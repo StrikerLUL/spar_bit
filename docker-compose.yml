@@ -1,0 +1,101 @@
+name: sparbit
+
+services:
+  backend:
+    build: ./backend
+    container_name: sparbit-backend
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      SPARBIT_DATA_DIR: /data
+      SPARBIT_CLAIMER_LOG_DIR: /claimer-data
+    volumes:
+      - sparbit-data:/data
+      # Nur lesend: das UI parst die Claimer-Logs, schreibt dort aber nichts.
+      - claimer-data:/claimer-data:ro
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: ""
+    container_name: sparbit-frontend
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+    ports:
+      - "${SPARBIT_WEB_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Auto-Claimer: Epic + Prime Gaming + GOG.
+  # Konfiguration folgt der README von vogler/free-games-claimer.
+  # Beim ersten Start muss man sich einmal interaktiv anmelden -
+  # siehe README.md, Abschnitt "Auto-Claimer".
+  claimer:
+    image: ghcr.io/vogler/free-games-claimer:latest
+    container_name: sparbit-claimer
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      # Zeitplan im Container (Cron). Leer = einmalig beim Start.
+      SCHEDULE: ${CLAIMER_SCHEDULE:-0 4 * * *}
+      # Nach dem Lauf nicht beenden, damit SCHEDULE greift.
+      SHOW: "0"
+      # Zugangsdaten aus .env
+      EG_EMAIL: ${EG_EMAIL:-}
+      EG_PASSWORD: ${EG_PASSWORD:-}
+      EG_OTPKEY: ${EG_OTPKEY:-}
+      PG_EMAIL: ${PG_EMAIL:-}
+      PG_PASSWORD: ${PG_PASSWORD:-}
+      PG_OTPKEY: ${PG_OTPKEY:-}
+      GOG_EMAIL: ${GOG_EMAIL:-}
+      GOG_PASSWORD: ${GOG_PASSWORD:-}
+      NOTIFY: ${NOTIFY:-}
+    volumes:
+      # Persistente Login-Sessions - ohne das musst du dich staendig neu anmelden.
+      - claimer-data:/fgc/data
+    ports:
+      # VNC zum einmaligen interaktiven Anmelden (siehe README).
+      # Nur an localhost gebunden - nicht ins Internet haengen.
+      - "127.0.0.1:5900:5900"
+      - "127.0.0.1:6080:6080"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  sparbit-data:
+  claimer-data:

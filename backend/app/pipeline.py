@@ -1,0 +1,269 @@
+"""Der Weg eines Deals: Quelle -> Dedupe -> DB -> Regeln -> Kanaele."""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, time, timedelta, timezone
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .db import get_setting
+from .dedupe import canonical_url, normalize_title, titles_match, url_hash
+from .events import broker
+from .filters import RuleSpec, evaluate
+from .models import (Channel, Deal, Match, NotificationLog, Rule, SourceConfig,
+                     utcnow)
+from .notify import Notification, get_channel
+from .sources.base import DealItem
+
+log = logging.getLogger(__name__)
+
+# Wie weit zurueck wird auf Fuzzy-Duplikate geprueft.
+DEDUPE_WINDOW_HOURS = 72
+DEDUPE_CANDIDATES = 400
+
+
+def ingest(db: Session, source_id: str, items: list[DealItem]) -> list[Deal]:
+    """Neue Deals speichern. Gibt die tatsaechlich NEUEN zurueck."""
+    if not items:
+        return []
+
+    since = utcnow() - timedelta(hours=DEDUPE_WINDOW_HOURS)
+    recent = list(db.scalars(
+        select(Deal).where(Deal.first_seen >= since, Deal.duplicate_of.is_(None))
+        .order_by(Deal.first_seen.desc()).limit(DEDUPE_CANDIDATES)
+    ))
+    # Titel-Index nur ueber die Kandidaten, damit der Fuzzy-Vergleich billig bleibt.
+    fresh: list[Deal] = []
+
+    for item in items:
+        try:
+            deal = _ingest_one(db, source_id, item, recent)
+        except Exception as exc:
+            log.warning("Deal verworfen (%s): %s", source_id, exc,
+                        extra={"source_id": source_id})
+            continue
+        if deal is not None:
+            fresh.append(deal)
+            recent.insert(0, deal)
+
+    if fresh:
+        db.commit()
+        for deal in fresh:
+            broker.publish("deal", _deal_payload(deal))
+    return fresh
+
+
+def _ingest_one(db: Session, source_id: str, item: DealItem,
+                recent: list[Deal]) -> Deal | None:
+    if not item.url or not item.titel:
+        return None
+
+    uhash = url_hash(item.url)
+
+    # 1) Exaktes URL-Duplikat -> nur "wieder gesehen" vermerken.
+    existing = db.scalar(select(Deal).where(Deal.url_hash == uhash))
+    if existing:
+        existing.last_seen = utcnow()
+        existing.seen_count += 1
+        # Preis kann sich geaendert haben - guenstigeren uebernehmen.
+        if item.preis is not None and (existing.preis is None
+                                       or item.preis < existing.preis):
+            existing.preis = item.preis
+            existing.rabatt_prozent = item.rabatt_prozent or existing.rabatt_prozent
+            existing.ist_gratis = existing.ist_gratis or item.ist_gratis
+        if source_id not in (existing.also_from or []) and source_id != existing.quelle:
+            existing.also_from = list(existing.also_from or []) + [source_id]
+        return None
+
+    titel_norm = normalize_title(item.titel)
+
+    # 2) Fuzzy-Duplikat ueber Quellen hinweg.
+    for cand in recent:
+        if cand.titel_norm and titles_match(item.titel, cand.titel):
+            # Gleicher Titel, andere URL -> derselbe Deal aus anderer Quelle.
+            cand.last_seen = utcnow()
+            cand.seen_count += 1
+            if source_id not in (cand.also_from or []) and source_id != cand.quelle:
+                cand.also_from = list(cand.also_from or []) + [source_id]
+            if item.preis is not None and (cand.preis is None or item.preis < cand.preis):
+                cand.preis = item.preis
+                cand.ist_gratis = cand.ist_gratis or item.ist_gratis
+            log.debug("Duplikat: '%s' (%s) == '%s' (%s)",
+                      item.titel[:60], source_id, cand.titel[:60], cand.quelle)
+            return None
+
+    deal = Deal(
+        url_hash=uhash,
+        titel=item.titel[:1000],
+        titel_norm=titel_norm,
+        beschreibung=item.beschreibung,
+        url=item.url,
+        bild=item.bild,
+        preis=item.preis,
+        originalpreis=item.originalpreis,
+        rabatt_prozent=item.rabatt_prozent,
+        waehrung=item.waehrung,
+        ist_gratis=item.ist_gratis,
+        haendler=(item.haendler or None) and item.haendler[:128],
+        kategorie=item.kategorie,
+        quelle=item.quelle or source_id,
+        temperatur=item.temperatur,
+        tags=item.tags or [],
+        veroeffentlicht_am=item.veroeffentlicht_am,
+        also_from=[],
+        roh=item.roh or {},
+    )
+    db.add(deal)
+    db.flush()
+    return deal
+
+
+def _deal_payload(deal: Deal) -> dict:
+    return {
+        "id": deal.id, "titel": deal.titel, "url": deal.url, "bild": deal.bild,
+        "preis": deal.preis, "originalpreis": deal.originalpreis,
+        "rabatt_prozent": deal.rabatt_prozent, "waehrung": deal.waehrung,
+        "ist_gratis": deal.ist_gratis, "haendler": deal.haendler,
+        "quelle": deal.quelle, "temperatur": deal.temperatur,
+        "first_seen": deal.first_seen.isoformat() if deal.first_seen else None,
+    }
+
+
+# --- Regel-Auswertung ------------------------------------------------------
+
+def match_rules(db: Session, deals: list[Deal]) -> list[tuple[Rule, Deal]]:
+    """Neue Deals gegen alle aktiven Regeln pruefen."""
+    if not deals:
+        return []
+    rules = list(db.scalars(select(Rule).where(Rule.enabled.is_(True))))
+    if not rules:
+        return []
+
+    hits: list[tuple[Rule, Deal]] = []
+    for rule in rules:
+        spec = RuleSpec.from_model(rule)
+        for deal in deals:
+            if not evaluate(spec, deal).matched:
+                continue
+            exists = db.scalar(select(Match).where(Match.rule_id == rule.id,
+                                                   Match.deal_id == deal.id))
+            if exists:
+                continue
+            db.add(Match(rule_id=rule.id, deal_id=deal.id))
+            rule.match_count += 1
+            rule.last_match = utcnow()
+            hits.append((rule, deal))
+            broker.publish("match", {"regel": rule.name, "prioritaet": rule.priority,
+                                     **_deal_payload(deal)})
+    if hits:
+        db.commit()
+    return hits
+
+
+# --- Ruhezeiten ------------------------------------------------------------
+
+def _parse_hhmm(raw: str, fallback: time) -> time:
+    try:
+        hh, mm = str(raw).split(":")
+        return time(int(hh) % 24, int(mm) % 60)
+    except (ValueError, AttributeError):
+        return fallback
+
+
+def in_quiet_hours(db: Session, now: datetime | None = None) -> bool:
+    cfg = get_setting(db, "quiet_hours") or {}
+    if not cfg.get("enabled"):
+        return False
+    now = (now or datetime.now(timezone.utc)).astimezone(
+        timezone(timedelta(hours=float(cfg.get("utc_offset", 2)))))
+    start = _parse_hhmm(cfg.get("start", "23:00"), time(23, 0))
+    end = _parse_hhmm(cfg.get("end", "07:00"), time(7, 0))
+    cur = now.time()
+    if start <= end:
+        return start <= cur < end
+    return cur >= start or cur < end     # ueber Mitternacht
+
+
+async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
+    """Treffer an die Kanaele geben. SOFORT umgeht Ruhezeiten."""
+    if not hits:
+        return 0
+
+    quiet = in_quiet_hours(db)
+    channels = {c.id: c for c in db.scalars(select(Channel))}
+    sent = 0
+
+    for rule, deal in hits:
+        sofort = (rule.priority or "NORMAL").upper() == "SOFORT"
+        if quiet and not sofort:
+            log.info("Ruhezeit: '%s' zurueckgehalten (Regel %s)",
+                     deal.titel[:60], rule.name)
+            continue
+
+        target_ids = rule.channels or []
+        if not target_ids:
+            log.warning("Regel '%s' hat keinen Kanal konfiguriert", rule.name)
+            continue
+
+        note = Notification(
+            titel=deal.titel, url=deal.url, quelle=deal.quelle, regel=rule.name,
+            preis=deal.preis, originalpreis=deal.originalpreis,
+            rabatt_prozent=deal.rabatt_prozent, waehrung=deal.waehrung,
+            haendler=deal.haendler, bild=deal.bild, ist_gratis=deal.ist_gratis,
+            beschreibung=deal.beschreibung, deal_id=deal.id,
+            prioritaet="SOFORT" if sofort else "NORMAL", tags=deal.tags or [],
+        )
+
+        for cid in target_ids:
+            chan_row = channels.get(cid)
+            if not chan_row or not chan_row.enabled:
+                continue
+            impl = get_channel(chan_row.type)
+            if impl is None:
+                log.error("Unbekannter Kanaltyp '%s'", chan_row.type)
+                continue
+            try:
+                await impl.send(chan_row.config or {}, note, http)
+                chan_row.last_used = utcnow()
+                sent += 1
+                db.add(NotificationLog(
+                    channel_id=cid, channel_type=chan_row.type, rule_id=rule.id,
+                    rule_name=rule.name, deal_id=deal.id,
+                    deal_titel=deal.titel[:500], ok=True))
+            except Exception as exc:
+                chan_row.error_count += 1
+                log.error("Kanal %s (%s) fehlgeschlagen: %s",
+                          chan_row.name, chan_row.type, exc,
+                          extra={"channel": chan_row.type})
+                db.add(NotificationLog(
+                    channel_id=cid, channel_type=chan_row.type, rule_id=rule.id,
+                    rule_name=rule.name, deal_id=deal.id,
+                    deal_titel=deal.titel[:500], ok=False,
+                    error=f"{type(exc).__name__}: {exc}"[:500]))
+
+        match = db.scalar(select(Match).where(Match.rule_id == rule.id,
+                                              Match.deal_id == deal.id))
+        if match:
+            match.notified_at = utcnow()
+
+    db.commit()
+    return sent
+
+
+async def send_digest(db: Session, http) -> int:
+    """Stuendlicher Digest fuer NORMAL-Regeln, deren Treffer wegen Ruhezeit
+    oder Prioritaet liegen geblieben sind."""
+    pending = list(db.scalars(
+        select(Match).where(Match.notified_at.is_(None))
+        .order_by(Match.created_at.asc()).limit(200)
+    ))
+    if not pending:
+        return 0
+    if in_quiet_hours(db):
+        return 0
+
+    rules = {r.id: r for r in db.scalars(select(Rule))}
+    hits = [(rules[m.rule_id], m.deal) for m in pending
+            if m.rule_id in rules and m.deal is not None]
+    return await dispatch(db, hits, http)

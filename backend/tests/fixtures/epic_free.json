@@ -1,0 +1,66 @@
+{
+  "data": {
+    "Catalog": {
+      "searchStore": {
+        "elements": [
+          {
+            "title": "Control",
+            "description": "Ein übernatürlicher Third-Person-Shooter.",
+            "productSlug": "control",
+            "keyImages": [
+              {"type": "OfferImageWide", "url": "https://cdn1.epicgames.com/control-wide.jpg"},
+              {"type": "Thumbnail", "url": "https://cdn1.epicgames.com/control-thumb.jpg"}
+            ],
+            "price": {
+              "totalPrice": {
+                "discountPrice": 0,
+                "originalPrice": 2999,
+                "currencyCode": "EUR",
+                "decimals": 2
+              }
+            },
+            "promotions": {
+              "promotionalOffers": [
+                {"promotionalOffers": [
+                  {"startDate": "2025-08-28T15:00:00.000Z",
+                   "endDate": "2099-09-04T15:00:00.000Z",
+                   "discountSetting": {"discountType": "PERCENTAGE", "discountPercentage": 0}}
+                ]}
+              ],
+              "upcomingPromotionalOffers": []
+            },
+            "catalogNs": {"mappings": [{"pageSlug": "control"}]}
+          },
+          {
+            "title": "Alan Wake 2",
+            "description": "Survival-Horror.",
+            "productSlug": "alan-wake-2",
+            "keyImages": [{"type": "OfferImageTall", "url": "https://cdn1.epicgames.com/aw2.jpg"}],
+            "price": {"totalPrice": {"discountPrice": 4999, "originalPrice": 4999,
+                                     "currencyCode": "EUR", "decimals": 2}},
+            "promotions": {
+              "promotionalOffers": [],
+              "upcomingPromotionalOffers": [
+                {"promotionalOffers": [
+                  {"startDate": "2099-09-04T15:00:00.000Z",
+                   "endDate": "2099-09-11T15:00:00.000Z",
+                   "discountSetting": {"discountType": "PERCENTAGE", "discountPercentage": 0}}
+                ]}
+              ]
+            },
+            "catalogNs": {"mappings": []}
+          },
+          {
+            "title": "Nicht im Angebot",
+            "productSlug": "kein-deal",
+            "keyImages": [],
+            "price": {"totalPrice": {"discountPrice": 1999, "originalPrice": 1999,
+                                     "currencyCode": "EUR", "decimals": 2}},
+            "promotions": null,
+            "catalogNs": {"mappings": []}
+          }
+        ]
+      }
+    }
+  }
+}

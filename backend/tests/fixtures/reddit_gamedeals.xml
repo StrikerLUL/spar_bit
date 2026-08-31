@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>GameDeals</title>
+  <entry>
+    <title>[Steam] Portal 2 (Free to keep)</title>
+    <link href="https://www.reddit.com/r/GameDeals/comments/abc123/steam_portal_2_free/"/>
+    <updated>2025-08-31T08:00:00+00:00</updated>
+    <author><name>/u/dealbot</name></author>
+    <content type="html">&lt;p&gt;Portal 2 ist gerade kostenlos auf Steam. Free to keep bis Montag.&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>[GOG] The Witcher 3 GOTY (85% off - 7,49€)</title>
+    <link href="https://www.reddit.com/r/GameDeals/comments/def456/gog_witcher3/"/>
+    <updated>2025-08-31T07:30:00+00:00</updated>
+    <author><name>/u/gamer</name></author>
+    <content type="html">&lt;p&gt;7,49€ statt 49,99€&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>[Epic] Mystery Game revealed: Control</title>
+    <link href="https://www.reddit.com/r/GameDeals/comments/ghi789/epic_control/"/>
+    <updated>2025-08-30T15:00:00+00:00</updated>
+    <author><name>/u/freegames</name></author>
+    <content type="html">&lt;p&gt;Diese Woche gratis im Epic Games Store.&lt;/p&gt;</content>
+  </entry>
+</feed>

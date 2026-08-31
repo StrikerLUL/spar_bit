@@ -1,0 +1,13 @@
+[
+  {"internalName": "PORTAL2", "title": "Portal 2", "dealID": "abc123XYZ",
+   "storeID": "1", "salePrice": "0.00", "normalPrice": "9.99", "savings": "100.000000",
+   "steamAppID": "620", "thumb": "https://cdn.cheapshark.com/portal2.jpg",
+   "dealRating": "10.0"},
+  {"internalName": "HADES", "title": "Hades", "dealID": "def456ABC",
+   "storeID": "25", "salePrice": "4.99", "normalPrice": "24.99", "savings": "80.032013",
+   "steamAppID": "1145360", "thumb": "https://cdn.cheapshark.com/hades.jpg",
+   "dealRating": "9.2"},
+  {"internalName": "CHEAP", "title": "Kaum Rabatt", "dealID": "ghi789",
+   "storeID": "1", "salePrice": "9.00", "normalPrice": "10.00", "savings": "10.000000",
+   "dealRating": "3.0"}
+]

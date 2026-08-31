@@ -1,0 +1,30 @@
+{
+  "specials": {
+    "id": 0,
+    "name": "Sonderangebote",
+    "items": [
+      {"id": 292030, "name": "The Witcher 3: Wild Hunt", "discounted": true,
+       "discount_percent": 80, "original_price": 3999, "final_price": 799,
+       "currency": "EUR",
+       "large_capsule_image": "https://cdn.akamai.steamstatic.com/w3.jpg",
+       "header_image": "https://cdn.akamai.steamstatic.com/w3-header.jpg"},
+      {"id": 570, "name": "Dota 2 Bundle", "discounted": true,
+       "discount_percent": 100, "original_price": 1999, "final_price": 0,
+       "currency": "EUR",
+       "large_capsule_image": "https://cdn.akamai.steamstatic.com/dota.jpg"},
+      {"id": 440, "name": "Nur 20 Prozent", "discounted": true,
+       "discount_percent": 20, "original_price": 1000, "final_price": 800,
+       "currency": "EUR", "large_capsule_image": "https://cdn.akamai.steamstatic.com/tf2.jpg"}
+    ]
+  },
+  "top_sellers": {
+    "id": 1,
+    "name": "Topseller",
+    "items": [
+      {"id": 292030, "name": "The Witcher 3: Wild Hunt", "discounted": true,
+       "discount_percent": 80, "original_price": 3999, "final_price": 799,
+       "currency": "EUR"}
+    ]
+  },
+  "status": 1
+}

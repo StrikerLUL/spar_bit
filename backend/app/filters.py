@@ -1,0 +1,226 @@
+"""Filter-Engine.
+
+Eine Regel ist ein Datensatz, kein Code. Sie wird im UI gebaut und hier
+ausgewertet. Wichtig fuers UI: `evaluate` liefert nicht nur ja/nein, sondern
+auch WARUM - damit der Regel-Editor zeigen kann, woran ein Deal gescheitert
+ist.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any, Iterable
+
+# Ein "Deal-aehnliches" Objekt: DB-Model oder DealItem. Beides hat diese Felder.
+
+
+@dataclass
+class RuleSpec:
+    """Regel-Definition, entkoppelt vom DB-Model (damit testbar ohne DB)."""
+
+    keywords: list[str] = field(default_factory=list)
+    required_keywords: list[str] = field(default_factory=list)
+    blacklist: list[str] = field(default_factory=list)
+    max_preis: float | None = None
+    min_rabatt_prozent: float | None = None
+    nur_gratis: bool = False
+    min_temperatur: float | None = None
+    sources: list[str] = field(default_factory=list)
+    kategorien: list[str] = field(default_factory=list)
+    haendler: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_model(cls, rule: Any) -> "RuleSpec":
+        return cls(
+            keywords=list(rule.keywords or []),
+            required_keywords=list(rule.required_keywords or []),
+            blacklist=list(rule.blacklist or []),
+            max_preis=rule.max_preis,
+            min_rabatt_prozent=rule.min_rabatt_prozent,
+            nur_gratis=bool(rule.nur_gratis),
+            min_temperatur=rule.min_temperatur,
+            sources=list(rule.sources or []),
+            kategorien=list(rule.kategorien or []),
+            haendler=list(rule.haendler or []),
+        )
+
+
+@dataclass
+class MatchResult:
+    matched: bool
+    reasons: list[str] = field(default_factory=list)   # was hat gepasst
+    failed: list[str] = field(default_factory=list)    # woran es scheiterte
+
+    def __bool__(self) -> bool:
+        return self.matched
+
+
+def _haystack(deal: Any) -> str:
+    parts = [
+        getattr(deal, "titel", "") or "",
+        getattr(deal, "beschreibung", "") or "",
+        getattr(deal, "haendler", "") or "",
+        " ".join(getattr(deal, "tags", None) or []),
+    ]
+    return " ".join(parts).lower()
+
+
+def _term_matches(term: str, haystack: str) -> bool:
+    """Keyword-Match.
+
+    - "foo bar"   -> Phrase, muss so vorkommen
+    - "foo*"      -> Praefix
+    - sonst       -> ganzes Wort (damit "tv" nicht in "advent" trifft)
+    """
+    term = (term or "").strip().lower()
+    if not term:
+        return False
+    if term.endswith("*"):
+        stem = re.escape(term[:-1])
+        return re.search(rf"(?<![\w]){stem}[\w]*", haystack) is not None
+    if " " in term:
+        return term in haystack
+    return re.search(rf"(?<![\w]){re.escape(term)}(?![\w])", haystack) is not None
+
+
+def _norm_set(values: Iterable[str]) -> set[str]:
+    return {str(v).strip().lower() for v in values if str(v).strip()}
+
+
+def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
+    """Prueft einen Deal gegen eine Regel. Alle Bedingungen sind UND-verknuepft;
+    nur die `keywords`-Liste selbst ist ODER."""
+    reasons: list[str] = []
+    failed: list[str] = []
+    hay = _haystack(deal)
+
+    # --- Blacklist: schlaegt alles ---
+    for term in rule.blacklist:
+        if _term_matches(term, hay):
+            return MatchResult(False, [], [f"Blacklist-Treffer: '{term}'"])
+
+    # --- Pflicht-Keywords (UND) ---
+    for term in rule.required_keywords:
+        if not _term_matches(term, hay):
+            failed.append(f"Pflicht-Keyword fehlt: '{term}'")
+    if rule.required_keywords and not failed:
+        reasons.append(f"alle Pflicht-Keywords vorhanden ({len(rule.required_keywords)})")
+
+    # --- Keywords (ODER) ---
+    if rule.keywords:
+        hits = [t for t in rule.keywords if _term_matches(t, hay)]
+        if hits:
+            reasons.append("Keyword: " + ", ".join(f"'{h}'" for h in hits[:3]))
+        else:
+            failed.append("kein Keyword getroffen")
+
+    # --- Quellen ---
+    if rule.sources:
+        quelle = (getattr(deal, "quelle", "") or "").lower()
+        if quelle not in _norm_set(rule.sources):
+            failed.append(f"Quelle '{quelle}' nicht in Auswahl")
+        else:
+            reasons.append(f"Quelle '{quelle}'")
+
+    # --- Gratis / Preis / Rabatt ---
+    preis = getattr(deal, "preis", None)
+    ist_gratis = bool(getattr(deal, "ist_gratis", False))
+
+    if rule.nur_gratis:
+        if ist_gratis:
+            reasons.append("ist gratis")
+        else:
+            failed.append("nicht gratis")
+
+    if rule.max_preis is not None:
+        if preis is None:
+            failed.append("kein Preis erkannt (max_preis gesetzt)")
+        elif preis > rule.max_preis:
+            failed.append(f"Preis {preis:.2f} > max {rule.max_preis:.2f}")
+        else:
+            reasons.append(f"Preis {preis:.2f} <= {rule.max_preis:.2f}")
+
+    if rule.min_rabatt_prozent is not None:
+        rabatt = getattr(deal, "rabatt_prozent", None)
+        # Gratis zaehlt implizit als 100 %.
+        if rabatt is None and ist_gratis:
+            rabatt = 100.0
+        if rabatt is None:
+            failed.append("kein Rabatt erkannt (min_rabatt gesetzt)")
+        elif rabatt < rule.min_rabatt_prozent:
+            failed.append(f"Rabatt {rabatt:.0f}% < {rule.min_rabatt_prozent:.0f}%")
+        else:
+            reasons.append(f"Rabatt {rabatt:.0f}%")
+
+    # --- Temperatur ---
+    if rule.min_temperatur is not None:
+        temp = getattr(deal, "temperatur", None)
+        if temp is None:
+            failed.append("keine Temperatur (Quelle liefert keine)")
+        elif temp < rule.min_temperatur:
+            failed.append(f"Temperatur {temp:.0f} < {rule.min_temperatur:.0f}")
+        else:
+            reasons.append(f"Temperatur {temp:.0f}")
+
+    # --- Kategorie / Haendler ---
+    if rule.kategorien:
+        kat = (getattr(deal, "kategorie", "") or "").lower()
+        if kat not in _norm_set(rule.kategorien):
+            failed.append(f"Kategorie '{kat or '-'}' nicht in Auswahl")
+        else:
+            reasons.append(f"Kategorie '{kat}'")
+
+    if rule.haendler:
+        h = (getattr(deal, "haendler", "") or "").lower()
+        wanted = _norm_set(rule.haendler)
+        # Teilstring, damit "amazon" auch "Amazon.de" trifft.
+        if not any(w in h for w in wanted):
+            failed.append(f"Haendler '{h or '-'}' nicht in Auswahl")
+        else:
+            reasons.append(f"Haendler '{h}'")
+
+    # Eine Regel ohne jede Bedingung soll nicht alles durchwinken.
+    if not any([rule.keywords, rule.required_keywords, rule.nur_gratis,
+                rule.max_preis is not None, rule.min_rabatt_prozent is not None,
+                rule.min_temperatur is not None, rule.sources, rule.kategorien,
+                rule.haendler]):
+        return MatchResult(False, [], ["Regel hat keine Bedingungen"])
+
+    return MatchResult(not failed, reasons, failed)
+
+
+def preview(rule: RuleSpec, deals: list[Any], sample_size: int = 8) -> dict:
+    """Fuer den Regel-Editor: wie viele der letzten N Deals haette die Regel
+    getroffen, und welche?"""
+    hits, near_misses = [], []
+    for deal in deals:
+        res = evaluate(rule, deal)
+        if res.matched:
+            hits.append((deal, res))
+        elif len(res.failed) == 1 and not res.failed[0].startswith("Blacklist"):
+            near_misses.append((deal, res))
+
+    total = len(deals)
+    return {
+        "geprueft": total,
+        "treffer": len(hits),
+        "trefferquote": round(len(hits) / total * 100, 1) if total else 0.0,
+        "beispiele": [_sample(d, r) for d, r in hits[:sample_size]],
+        "knapp_verfehlt": [_sample(d, r) for d, r in near_misses[:sample_size]],
+    }
+
+
+def _sample(deal: Any, res: MatchResult) -> dict:
+    return {
+        "id": getattr(deal, "id", None),
+        "titel": getattr(deal, "titel", ""),
+        "preis": getattr(deal, "preis", None),
+        "originalpreis": getattr(deal, "originalpreis", None),
+        "rabatt_prozent": getattr(deal, "rabatt_prozent", None),
+        "ist_gratis": bool(getattr(deal, "ist_gratis", False)),
+        "quelle": getattr(deal, "quelle", ""),
+        "url": getattr(deal, "url", ""),
+        "bild": getattr(deal, "bild", None),
+        "gruende": res.reasons,
+        "verfehlt": res.failed,
+    }
