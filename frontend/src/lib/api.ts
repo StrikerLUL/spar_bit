@@ -1,0 +1,340 @@
+/** Typisierter API-Client. Alle Aufrufe gehen mit Session-Cookie raus. */
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    credentials: "include",
+    headers: init?.body ? { "Content-Type": "application/json" } : undefined,
+    ...init,
+  });
+
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (body?.detail) {
+        detail = typeof body.detail === "string"
+          ? body.detail
+          : JSON.stringify(body.detail);
+      }
+    } catch {
+      /* Antwort war kein JSON - Statuszeile reicht. */
+    }
+    throw new ApiError(response.status, detail);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+const get = <T>(path: string) => request<T>(path);
+const post = <T>(path: string, body?: unknown) =>
+  request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+const put = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: "PUT", body: JSON.stringify(body) });
+const patch = <T>(path: string, body: unknown) =>
+  request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
+
+// --- Typen ---------------------------------------------------------------
+
+export interface AuthStatus {
+  setup_done: boolean;
+  logged_in: boolean;
+  username: string | null;
+}
+
+export interface Deal {
+  id: number;
+  titel: string;
+  beschreibung: string | null;
+  url: string;
+  bild: string | null;
+  preis: number | null;
+  originalpreis: number | null;
+  rabatt_prozent: number | null;
+  waehrung: string;
+  ist_gratis: boolean;
+  haendler: string | null;
+  kategorie: string | null;
+  quelle: string;
+  temperatur: number | null;
+  tags: string[];
+  veroeffentlicht_am: string | null;
+  first_seen: string;
+  last_seen: string;
+  seen_count: number;
+  also_from: string[];
+  bookmarked: boolean;
+}
+
+export interface OptionSpec {
+  key: string;
+  label: string;
+  type: "string" | "int" | "bool" | "list" | "select";
+  default: unknown;
+  help: string;
+  choices: string[];
+}
+
+export interface Source {
+  id: string;
+  display_name: string;
+  category: string;
+  beschreibung: string;
+  docs_url: string | null;
+  requires_api_key: boolean;
+  api_key_url: string | null;
+  experimental: boolean;
+  default_interval: number;
+  min_interval: number;
+  options_schema: OptionSpec[];
+  enabled: boolean;
+  interval_seconds: number;
+  has_api_key: boolean;
+  options: Record<string, unknown>;
+  verification: "unverified" | "verified" | "broken";
+  last_verified: string | null;
+  last_run: string | null;
+  last_success: string | null;
+  last_error: string | null;
+  consecutive_failures: number;
+  circuit_open_until: string | null;
+  circuit_open: boolean;
+  total_runs: number;
+  total_errors: number;
+  total_items: number;
+  fehlerquote: number;
+}
+
+export interface SourceTestResult {
+  ok: boolean;
+  detail: string;
+  items_found: number;
+  latency_ms: number;
+  samples: Array<{
+    titel: string;
+    url: string;
+    preis: number | null;
+    originalpreis: number | null;
+    rabatt_prozent: number | null;
+    ist_gratis: boolean;
+    haendler: string | null;
+    bild: string | null;
+  }>;
+}
+
+export interface Rule {
+  id: number;
+  name: string;
+  enabled: boolean;
+  priority: "SOFORT" | "NORMAL";
+  keywords: string[];
+  required_keywords: string[];
+  blacklist: string[];
+  max_preis: number | null;
+  min_rabatt_prozent: number | null;
+  nur_gratis: boolean;
+  min_temperatur: number | null;
+  sources: string[];
+  kategorien: string[];
+  haendler: string[];
+  channels: number[];
+  created_at: string;
+  match_count: number;
+  last_match: string | null;
+}
+
+export type RuleDraft = Omit<Rule, "id" | "created_at" | "match_count" | "last_match">;
+
+export interface PreviewSample {
+  id: number | null;
+  titel: string;
+  preis: number | null;
+  originalpreis: number | null;
+  rabatt_prozent: number | null;
+  ist_gratis: boolean;
+  quelle: string;
+  url: string;
+  bild: string | null;
+  gruende: string[];
+  verfehlt: string[];
+}
+
+export interface RulePreview {
+  geprueft: number;
+  treffer: number;
+  trefferquote: number;
+  beispiele: PreviewSample[];
+  knapp_verfehlt: PreviewSample[];
+}
+
+export interface Channel {
+  id: number;
+  type: string;
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  created_at: string;
+  last_used: string | null;
+  error_count: number;
+}
+
+export interface ChannelType {
+  type: string;
+  display_name: string;
+  beschreibung: string;
+  options_schema: OptionSpec[];
+}
+
+export interface QuietHours {
+  enabled: boolean;
+  start: string;
+  end: string;
+  utc_offset: number;
+}
+
+export interface Stats {
+  treffer_heute: number;
+  deals_heute: number;
+  gratis_diese_woche: number;
+  gesparter_betrag: number;
+  deals_gesamt: number;
+  quellen_ampel: { gruen: number; gelb: number; rot: number; aus: number };
+  aktive_regeln: number;
+  top_quellen: Array<{ quelle: string; anzahl: number }>;
+}
+
+export interface SystemInfo {
+  version: string;
+  python: string;
+  platform: string;
+  gestartet: string;
+  laufzeit_sekunden: number;
+  db_pfad: string;
+  db_groesse_bytes: number;
+  db_groesse_mb: number;
+  sse_clients: number;
+  zeilen: Record<string, number>;
+}
+
+export interface LogLine {
+  ts: string;
+  level: string;
+  logger: string;
+  message: string;
+  exc?: string;
+}
+
+export interface ClaimEvent {
+  platform: string;
+  titel: string;
+  status: string;
+  seen_at: string;
+  detail: string | null;
+}
+
+export interface ClaimerStatus {
+  log_dir: string;
+  log_vorhanden: boolean;
+  dateien: string[];
+  letzte_aenderung: string | null;
+  geclaimt_gesamt: number;
+  ereignisse: ClaimEvent[];
+}
+
+export interface NotificationLogEntry {
+  id: number;
+  channel_type: string;
+  rule_name: string | null;
+  deal_titel: string | null;
+  ok: boolean;
+  error: string | null;
+  created_at: string;
+}
+
+export interface SourceRun {
+  started_at: string;
+  ok: boolean;
+  items: number;
+  new_items: number;
+  duration_ms: number;
+  error: string | null;
+}
+
+// --- API -----------------------------------------------------------------
+
+export const api = {
+  auth: {
+    status: () => get<AuthStatus>("/auth/status"),
+    setup: (username: string, password: string) =>
+      post<{ ok: boolean }>("/auth/setup", { username, password }),
+    login: (username: string, password: string) =>
+      post<{ ok: boolean }>("/auth/login", { username, password }),
+    logout: () => post<{ ok: boolean }>("/auth/logout"),
+    changePassword: (old_password: string, new_password: string) =>
+      post<{ ok: boolean }>("/auth/password", { old_password, new_password }),
+  },
+  deals: {
+    list: (params: Record<string, string | number | boolean | undefined>) => {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== "" && value !== false) {
+          query.set(key, String(value));
+        }
+      }
+      return get<{ total: number; items: Deal[] }>(`/deals?${query}`);
+    },
+    bookmark: (id: number) =>
+      post<{ id: number; bookmarked: boolean }>(`/deals/${id}/bookmark`),
+  },
+  stats: () => get<Stats>("/stats"),
+  matches: (limit = 40) =>
+    get<Array<Deal & { regel: string; created_at: string }>>(`/matches?limit=${limit}`),
+  sources: {
+    list: () => get<Source[]>("/sources"),
+    update: (id: string, body: Partial<Source>) => patch<Source>(`/sources/${id}`, body),
+    test: (id: string) => post<SourceTestResult>(`/sources/${id}/test`),
+    run: (id: string) => post<Record<string, unknown>>(`/sources/${id}/run`),
+    reset: (id: string) => post<{ ok: boolean }>(`/sources/${id}/reset`),
+    runs: (id: string) => get<SourceRun[]>(`/sources/${id}/runs`),
+  },
+  rules: {
+    list: () => get<Rule[]>("/rules"),
+    create: (body: RuleDraft) => post<Rule>("/rules", body),
+    update: (id: number, body: RuleDraft) => put<Rule>(`/rules/${id}`, body),
+    remove: (id: number) => del<{ ok: boolean }>(`/rules/${id}`),
+    preview: (body: RuleDraft) => post<RulePreview>("/rules/preview", body),
+    matches: (id: number) => get<unknown[]>(`/rules/${id}/matches`),
+  },
+  channels: {
+    list: () => get<Channel[]>("/channels"),
+    types: () => get<ChannelType[]>("/channels/types"),
+    create: (body: Partial<Channel>) => post<Channel>("/channels", body),
+    update: (id: number, body: Partial<Channel>) => put<Channel>(`/channels/${id}`, body),
+    remove: (id: number) => del<{ ok: boolean }>(`/channels/${id}`),
+    test: (id: number) => post<{ ok: boolean; error?: string }>(`/channels/${id}/test`),
+    log: () => get<NotificationLogEntry[]>("/channels/log"),
+  },
+  quietHours: {
+    get: () => get<QuietHours>("/quiet-hours"),
+    set: (body: QuietHours) => put<QuietHours>("/quiet-hours", body),
+  },
+  system: {
+    info: () => get<SystemInfo>("/system/info"),
+    logs: (level = "ALL", limit = 300) =>
+      get<LogLine[]>(`/system/logs?level=${level}&limit=${limit}`),
+    backupUrl: "/api/system/backup",
+  },
+  claimer: {
+    status: () => get<ClaimerStatus>("/claimer/status"),
+    log: () => get<{ log: string }>("/claimer/log"),
+    scan: () => post<{ neue_ereignisse: number }>("/claimer/scan"),
+  },
+};

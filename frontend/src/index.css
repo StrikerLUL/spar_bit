@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Dunkel ist der Normalfall. Ruhige, kuehle Graustufen, ein einziger
+     Akzent (Smaragd) - der markiert Gratis-Funde und aktive Zustaende. */
+  :root {
+    --background: 222 24% 5%;
+    --foreground: 210 20% 96%;
+    --card: 222 22% 7.5%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 24% 8%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 158 72% 45%;
+    --primary-foreground: 158 90% 6%;
+    --secondary: 220 16% 14%;
+    --secondary-foreground: 210 20% 92%;
+    --muted: 220 16% 13%;
+    --muted-foreground: 217 12% 60%;
+    --accent: 220 16% 16%;
+    --accent-foreground: 210 20% 96%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 158 72% 45%;
+    --success-foreground: 158 90% 6%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 38 92% 8%;
+    --border: 220 14% 16%;
+    --input: 220 14% 18%;
+    --ring: 158 72% 45%;
+    --radius: 0.85rem;
+  }
+
+  .light {
+    --background: 210 30% 98%;
+    --foreground: 222 30% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 30% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 30% 10%;
+    --primary: 158 68% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 20% 94%;
+    --secondary-foreground: 222 30% 14%;
+    --muted: 214 20% 95%;
+    --muted-foreground: 218 12% 42%;
+    --accent: 214 20% 92%;
+    --accent-foreground: 222 30% 12%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 158 68% 34%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 88% 42%;
+    --warning-foreground: 0 0% 100%;
+    --border: 214 18% 88%;
+    --input: 214 18% 86%;
+    --ring: 158 68% 36%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* Sehr dezenter Verlauf, damit die Flaeche nicht tot wirkt. */
+    background-image:
+      radial-gradient(60rem 40rem at 15% -10%, hsl(158 72% 45% / 0.05), transparent 60%),
+      radial-gradient(50rem 35rem at 100% 0%, hsl(210 80% 50% / 0.04), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    @apply bg-primary/25;
+  }
+
+  /* Schlanke Scrollbars, die sich ins dunkle Layout einfuegen. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/40; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply border border-border/70 bg-card/70 backdrop-blur-xl;
+  }
+  /* Zahlen in Tabellen und Kacheln sollen nicht springen. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
