@@ -25,6 +25,35 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _in_die_venv() -> None:
+    """In die von run.py angelegte Umgebung wechseln.
+
+    Dort liegen die Abhaengigkeiten. Ohne diesen Sprung scheitert
+    'python cli.py' auf einem frischen Rechner an einem ImportError, obwohl
+    alles laengst installiert ist.
+    """
+    if os.environ.get("SPARBIT_CLI_REEXEC"):
+        return
+    venv = ROOT / ".venv" / ("Scripts" if os.name == "nt" else "bin")
+    python = venv / ("python.exe" if os.name == "nt" else "python")
+    if not python.exists():
+        return                                  # ohne .venv: einfach so laufen
+    try:
+        if Path(sys.executable).resolve() == python.resolve():
+            return                              # schon drin
+    except OSError:
+        return
+    os.environ["SPARBIT_CLI_REEXEC"] = "1"
+    try:
+        os.execv(str(python), [str(python), str(Path(__file__).resolve()),
+                               *sys.argv[1:]])
+    except OSError:
+        pass                                    # dann eben mit dem aktuellen
+
+
+_in_die_venv()
 sys.path.insert(0, str(ROOT / "backend"))
 os.environ.setdefault("SPARBIT_DATA_DIR", str(ROOT / "data"))
 os.environ.setdefault("SPARBIT_LOG_LEVEL", "WARNING")

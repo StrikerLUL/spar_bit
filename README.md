@@ -9,7 +9,7 @@ Desktop-Meldung. Alles einstellbar **im Browser und auf der Kommandozeile**.
 **Läuft auf deinem eigenen Rechner.** Kein Server, kein Docker, keine
 Konfigurationsdateien. Ein Befehl genügt.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-319-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-322-22c55e)
 
 ```bash
 git clone https://github.com/StrikerLUL/spar_bit.git
@@ -417,6 +417,9 @@ Die CLI meckert früh statt spät: fehlende Pflichtfelder, vertippte Feldnamen
 Blacklist stehen, werden abgelehnt — nicht klaglos gespeichert. Bei einem
 Tippfehler im Quellennamen schlägt sie die richtige vor.
 
+Die CLI benutzt automatisch die von `run.py` angelegte `.venv` — `python
+cli.py …` genügt, egal mit welchem Python du sie startest.
+
 > Die CLI kennt kein eigenes Passwort. Wer die Datei `data/sparbit.db` lesen
 > kann, hat ohnehin Zugriff auf alles — ein zweites Passwort davor wäre nur
 > Theater.
@@ -498,7 +501,7 @@ automatisch mit `Secure`.
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 319 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 322 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen

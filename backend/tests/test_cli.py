@@ -188,13 +188,30 @@ def test_deals_leer(datendir):
 
 # --- reine Hilfsfunktionen -------------------------------------------------
 
+def lade_cli(name="sparbit_cli"):
+    """cli.py als Modul laden.
+
+    SPARBIT_CLI_REEXEC verhindert, dass _in_die_venv() beim Import den
+    laufenden pytest-Prozess per execv durch die .venv ersetzt.
+    """
+    import importlib.util
+    vorher = os.environ.get("SPARBIT_CLI_REEXEC")
+    os.environ["SPARBIT_CLI_REEXEC"] = "1"
+    try:
+        spec = importlib.util.spec_from_file_location(name, CLI)
+        modul = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modul)
+        return modul
+    finally:
+        if vorher is None:
+            os.environ.pop("SPARBIT_CLI_REEXEC", None)
+        else:
+            os.environ["SPARBIT_CLI_REEXEC"] = vorher
+
+
 @pytest.fixture(scope="module")
 def cli_modul():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("sparbit_cli", CLI)
-    modul = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modul)
-    return modul
+    return lade_cli()
 
 
 def test_paare_erkennt_typen(cli_modul):
@@ -222,3 +239,57 @@ def test_beschnitten_markiert(cli_modul):
     assert cli_modul.beschnitten("kurz", 10) == "kurz"
     assert cli_modul.beschnitten("viel zu langer Text", 10).endswith("…")
     assert len(cli_modul.beschnitten("viel zu langer Text", 10)) == 10
+
+
+def test_wechselt_in_die_venv(monkeypatch, tmp_path):
+    """run.py installiert nach ./.venv - die CLI muss dort landen.
+
+    Ohne diesen Sprung scheitert 'python cli.py' auf einem frischen Rechner
+    an einem ImportError, obwohl alles laengst installiert ist.
+    """
+    wurzel = tmp_path / "spar_bit"
+    binordner = wurzel / ".venv" / ("Scripts" if os.name == "nt" else "bin")
+    binordner.mkdir(parents=True)
+    venv_python = binordner / ("python.exe" if os.name == "nt" else "python")
+    venv_python.write_text("")
+
+    modul = lade_cli("cli_fuer_venv_test")
+
+    gerufen = []
+    monkeypatch.setattr(modul, "ROOT", wurzel)
+    monkeypatch.setattr(modul.os, "execv",
+                        lambda pfad, argv: gerufen.append((pfad, argv)))
+    monkeypatch.delenv("SPARBIT_CLI_REEXEC", raising=False)
+    monkeypatch.setattr(modul.sys, "argv", ["cli.py", "status"])
+
+    modul._in_die_venv()
+
+    assert gerufen, "ohne Sprung fehlen der CLI ihre Abhaengigkeiten"
+    pfad, argv = gerufen[0]
+    assert pfad == str(venv_python)
+    assert argv[-1] == "status"
+
+
+def test_springt_nicht_zweimal(monkeypatch, tmp_path):
+    """Sonst startet sich die CLI endlos selbst."""
+    modul = lade_cli("cli_kein_zweiter_sprung")
+
+    gerufen = []
+    monkeypatch.setenv("SPARBIT_CLI_REEXEC", "1")
+    monkeypatch.setattr(modul.os, "execv",
+                        lambda pfad, argv: gerufen.append(pfad))
+    modul._in_die_venv()
+    assert not gerufen
+
+
+def test_ohne_venv_laeuft_die_cli_trotzdem(monkeypatch, tmp_path):
+    """Wer die Abhaengigkeiten global hat, braucht keine .venv."""
+    modul = lade_cli("cli_ohne_venv")
+
+    gerufen = []
+    monkeypatch.setattr(modul, "ROOT", tmp_path)      # kein .venv darin
+    monkeypatch.setattr(modul.os, "execv",
+                        lambda pfad, argv: gerufen.append(pfad))
+    monkeypatch.delenv("SPARBIT_CLI_REEXEC", raising=False)
+    modul._in_die_venv()
+    assert not gerufen
