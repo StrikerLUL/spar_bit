@@ -107,6 +107,7 @@ export interface Source {
   consecutive_failures: number;
   circuit_open_until: string | null;
   circuit_open: boolean;
+  snooze_until: string | null;
   total_runs: number;
   total_errors: number;
   total_items: number;
@@ -209,6 +210,58 @@ export interface Stats {
   quellen_ampel: { gruen: number; gelb: number; rot: number; aus: number };
   aktive_regeln: number;
   top_quellen: Array<{ quelle: string; anzahl: number }>;
+}
+
+export interface TimelinePoint {
+  tag: string;
+  deals: number;
+  gratis: number;
+  treffer: number;
+  ersparnis: number;
+}
+
+export interface QuellenStat {
+  quelle: string;
+  deals: number;
+  gratis: number;
+  treffer: number;
+  signalquote: number;
+}
+
+export interface HaendlerStat {
+  haendler: string;
+  anzahl: number;
+  schnitt_rabatt: number;
+}
+
+export interface PricePoint {
+  ts: string;
+  preis: number;
+  waehrung: string;
+  quelle: string | null;
+}
+
+export interface DealDetail extends Deal {
+  preis_eur: number | null;
+  alarm_preis: number | null;
+  alarm_ausgeloest: string | null;
+  notiz: string | null;
+  verlauf: PricePoint[];
+  tiefstpreis: number | null;
+  hoechstpreis: number | null;
+  regeltreffer: Array<{ regel: string; wann: string }>;
+}
+
+export interface SavedSearch {
+  id: number;
+  name: string;
+  filter: Record<string, unknown>;
+}
+
+export interface AppSettings {
+  waehrungskurse: Record<string, number>;
+  aktive_kurse: Record<string, number>;
+  benachrichtigungen_pausiert: boolean;
 }
 
 export interface SystemInfo {
@@ -336,5 +389,36 @@ export const api = {
     status: () => get<ClaimerStatus>("/claimer/status"),
     log: () => get<{ log: string }>("/claimer/log"),
     scan: () => post<{ neue_ereignisse: number }>("/claimer/scan"),
+  },
+  statistik: {
+    timeline: (tage = 30) => get<{ tage: number; punkte: TimelinePoint[] }>(
+      `/stats/timeline?tage=${tage}`),
+    quellen: (tage = 30) => get<QuellenStat[]>(`/stats/quellen?tage=${tage}`),
+    haendler: () => get<HaendlerStat[]>("/stats/haendler"),
+  },
+  detail: (id: number) => get<DealDetail>(`/deals/${id}/detail`),
+  alarm: (id: number, ziel_preis: number | null, notiz?: string | null) =>
+    put<{ id: number; alarm_preis: number | null; notiz: string | null }>(
+      `/deals/${id}/alarm`, { ziel_preis, notiz }),
+  searches: {
+    list: () => get<SavedSearch[]>("/searches"),
+    create: (name: string, filter: Record<string, unknown>) =>
+      post<SavedSearch>("/searches", { name, filter }),
+    remove: (id: number) => del<{ ok: boolean }>(`/searches/${id}`),
+  },
+  settings: {
+    get: () => get<AppSettings>("/settings"),
+    set: (body: { waehrungskurse: Record<string, number>;
+                  benachrichtigungen_pausiert: boolean }) =>
+      put<AppSettings>("/settings", body),
+  },
+  snooze: (sourceId: string, stunden: number) =>
+    post<{ id: string; snooze_until: string | null }>(
+      `/sources/${sourceId}/snooze?stunden=${stunden}`),
+  restore: (payload: unknown) => post<Record<string, unknown>>("/system/restore", payload),
+  csvUrl: (params: Record<string, boolean>) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) q.set(k, "true");
+    return `/api/deals/export.csv?${q}`;
   },
 };

@@ -3,8 +3,8 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, Deal, Match, Rule
-from app.pipeline import ingest, match_rules
+from app.models import Base, Deal, Match, PriceHistory, Rule
+from app.pipeline import check_price_alarms, ingest, match_rules
 from app.sources.base import DealItem
 
 
@@ -127,3 +127,74 @@ def test_ungueltige_items_werden_uebersprungen(db):
         DealItem(titel="Ohne URL", url="", quelle="mydealz"),
     ])
     assert len(fresh) == 1
+
+
+# --- Preishistorie und Alarme ---------------------------------------------
+
+def test_erster_preis_landet_in_der_historie(db):
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=99.0)])
+    verlauf = list(db.scalars(select(PriceHistory)))
+    assert len(verlauf) == 1 and verlauf[0].preis == 99.0
+
+
+def test_preissenkung_wird_aufgezeichnet(db):
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=99.0)])
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=79.0)])
+    preise = [p.preis for p in db.scalars(select(PriceHistory).order_by(PriceHistory.id))]
+    assert preise == [99.0, 79.0]
+    assert db.scalar(select(Deal)).preis == 79.0
+
+
+def test_gleicher_preis_erzeugt_keinen_neuen_eintrag(db):
+    for _ in range(3):
+        ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=99.0)])
+    assert len(list(db.scalars(select(PriceHistory)))) == 1
+
+
+def test_teurerer_preis_gewinnt_nicht(db):
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=79.0)])
+    ingest(db, "reddit", [item(url="https://a.de/1", titel="SSD", preis=99.0,
+                               quelle="reddit")])
+    assert db.scalar(select(Deal)).preis == 79.0
+
+
+def test_preis_eur_wird_beim_anlegen_gesetzt(db):
+    ingest(db, "cheapshark", [item(url="https://a.de/1", titel="Spiel", preis=10.0,
+                                   waehrung="USD")])
+    deal_row = db.scalar(select(Deal))
+    assert deal_row.waehrung == "USD"
+    assert deal_row.preis_eur is not None and deal_row.preis_eur < 10.0
+
+
+def test_guenstiger_wird_ueber_waehrungen_hinweg_verglichen(db):
+    """9 USD (~8,28 EUR) ist guenstiger als 9 EUR - der Vergleich muss in
+    einer gemeinsamen Waehrung passieren, nicht auf den nackten Zahlen."""
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="Spiel", preis=9.0,
+                                waehrung="EUR")])
+    ingest(db, "cheapshark", [item(url="https://a.de/1", titel="Spiel", preis=9.0,
+                                   waehrung="USD", quelle="cheapshark")])
+    deal_row = db.scalar(select(Deal))
+    assert deal_row.waehrung == "USD"
+
+
+def test_preisalarm_loest_bei_unterschreitung_aus(db):
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=99.0)])
+    deal_row = db.scalar(select(Deal))
+    deal_row.alarm_preis = 80.0
+    db.commit()
+
+    assert check_price_alarms(db) == []          # 99 > 80, noch nichts
+
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=75.0)])
+    getroffen = check_price_alarms(db)
+    assert len(getroffen) == 1 and getroffen[0].id == deal_row.id
+
+
+def test_preisalarm_loest_nur_einmal_aus(db):
+    ingest(db, "mydealz", [item(url="https://a.de/1", titel="SSD", preis=50.0)])
+    deal_row = db.scalar(select(Deal))
+    deal_row.alarm_preis = 80.0
+    db.commit()
+
+    assert len(check_price_alarms(db)) == 1
+    assert check_price_alarms(db) == []          # kein Dauerfeuer

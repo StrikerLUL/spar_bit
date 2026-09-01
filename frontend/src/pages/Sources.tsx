@@ -1,6 +1,6 @@
 import {
-  AlertTriangle, CheckCircle2, ExternalLink, FlaskConical, HelpCircle, Key,
-  Play, RotateCcw, TestTube2, XCircle,
+  AlertTriangle, BellOff, CheckCircle2, ExternalLink, FlaskConical, HelpCircle,
+  Key, Play, RotateCcw, TestTube2, XCircle,
 } from "lucide-react";
 import * as React from "react";
 import { api, type OptionSpec, type Source, type SourceTestResult } from "@/lib/api";
@@ -111,6 +111,9 @@ export function Sources() {
 
 function healthOf(source: Source): { status: "ok" | "warn" | "error" | "off"; label: string } {
   if (!source.enabled) return { status: "off", label: "Aus" };
+  if (source.snooze_until && new Date(source.snooze_until) > new Date())
+    return { status: "warn", label: `stumm bis ${new Date(source.snooze_until)
+      .toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` };
   if (source.circuit_open) return { status: "error", label: "Gesperrt" };
   if (source.consecutive_failures > 0)
     return { status: "warn", label: `${source.consecutive_failures} Fehler in Folge` };
@@ -281,6 +284,25 @@ function SourceCard({
           <Button variant="ghost" size="sm" onClick={runNow} loading={running}
             title="Sofort einen Lauf auslösen">
             <Play className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {source.enabled && (
+          <Button
+            variant="ghost"
+            size="sm"
+            title={source.snooze_until && new Date(source.snooze_until) > new Date()
+              ? "Stummschaltung aufheben" : "6 Stunden stummschalten"}
+            onClick={async () => {
+              const aktiv = source.snooze_until
+                && new Date(source.snooze_until) > new Date();
+              await api.snooze(source.id, aktiv ? 0 : 6);
+              toast.push("success", aktiv
+                ? "Stummschaltung aufgehoben"
+                : `${source.display_name} für 6 Stunden stumm`);
+              onChanged();
+            }}
+          >
+            <BellOff className="h-3.5 w-3.5" />
           </Button>
         )}
         {source.circuit_open && (

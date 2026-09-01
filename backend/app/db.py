@@ -5,7 +5,7 @@ import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import settings
@@ -36,7 +36,33 @@ def _sqlite_pragmas(dbapi_conn, _record):
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
+# Spalten, die nach dem ersten Release dazugekommen sind. SQLite kann
+# ADD COLUMN, also reicht das statt eines Migrations-Frameworks - fuer eine
+# Single-User-App waere Alembic hier mehr Ballast als Nutzen.
+_ADDED_COLUMNS: list[tuple[str, str, str]] = [
+    ("deals", "preis_eur", "FLOAT"),
+    ("deals", "alarm_preis", "FLOAT"),
+    ("deals", "alarm_ausgeloest", "DATETIME"),
+    ("deals", "notiz", "TEXT"),
+    ("source_configs", "snooze_until", "DATETIME"),
+]
+
+
+def _migrate(conn) -> None:
+    """Fehlende Spalten nachziehen. Idempotent - laeuft bei jedem Start."""
+    for table, column, ddl in _ADDED_COLUMNS:
+        exists = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        if not exists:
+            continue                      # Tabelle legt create_all gleich neu an
+        if any(row[1] == column for row in exists):
+            continue
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+        log.info("Migration: Spalte %s.%s ergaenzt", table, column)
+
+
 def init_db() -> None:
+    with engine.begin() as conn:
+        _migrate(conn)
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
         if not get_setting(db, "secret_key"):

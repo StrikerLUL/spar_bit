@@ -1,11 +1,16 @@
 import {
-  Bell, CheckCircle2, Clock, Plus, Send, Trash2, XCircle,
+  Bell, CheckCircle2, Clock, Coins, Monitor, Pause, Play, Plus, Send, Trash2,
+  XCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
-  api, type Channel, type ChannelType, type NotificationLogEntry,
-  type OptionSpec, type QuietHours,
+  api, type AppSettings, type Channel, type ChannelType,
+  type NotificationLogEntry, type OptionSpec, type QuietHours,
 } from "@/lib/api";
+import {
+  desktopEnabled, desktopSupported, requestDesktopPermission, setDesktopEnabled,
+  showDesktop,
+} from "@/lib/notify";
 import { useAsync } from "@/lib/useEvents";
 import { cn, formatDateTime, timeAgo } from "@/lib/utils";
 import {
@@ -196,7 +201,11 @@ export function Notifications() {
           </Card>
         </div>
 
-        <QuietHoursCard />
+        <div className="space-y-4 lg:space-y-6">
+          <DesktopCard />
+          <QuietHoursCard />
+          <EinstellungenCard />
+        </div>
       </div>
 
       {editing && (
@@ -409,5 +418,148 @@ function ChannelField({
         <p className="text-xs leading-relaxed text-muted-foreground">{spec.help}</p>
       )}
     </div>
+  );
+}
+
+
+/** Desktop-Benachrichtigungen - der kuerzeste Weg, wenn SparBit auf dem
+ *  eigenen Rechner laeuft. Kein Bot, kein Token. */
+function DesktopCard() {
+  const toast = useToast();
+  const [an, setAn] = React.useState(desktopEnabled());
+  const unterstuetzt = desktopSupported();
+
+  const umschalten = async (wert: boolean) => {
+    if (!wert) {
+      setDesktopEnabled(false);
+      setAn(false);
+      return;
+    }
+    const erlaubt = await requestDesktopPermission();
+    if (!erlaubt) {
+      toast.push("error", "Vom Browser abgelehnt",
+        "Benachrichtigungen sind für diese Seite blockiert. In den "
+        + "Seiteneinstellungen des Browsers wieder erlauben.");
+      return;
+    }
+    setDesktopEnabled(true);
+    setAn(true);
+    showDesktop("SparBit ist bereit", "So sehen deine Treffer künftig aus.");
+  };
+
+  return (
+    <Card className="h-fit">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Monitor className="h-4 w-4 text-primary" />
+          Desktop-Meldungen
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!unterstuetzt ? (
+          <p className="text-xs text-muted-foreground">
+            Dieser Browser kennt keine Desktop-Benachrichtigungen.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <Label>Aktiv</Label>
+              <Switch checked={an} onChange={umschalten} label="Desktop-Meldungen" />
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Zeigt Regeltreffer direkt als Systemmeldung — solange dieser Tab
+              offen ist. Gilt nur für diesen Browser, unabhängig von Telegram.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Waehrungskurse und globale Pause. */
+function EinstellungenCard() {
+  const toast = useToast();
+  const { data, loading, reload } = useAsync<AppSettings>(() => api.settings.get(), []);
+  const [kurse, setKurse] = React.useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    if (data) {
+      setKurse(Object.fromEntries(
+        Object.entries(data.waehrungskurse).map(([k, v]) => [k, String(v)])));
+    }
+  }, [data]);
+
+  if (loading || !data) return <Skeleton className="h-64" />;
+
+  const speichern = async (pausiert = data.benachrichtigungen_pausiert) => {
+    try {
+      await api.settings.set({
+        waehrungskurse: Object.fromEntries(
+          Object.entries(kurse)
+            .map(([k, v]) => [k, Number(v)])
+            .filter(([, v]) => Number.isFinite(v as number) && (v as number) > 0)),
+        benachrichtigungen_pausiert: pausiert,
+      });
+      toast.push("success", "Gespeichert");
+      reload();
+    } catch (err) {
+      toast.push("error", "Speichern fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card className="h-fit">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Coins className="h-4 w-4 text-primary" />
+          Währung & Pause
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <Button
+            variant={data.benachrichtigungen_pausiert ? "default" : "outline"}
+            size="sm"
+            className="w-full"
+            onClick={() => speichern(!data.benachrichtigungen_pausiert)}
+          >
+            {data.benachrichtigungen_pausiert
+              ? <><Play className="h-3.5 w-3.5" /> Zustellung fortsetzen</>
+              : <><Pause className="h-3.5 w-3.5" /> Zustellung pausieren</>}
+          </Button>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {data.benachrichtigungen_pausiert
+              ? "Treffer werden weiter gesammelt, aber nicht zugestellt."
+              : "Geht auch per Telegram: /pause und /weiter."}
+          </p>
+        </div>
+
+        <div className="space-y-2 border-t border-border pt-3">
+          <Label>Wechselkurse (1 Einheit in €)</Label>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            CheapShark liefert USD, HotUKDeals GBP. Damit „max. 20 €" überall
+            gleich greift, rechnet SparBit alles in Euro um.
+          </p>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            {["USD", "GBP", "CHF", "PLN"].map((code) => (
+              <div key={code} className="flex items-center gap-2">
+                <span className="w-9 text-xs text-muted-foreground">{code}</span>
+                <Input
+                  type="number" step="0.01" min="0"
+                  value={kurse[code] ?? ""}
+                  onChange={(e) => setKurse((c) => ({ ...c, [code]: e.target.value }))}
+                  className="h-8"
+                />
+              </div>
+            ))}
+          </div>
+          <Button size="sm" variant="outline" className="w-full"
+                  onClick={() => speichern()}>
+            Kurse speichern
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,4 +1,4 @@
-import { Bookmark, ExternalLink, Flame, Store } from "lucide-react";
+import { Bookmark, ExternalLink, Flame, LineChart, Store } from "lucide-react";
 import type { Deal } from "@/lib/api";
 import { cn, formatPrice, sourceLabel, timeAgo } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui";
@@ -6,9 +6,11 @@ import { Badge, Button, Card } from "@/components/ui";
 export function DealCard({
   deal,
   onBookmark,
+  onOpen,
 }: {
   deal: Deal;
   onBookmark?: (id: number) => void;
+  onOpen?: (id: number) => void;
 }) {
   const discount = deal.rabatt_prozent;
   return (
@@ -61,15 +63,26 @@ export function DealCard({
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-4">
-        <a
-          href={deal.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="line-clamp-2 text-sm font-medium leading-snug transition-colors hover:text-primary"
-          title={deal.titel}
-        >
-          {deal.titel}
-        </a>
+        {onOpen ? (
+          <button
+            type="button"
+            onClick={() => onOpen(deal.id)}
+            className="line-clamp-2 text-left text-sm font-medium leading-snug transition-colors hover:text-primary"
+            title="Details, Preisverlauf und Preisalarm"
+          >
+            {deal.titel}
+          </button>
+        ) : (
+          <a
+            href={deal.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="line-clamp-2 text-sm font-medium leading-snug transition-colors hover:text-primary"
+            title={deal.titel}
+          >
+            {deal.titel}
+          </a>
+        )}
 
         <div className="mt-auto space-y-3">
           <div className="flex items-baseline gap-2">
@@ -101,15 +114,23 @@ export function DealCard({
             <span className="ml-auto shrink-0">{timeAgo(deal.first_seen)}</span>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => window.open(deal.url, "_blank", "noopener,noreferrer")}
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Zum Deal
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={() => window.open(deal.url, "_blank", "noopener,noreferrer")}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Zum Deal
+            </Button>
+            {onOpen && (
+              <Button variant="ghost" size="sm" onClick={() => onOpen(deal.id)}
+                      title="Preisverlauf und Alarm">
+                <LineChart className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </Card>

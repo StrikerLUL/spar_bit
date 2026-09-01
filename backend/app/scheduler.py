@@ -19,7 +19,8 @@ from .db import SessionLocal, session_scope
 from .events import broker
 from .http import NotModified, PoliteClient, RateLimited
 from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
-from .pipeline import dispatch, ingest, match_rules, send_digest
+from .pipeline import (check_price_alarms, dispatch, dispatch_alarms,
+                       ingest, match_rules, send_digest)
 from .sources import all_sources, get_source
 from .sources.base import FetchContext
 
@@ -80,6 +81,8 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
                 return {"source_id": source_id, "skipped": "deaktiviert"}
             if not manual and cfg.circuit_open_until and cfg.circuit_open_until > utcnow():
                 return {"source_id": source_id, "skipped": "Circuit Breaker offen"}
+            if not manual and cfg.snooze_until and cfg.snooze_until > utcnow():
+                return {"source_id": source_id, "skipped": "stummgeschaltet"}
             ctx = build_context(cfg)
 
         t0 = time.monotonic()
@@ -134,6 +137,17 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
 
                 fresh = ingest(db, source_id, items)
                 new_count = len(fresh)
+
+                # Preisalarme greifen auch, wenn der Deal nicht neu ist -
+                # gerade dann ist er ja im Preis gefallen.
+                try:
+                    alarme = check_price_alarms(db)
+                    if alarme:
+                        await dispatch_alarms(db, alarme, get_http())
+                except Exception as exc:
+                    log.error("Preisalarm fehlgeschlagen: %s", exc)
+
+                hits = []
                 if fresh:
                     hits = match_rules(db, fresh)
                     if hits:

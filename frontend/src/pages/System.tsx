@@ -1,7 +1,10 @@
-import { Download, HardDrive, RefreshCw, ScrollText } from "lucide-react";
+import {
+  Download, HardDrive, Keyboard, RefreshCw, ScrollText, Upload,
+} from "lucide-react";
 import * as React from "react";
 import { api, type LogLine, type SystemInfo } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
+import { useToast } from "@/components/Toast";
 import { cn, formatBytes, formatDuration, formatDateTime } from "@/lib/utils";
 import {
   Badge, Button, Card, CardContent, CardHeader, CardTitle, Select, Skeleton,
@@ -156,6 +159,39 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
                 <Download className="h-4 w-4" />
                 Backup herunterladen
               </Button>
+              <RestoreButton />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Keyboard className="h-4 w-4 text-primary" />
+                Tastenkürzel
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="space-y-1.5 text-xs">
+                {[
+                  ["Strg / Cmd + K", "Schnellzugriff öffnen"],
+                  ["/", "In die Suche springen"],
+                  ["g dann d", "Dashboard"],
+                  ["g dann f", "Feed"],
+                  ["g dann s", "Statistiken"],
+                  ["g dann q", "Quellen"],
+                  ["g dann r", "Regeln"],
+                  ["Esc", "Dialog schließen"],
+                ].map(([taste, was]) => (
+                  <div key={taste} className="flex items-baseline justify-between gap-3">
+                    <dt>
+                      <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px]">
+                        {taste}
+                      </kbd>
+                    </dt>
+                    <dd className="text-muted-foreground">{was}</dd>
+                  </div>
+                ))}
+              </dl>
             </CardContent>
           </Card>
         </div>
@@ -170,3 +206,58 @@ const Row = ({ label, value }: { label: string; value: string }) => (
     <span className="truncate text-right font-medium" title={value}>{value}</span>
   </div>
 );
+
+
+/** Backup zurueckspielen. Regeln, Kanaele und Quellen-Konfiguration werden
+ *  ersetzt - gesammelte Deals bleiben, die kommen ohnehin wieder rein. */
+function RestoreButton() {
+  const toast = useToast();
+  const input = React.useRef<HTMLInputElement>(null);
+  const [laeuft, setLaeuft] = React.useState(false);
+
+  const einlesen = async (datei: File) => {
+    setLaeuft(true);
+    try {
+      const inhalt = JSON.parse(await datei.text());
+      const bericht = await api.restore(inhalt) as Record<string, number>;
+      toast.push("success", "Backup eingespielt",
+        `${bericht.regeln} Regeln, ${bericht.kanaele} Kanäle, `
+        + `${bericht.quellen} Quellen. Seite neu laden.`);
+    } catch (err) {
+      toast.push("error", "Einspielen fehlgeschlagen", (err as Error).message);
+    } finally {
+      setLaeuft(false);
+      if (input.current) input.current.value = "";
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(e) => {
+          const datei = e.target.files?.[0];
+          if (datei) void einlesen(datei);
+        }}
+      />
+      <Button
+        variant="ghost"
+        className="w-full"
+        loading={laeuft}
+        onClick={() => {
+          if (window.confirm(
+            "Backup einspielen? Regeln, Kanäle und Quellen-Einstellungen "
+            + "werden dabei ersetzt. Gesammelte Deals bleiben erhalten.")) {
+            input.current?.click();
+          }
+        }}
+      >
+        <Upload className="h-4 w-4" />
+        Backup einspielen
+      </Button>
+    </>
+  );
+}

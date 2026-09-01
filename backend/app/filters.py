@@ -123,7 +123,13 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
             reasons.append(f"Quelle '{quelle}'")
 
     # --- Gratis / Preis / Rabatt ---
-    preis = getattr(deal, "preis", None)
+    # Fuer Preisschwellen zaehlt der EUR-Betrag: CheapShark liefert USD,
+    # HotUKDeals GBP - sonst wuerde "max. 20 EUR" quellenabhaengig anders
+    # greifen. Faellt preis_eur aus (unbekannte Waehrung), nutzen wir den
+    # Rohpreis, statt den Deal stillschweigend fallen zu lassen.
+    preis = getattr(deal, "preis_eur", None)
+    if preis is None:
+        preis = getattr(deal, "preis", None)
     ist_gratis = bool(getattr(deal, "ist_gratis", False))
 
     if rule.nur_gratis:

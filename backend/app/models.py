@@ -43,6 +43,8 @@ class SourceConfig(Base):
     # Health / Circuit Breaker
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
     circuit_open_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Manuell stummgeschaltet (z.B. per Telegram-Knopf), laeuft von selbst ab.
+    snooze_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
@@ -84,6 +86,9 @@ class Deal(Base):
     originalpreis: Mapped[float | None] = mapped_column(Float)
     rabatt_prozent: Mapped[float | None] = mapped_column(Float)
     waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
+    # Preis in EUR umgerechnet - CheapShark liefert USD, HotUKDeals GBP.
+    # Regeln rechnen hiermit, damit "max 20 EUR" quellenuebergreifend stimmt.
+    preis_eur: Mapped[float | None] = mapped_column(Float, index=True)
     ist_gratis: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     haendler: Mapped[str | None] = mapped_column(String(128), index=True)
@@ -101,6 +106,10 @@ class Deal(Base):
     duplicate_of: Mapped[int | None] = mapped_column(ForeignKey("deals.id"), index=True)
     also_from: Mapped[list] = mapped_column(JSON, default=list)
     bookmarked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Preisalarm: melden, sobald der Preis unter diese Schwelle faellt.
+    alarm_preis: Mapped[float | None] = mapped_column(Float)
+    alarm_ausgeloest: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notiz: Mapped[str | None] = mapped_column(Text)
     roh: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
@@ -197,3 +206,25 @@ class LogEntry(Base):
     logger: Mapped[str] = mapped_column(String(64))
     message: Mapped[str] = mapped_column(Text)
     extra: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class PriceHistory(Base):
+    """Ein Eintrag je beobachteter Preisaenderung - Grundlage der Sparkline."""
+    __tablename__ = "price_history"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"),
+                                         index=True)
+    preis: Mapped[float] = mapped_column(Float)
+    waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
+    quelle: Mapped[str | None] = mapped_column(String(64))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                         index=True)
+
+
+class SavedSearch(Base):
+    """Gespeicherter Filter im Feed - ein Klick statt jedes Mal neu einstellen."""
+    __tablename__ = "saved_searches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    filter: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

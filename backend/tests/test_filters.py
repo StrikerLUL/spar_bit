@@ -8,9 +8,10 @@ from app.filters import RuleSpec, evaluate, preview
 
 def deal(**kw):
     base = dict(id=1, titel="", beschreibung="", haendler=None, tags=[],
-                preis=None, originalpreis=None, rabatt_prozent=None,
-                ist_gratis=False, temperatur=None, quelle="mydealz",
-                kategorie="community", url="https://example.com/x", bild=None)
+                preis=None, preis_eur=None, originalpreis=None,
+                rabatt_prozent=None, ist_gratis=False, temperatur=None,
+                quelle="mydealz", kategorie="community",
+                url="https://example.com/x", bild=None)
     return SimpleNamespace(**{**base, **kw})
 
 
@@ -166,3 +167,22 @@ def test_preview_ohne_deals():
     result = preview(RuleSpec(keywords=["lego"]), [])
     assert result == {"geprueft": 0, "treffer": 0, "trefferquote": 0.0,
                       "beispiele": [], "knapp_verfehlt": []}
+
+
+# --- Waehrung -------------------------------------------------------------
+
+def test_preisgrenze_rechnet_in_euro():
+    """Ein 25-USD-Deal (~23 EUR) muss eine 'max. 24 EUR'-Regel treffen -
+    und ein 25-EUR-Deal darf es nicht."""
+    rule = RuleSpec(max_preis=24.0)
+    usd = deal(titel="x", preis=25.0, preis_eur=23.0)
+    eur = deal(titel="x", preis=25.0, preis_eur=25.0)
+    assert evaluate(rule, usd).matched
+    assert not evaluate(rule, eur).matched
+
+
+def test_ohne_eur_preis_zaehlt_der_rohpreis():
+    """Faellt die Umrechnung aus, soll der Deal nicht stillschweigend
+    verschwinden."""
+    rule = RuleSpec(max_preis=20.0)
+    assert evaluate(rule, deal(titel="x", preis=15.0, preis_eur=None)).matched

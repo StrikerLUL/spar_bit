@@ -118,3 +118,14 @@ def test_html_statt_feed_wirft(bad):
     """Eine Blockseite darf nicht als leerer Feed durchgehen."""
     with pytest.raises(ValueError):
         MyDealz().parse(bad)
+
+
+def test_rubrik_gilt_nicht_als_haendler(load_text):
+    """'[Preisfehler]' ist eine Rubrik, kein Shop - sonst verschmutzt es die
+    Haendler-Statistik und die Haendler-Filter in Regeln."""
+    items = MyDealz().parse(load_text("pepper_mydealz.xml"))
+    lego = next(i for i in items if "LEGO" in i.titel)
+    assert lego.haendler is None
+
+    xm5 = next(i for i in items if "WH-1000XM5" in i.titel)
+    assert xm5.haendler == "Amazon"

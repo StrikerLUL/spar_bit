@@ -7,12 +7,13 @@ from datetime import datetime, time, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .currency import to_eur
 from .db import get_setting
 from .dedupe import canonical_url, normalize_title, titles_match, url_hash
 from .events import broker
 from .filters import RuleSpec, evaluate
-from .models import (Channel, Deal, Match, NotificationLog, Rule, SourceConfig,
-                     utcnow)
+from .models import (Channel, Deal, Match, NotificationLog, PriceHistory,
+                     Rule, SourceConfig, utcnow)
 from .notify import Notification, get_channel
 from .sources.base import DealItem
 
@@ -66,12 +67,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
     if existing:
         existing.last_seen = utcnow()
         existing.seen_count += 1
-        # Preis kann sich geaendert haben - guenstigeren uebernehmen.
-        if item.preis is not None and (existing.preis is None
-                                       or item.preis < existing.preis):
-            existing.preis = item.preis
-            existing.rabatt_prozent = item.rabatt_prozent or existing.rabatt_prozent
-            existing.ist_gratis = existing.ist_gratis or item.ist_gratis
+        _apply_price(db, existing, item, source_id)
         if source_id not in (existing.also_from or []) and source_id != existing.quelle:
             existing.also_from = list(existing.also_from or []) + [source_id]
         return None
@@ -86,9 +82,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
             cand.seen_count += 1
             if source_id not in (cand.also_from or []) and source_id != cand.quelle:
                 cand.also_from = list(cand.also_from or []) + [source_id]
-            if item.preis is not None and (cand.preis is None or item.preis < cand.preis):
-                cand.preis = item.preis
-                cand.ist_gratis = cand.ist_gratis or item.ist_gratis
+            _apply_price(db, cand, item, source_id)
             log.debug("Duplikat: '%s' (%s) == '%s' (%s)",
                       item.titel[:60], source_id, cand.titel[:60], cand.quelle)
             return None
@@ -104,6 +98,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         originalpreis=item.originalpreis,
         rabatt_prozent=item.rabatt_prozent,
         waehrung=item.waehrung,
+        preis_eur=to_eur(item.preis, item.waehrung),
         ist_gratis=item.ist_gratis,
         haendler=(item.haendler or None) and item.haendler[:128],
         kategorie=item.kategorie,
@@ -116,7 +111,42 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
     )
     db.add(deal)
     db.flush()
+    if deal.preis is not None:
+        db.add(PriceHistory(deal_id=deal.id, preis=deal.preis,
+                            waehrung=deal.waehrung, quelle=source_id))
     return deal
+
+
+def _apply_price(db: Session, deal: Deal, item: DealItem, source_id: str) -> None:
+    """Preis eines schon bekannten Deals aktualisieren.
+
+    Es gewinnt der guenstigere Preis - derselbe Artikel taucht bei mehreren
+    Quellen zu verschiedenen Preisen auf, und interessant ist der beste.
+    Jede echte Aenderung landet in der Historie.
+    """
+    if item.preis is None:
+        return
+    neu_eur = to_eur(item.preis, item.waehrung)
+    alt_eur = deal.preis_eur if deal.preis_eur is not None else to_eur(deal.preis,
+                                                                      deal.waehrung)
+
+    guenstiger = (
+        deal.preis is None
+        or (neu_eur is not None and alt_eur is not None and neu_eur < alt_eur)
+        or (neu_eur is None and item.preis < deal.preis)
+    )
+    if not guenstiger:
+        return
+
+    geaendert = deal.preis != item.preis
+    deal.preis = item.preis
+    deal.waehrung = item.waehrung
+    deal.preis_eur = neu_eur
+    deal.rabatt_prozent = item.rabatt_prozent or deal.rabatt_prozent
+    deal.ist_gratis = deal.ist_gratis or item.ist_gratis
+    if geaendert:
+        db.add(PriceHistory(deal_id=deal.id, preis=item.preis,
+                            waehrung=item.waehrung, quelle=source_id))
 
 
 def _deal_payload(deal: Deal) -> dict:
@@ -188,6 +218,12 @@ def in_quiet_hours(db: Session, now: datetime | None = None) -> bool:
 async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
     """Treffer an die Kanaele geben. SOFORT umgeht Ruhezeiten."""
     if not hits:
+        return 0
+
+    # Per Telegram (/pause) global angehalten? Treffer bleiben gespeichert,
+    # nur die Zustellung ruht - /weiter holt sie als Digest nach.
+    if get_setting(db, "notifications_paused"):
+        log.info("Zustellung pausiert - %d Treffer zurueckgehalten", len(hits))
         return 0
 
     quiet = in_quiet_hours(db)
@@ -267,3 +303,69 @@ async def send_digest(db: Session, http) -> int:
     hits = [(rules[m.rule_id], m.deal) for m in pending
             if m.rule_id in rules and m.deal is not None]
     return await dispatch(db, hits, http)
+
+
+def check_price_alarms(db: Session) -> list[Deal]:
+    """Deals finden, deren Preis unter die gesetzte Alarmschwelle gefallen ist.
+
+    Ein Alarm loest genau einmal aus - sonst meldet sich SparBit bei jedem
+    Lauf erneut, solange der Preis unten bleibt.
+    """
+    kandidaten = list(db.scalars(
+        select(Deal).where(Deal.alarm_preis.isnot(None),
+                           Deal.alarm_ausgeloest.is_(None))
+    ))
+    getroffen: list[Deal] = []
+    for deal in kandidaten:
+        preis = deal.preis_eur if deal.preis_eur is not None else deal.preis
+        if preis is None:
+            continue
+        if preis <= deal.alarm_preis:
+            deal.alarm_ausgeloest = utcnow()
+            getroffen.append(deal)
+            log.info("Preisalarm: '%s' bei %.2f (Schwelle %.2f)",
+                     deal.titel[:60], preis, deal.alarm_preis)
+    if getroffen:
+        db.commit()
+        for deal in getroffen:
+            broker.publish("alarm", _deal_payload(deal))
+    return getroffen
+
+
+async def dispatch_alarms(db: Session, deals: list[Deal], http) -> int:
+    """Preisalarme ueber alle aktiven Kanaele melden - unabhaengig von Regeln.
+    Ein Alarm ist immer gewollt, sonst haette man ihn nicht gesetzt."""
+    if not deals:
+        return 0
+    channels = [c for c in db.scalars(select(Channel)) if c.enabled]
+    if not channels:
+        return 0
+
+    sent = 0
+    for deal in deals:
+        note = Notification(
+            titel=f"Preisalarm: {deal.titel}", url=deal.url, quelle=deal.quelle,
+            regel="Preisalarm", preis=deal.preis, originalpreis=deal.originalpreis,
+            rabatt_prozent=deal.rabatt_prozent, waehrung=deal.waehrung,
+            haendler=deal.haendler, bild=deal.bild, ist_gratis=deal.ist_gratis,
+            beschreibung=f"Dein Zielpreis war {deal.alarm_preis:.2f} EUR.",
+            deal_id=deal.id, prioritaet="SOFORT", tags=deal.tags or [],
+        )
+        for row in channels:
+            impl = get_channel(row.type)
+            if impl is None:
+                continue
+            try:
+                await impl.send(row.config or {}, note, http)
+                sent += 1
+                db.add(NotificationLog(channel_id=row.id, channel_type=row.type,
+                                       rule_name="Preisalarm", deal_id=deal.id,
+                                       deal_titel=deal.titel[:500], ok=True))
+            except Exception as exc:
+                log.error("Preisalarm ueber %s fehlgeschlagen: %s", row.type, exc)
+                db.add(NotificationLog(channel_id=row.id, channel_type=row.type,
+                                       rule_name="Preisalarm", deal_id=deal.id,
+                                       deal_titel=deal.titel[:500], ok=False,
+                                       error=f"{type(exc).__name__}: {exc}"[:500]))
+    db.commit()
+    return sent

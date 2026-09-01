@@ -1,15 +1,17 @@
 import {
-  Bell, Bookmark, Boxes, Gift, LayoutDashboard, LogOut, Menu, Radio,
-  ScrollText, SlidersHorizontal, Sparkles, X,
+  BarChart3, Bell, Bookmark, Boxes, Command, Gift, LayoutDashboard, LogOut,
+  Menu, Monitor, Moon, Radio, ScrollText, SlidersHorizontal, Sparkles, Sun, X,
 } from "lucide-react";
 import * as React from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import type { Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Button, StatusDot } from "@/components/ui";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/feed", label: "Feed", icon: Boxes },
+  { to: "/statistiken", label: "Statistiken", icon: BarChart3 },
   { to: "/quellen", label: "Quellen", icon: Radio },
   { to: "/regeln", label: "Regeln", icon: SlidersHorizontal },
   { to: "/benachrichtigungen", label: "Benachrichtigungen", icon: Bell },
@@ -22,11 +24,17 @@ export function Layout({
   connected,
   username,
   onLogout,
+  theme,
+  setTheme,
+  onOpenPalette,
 }: {
   children: React.ReactNode;
   connected: boolean;
   username: string | null;
   onLogout: () => void;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+  onOpenPalette: () => void;
 }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const location = useLocation();
@@ -68,8 +76,22 @@ export function Layout({
       {/* Desktop-Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-border bg-card/40 backdrop-blur-xl lg:flex">
         <Brand />
+        <div className="px-3">
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Command className="h-3.5 w-3.5" />
+            Schnellzugriff
+            <kbd className="ml-auto rounded border border-border px-1 py-0.5 text-[10px]">
+              ⌘K
+            </kbd>
+          </button>
+        </div>
         <div className="flex-1 overflow-y-auto px-3 py-4">{navItems}</div>
-        <Footer connected={connected} username={username} onLogout={onLogout} />
+        <Footer connected={connected} username={username} onLogout={onLogout}
+                theme={theme} setTheme={setTheme} />
       </aside>
 
       {/* Mobile-Kopfzeile */}
@@ -104,7 +126,8 @@ export function Layout({
               </Button>
             </div>
             <div className="flex-1 overflow-y-auto px-3 py-4">{navItems}</div>
-            <Footer connected={connected} username={username} onLogout={onLogout} />
+            <Footer connected={connected} username={username} onLogout={onLogout}
+                    theme={theme} setTheme={setTheme} />
           </aside>
         </div>
       )}
@@ -130,20 +153,52 @@ const Brand = () => (
   </div>
 );
 
+const THEMES: Array<{ value: Theme; icon: typeof Sun; label: string }> = [
+  { value: "light", icon: Sun, label: "Hell" },
+  { value: "dark", icon: Moon, label: "Dunkel" },
+  { value: "system", icon: Monitor, label: "System" },
+];
+
 const Footer = ({
   connected,
   username,
   onLogout,
+  theme,
+  setTheme,
 }: {
   connected: boolean;
   username: string | null;
   onLogout: () => void;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
 }) => (
   <div className="border-t border-border p-3">
     <div className="mb-2 flex items-center gap-2 px-2 text-xs text-muted-foreground">
       <StatusDot status={connected ? "ok" : "error"} pulse={connected} />
       {connected ? "Live verbunden" : "Verbindung getrennt"}
     </div>
+
+    <div className="mb-2 flex gap-1 rounded-md bg-muted/40 p-1">
+      {THEMES.map(({ value, icon: Icon, label }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => setTheme(value)}
+          title={label}
+          aria-label={`Thema: ${label}`}
+          aria-pressed={theme === value}
+          className={cn(
+            "flex flex-1 items-center justify-center rounded py-1.5 transition-colors",
+            theme === value
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Icon className="h-3.5 w-3.5" />
+        </button>
+      ))}
+    </div>
+
     <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
       <span className="truncate text-sm text-muted-foreground">{username ?? "—"}</span>
       <Button variant="ghost" size="icon" onClick={onLogout} aria-label="Abmelden"

@@ -1,12 +1,15 @@
-import { Boxes, Bookmark, Search, SlidersHorizontal, X } from "lucide-react";
+import {
+  Bookmark, Boxes, Download, Search, SlidersHorizontal, Star, Trash2, X,
+} from "lucide-react";
 import * as React from "react";
-import { api, type Deal, type Source } from "@/lib/api";
+import { api, type Deal, type SavedSearch, type Source } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { sourceLabel } from "@/lib/utils";
 import {
   Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton, Switch,
 } from "@/components/ui";
 import { DealCard } from "@/components/DealCard";
+import { DealDetailDialog } from "@/components/DealDetail";
 import { PageHeader } from "@/components/Layout";
 import { useToast } from "@/components/Toast";
 
@@ -24,6 +27,7 @@ export function Feed() {
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [offset, setOffset] = React.useState(0);
   const [items, setItems] = React.useState<Deal[]>([]);
+  const [detailId, setDetailId] = React.useState<number | null>(null);
 
   // Sucheingabe entprellen - sonst feuert jede Taste einen Request.
   React.useEffect(() => {
@@ -32,6 +36,8 @@ export function Feed() {
   }, [query]);
 
   const { data: sources } = useAsync<Source[]>(() => api.sources.list(), []);
+  const { data: searches, reload: reloadSearches } =
+    useAsync<SavedSearch[]>(() => api.searches.list(), []);
 
   const filters = React.useMemo(
     () => ({
@@ -83,6 +89,32 @@ export function Feed() {
     setMaxPreis("");
   };
 
+  const sucheSpeichern = async () => {
+    const name = window.prompt("Name für diese Suche?",
+      query || quelle || (nurGratis ? "Nur Gratis" : "Meine Suche"));
+    if (!name) return;
+    try {
+      await api.searches.create(name, {
+        q: query, quelle, nur_gratis: nurGratis, bookmarked: nurGemerkt,
+        min_rabatt: minRabatt, max_preis: maxPreis,
+      });
+      toast.push("success", "Suche gespeichert", name);
+      reloadSearches();
+    } catch (err) {
+      toast.push("error", "Speichern fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  const sucheAnwenden = (gespeichert: SavedSearch) => {
+    const f = gespeichert.filter as Record<string, string | boolean>;
+    setQuery(String(f.q ?? ""));
+    setQuelle(String(f.quelle ?? ""));
+    setNurGratis(Boolean(f.nur_gratis));
+    setNurGemerkt(Boolean(f.bookmarked));
+    setMinRabatt(String(f.min_rabatt ?? ""));
+    setMaxPreis(String(f.max_preis ?? ""));
+  };
+
   return (
     <>
       <PageHeader
@@ -95,9 +127,10 @@ export function Feed() {
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              data-suchfeld
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Titel, Beschreibung oder Händler durchsuchen…"
+              placeholder="Titel, Beschreibung oder Händler durchsuchen…  (Taste /)"
               className="pl-9"
             />
           </div>
@@ -111,7 +144,42 @@ export function Feed() {
               <Badge variant="secondary" className="ml-1">{activeFilters}</Badge>
             )}
           </Button>
+          <Button variant="ghost" size="icon" title="Als CSV herunterladen"
+                  onClick={() => window.open(
+                    api.csvUrl({ nur_gratis: nurGratis, nur_gemerkt: nurGemerkt }),
+                    "_blank")}>
+            <Download className="h-4 w-4" />
+          </Button>
         </div>
+
+        {(searches?.length || activeFilters > 0 || query) && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
+            {searches?.map((gespeichert) => (
+              <span key={gespeichert.id}
+                    className="group flex items-center rounded-full border border-border text-xs">
+                <button type="button" onClick={() => sucheAnwenden(gespeichert)}
+                        className="py-1 pl-2.5 pr-1 hover:text-primary">
+                  <Star className="mr-1 inline h-3 w-3" />
+                  {gespeichert.name}
+                </button>
+                <button type="button" aria-label="Suche löschen"
+                        onClick={async () => {
+                          await api.searches.remove(gespeichert.id);
+                          reloadSearches();
+                        }}
+                        className="py-1 pr-2 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100">
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            {(activeFilters > 0 || query) && (
+              <Button variant="ghost" size="sm" onClick={sucheSpeichern}>
+                <Star className="h-3.5 w-3.5" />
+                Suche merken
+              </Button>
+            )}
+          </div>
+        )}
 
         {filtersOpen && (
           <div className="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -198,7 +266,8 @@ export function Feed() {
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {items.map((deal) => (
-              <DealCard key={deal.id} deal={deal} onBookmark={bookmark} />
+              <DealCard key={deal.id} deal={deal} onBookmark={bookmark}
+                        onOpen={setDetailId} />
             ))}
           </div>
           {data && items.length < data.total && (
@@ -213,6 +282,20 @@ export function Feed() {
             </div>
           )}
         </>
+      )}
+
+      {detailId !== null && (
+        <DealDetailDialog
+          dealId={detailId}
+          onClose={() => setDetailId(null)}
+          onChanged={() => {
+            // Merk-Status in der Liste nachziehen, ohne alles neu zu laden.
+            api.deals.list({ ...filters, limit: PAGE_SIZE, offset: 0 })
+              .then((r) => setItems((cur) =>
+                cur.map((d) => r.items.find((n) => n.id === d.id) ?? d)))
+              .catch(() => undefined);
+          }}
+        />
       )}
     </>
   );

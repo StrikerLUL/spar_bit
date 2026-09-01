@@ -1,5 +1,5 @@
 import {
-  CheckCircle2, Plus, SlidersHorizontal, Target, Trash2, XCircle, Zap,
+  CheckCircle2, Plus, SlidersHorizontal, Sparkles, Target, Trash2, XCircle, Zap,
 } from "lucide-react";
 import * as React from "react";
 import {
@@ -16,6 +16,47 @@ import {
 } from "@/components/ui";
 import { PageHeader } from "@/components/Layout";
 import { useToast } from "@/components/Toast";
+
+/** Startpunkte statt weisses Blatt. Jede Vorlage ist bewusst eng gefasst -
+ *  lieber wenige gute Treffer als ein Kanal, den man nach zwei Tagen
+ *  stummschaltet. */
+const VORLAGEN: Array<{ name: string; beschreibung: string; regel: Partial<RuleDraft> }> = [
+  {
+    name: "Alles Gratis",
+    beschreibung: "Jeder 0-€-Fund, sofort. Der Klassiker zum Anfangen.",
+    regel: { name: "Alles Gratis", nur_gratis: true, priority: "SOFORT" },
+  },
+  {
+    name: "Gratis-Spiele",
+    beschreibung: "Nur Gaming-Quellen, nur kostenlos.",
+    regel: {
+      name: "Gratis-Spiele", nur_gratis: true, priority: "SOFORT",
+      sources: ["epic", "gog", "steam", "cheapshark", "itad", "reddit"],
+    },
+  },
+  {
+    name: "Preisfehler",
+    beschreibung: "Mindestens 80 % Rabatt und heiß diskutiert.",
+    regel: {
+      name: "Preisfehler", min_rabatt_prozent: 80, min_temperatur: 300,
+      priority: "SOFORT",
+    },
+  },
+  {
+    name: "Starke Rabatte",
+    beschreibung: "Ab 70 % reduziert, als stündliche Zusammenfassung.",
+    regel: { name: "Starke Rabatte", min_rabatt_prozent: 70, priority: "NORMAL" },
+  },
+  {
+    name: "Günstige Technik",
+    beschreibung: "Beispiel für Keywords plus Preisgrenze — bitte anpassen.",
+    regel: {
+      name: "Günstige Technik", priority: "NORMAL", max_preis: 50,
+      keywords: ["ssd", "kopfhörer", "monitor", "tastatur", "maus", "festplatte"],
+      blacklist: ["gebraucht", "defekt", "b-ware"],
+    },
+  },
+];
 
 const EMPTY_RULE: RuleDraft = {
   name: "",
@@ -71,6 +112,28 @@ export function Rules() {
           </Button>
         }
       />
+
+      <Card className="mb-6 p-4">
+        <p className="mb-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Vorlagen — ein Klick, dann anpassen
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {VORLAGEN.map((vorlage) => (
+            <button
+              key={vorlage.name}
+              type="button"
+              title={vorlage.beschreibung}
+              onClick={() => setEditing({
+                rule: { ...EMPTY_RULE, ...vorlage.regel } as RuleDraft,
+              })}
+              className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+            >
+              <Sparkles className="mr-1 inline h-3 w-3" />
+              {vorlage.name}
+            </button>
+          ))}
+        </div>
+      </Card>
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2">

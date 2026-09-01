@@ -21,6 +21,16 @@ from .rssutil import (entry_body, entry_datetime, entry_tags, first_image,
 _TEMP_RE = re.compile(r"(-?\d{1,4})\s*°")
 _MERCHANT_RE = re.compile(r"\[(.*?)\]")
 
+# In eckigen Klammern steht mal der Haendler ("[Amazon]"), mal eine Rubrik
+# ("[Preisfehler]"). Rubriken als Haendler zu fuehren macht die
+# Haendler-Statistik und Haendler-Filter unbrauchbar - deshalb aussortieren.
+_KEINE_HAENDLER = {
+    "preisfehler", "gratis", "kostenlos", "freebie", "deal", "hot", "sammeldeal",
+    "angebot", "schnäppchen", "schnaeppchen", "info", "update", "abgelaufen",
+    "lokal", "bundesweit", "neu", "tipp", "sparabo", "prime", "blitzangebot",
+    "vorbestellung", "vorbestellbar", "ausverkauft", "nur heute", "letzte chance",
+}
+
 
 class PepperSource(Source):
     """Basis fuer alle Pepper-Seiten. Unterklassen setzen nur Host + Defaults."""
@@ -108,8 +118,11 @@ class PepperSource(Source):
 
             merchant = None
             mm = _MERCHANT_RE.search(title)
-            if mm and len(mm.group(1)) <= 40:
-                merchant = mm.group(1).strip()
+            if mm:
+                kandidat = mm.group(1).strip()
+                if kandidat and len(kandidat) <= 40 \
+                        and kandidat.lower() not in _KEINE_HAENDLER:
+                    merchant = kandidat
 
             out.append(DealItem(
                 titel=title,

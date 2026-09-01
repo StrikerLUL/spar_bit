@@ -1,0 +1,15 @@
+{
+  "name": "SparBit — Deal- & Freebie-Zentrale",
+  "short_name": "SparBit",
+  "description": "Sammelt Gratis-Sachen, Preisfehler und starke Rabatte und meldet sie sofort.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0c10",
+  "theme_color": "#0a0c10",
+  "lang": "de",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

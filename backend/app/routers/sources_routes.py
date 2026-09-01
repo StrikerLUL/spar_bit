@@ -52,6 +52,7 @@ def _serialize(src, cfg: SourceConfig, stats: dict) -> dict:
         "consecutive_failures": cfg.consecutive_failures,
         "circuit_open_until": cfg.circuit_open_until,
         "circuit_open": bool(cfg.circuit_open_until and cfg.circuit_open_until > utcnow()),
+        "snooze_until": cfg.snooze_until,
         "total_runs": cfg.total_runs,
         "total_errors": cfg.total_errors,
         "total_items": cfg.total_items,

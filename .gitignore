@@ -3,9 +3,10 @@
 *.env
 !.env.example
 
-# Daten
+# Daten (lokaler Start legt ./data an)
 data/
 claimer-data/
+.venv/
 *.db
 *.db-wal
 *.db-shm
@@ -23,9 +24,14 @@ venv/
 
 # Node
 node_modules/
-dist/
 .vite/
 *.tsbuildinfo
+
+# frontend/dist wird BEWUSST mitgeliefert: so genuegt Python zum Starten,
+# Node.js ist nur zum Neubauen noetig (python run.py --rebuild).
+# Andere dist-Ordner bleiben draussen.
+/dist/
+backend/dist/
 
 # Editor / OS
 .DS_Store

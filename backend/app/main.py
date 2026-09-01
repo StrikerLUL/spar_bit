@@ -4,16 +4,20 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 from .config import settings
-from .db import init_db
+from .currency import set_rates
+from .db import get_setting, init_db, session_scope
 from .events import broker
 from .logging_setup import setup_logging
-from .routers import (auth_routes, deals_routes, notify_routes, rules_routes,
-                      sources_routes, system_routes)
+from .routers import (auth_routes, deals_routes, extras_routes, notify_routes,
+                      rules_routes, sources_routes, system_routes)
 
 setup_logging()
 log = logging.getLogger("sparbit")
@@ -24,12 +28,23 @@ async def lifespan(app: FastAPI):
     init_db()
     broker.bind_loop(asyncio.get_running_loop())
 
+    # Waehrungskurse aus den Einstellungen laden, damit Preisregeln
+    # quellenuebergreifend in EUR rechnen.
+    with session_scope() as db:
+        set_rates(get_setting(db, "currency_rates"))
+
     from . import scheduler as sched
     sched.start()
-    log.info("SparBit gestartet")
+
+    from .telegram_bot import bot
+    if settings.telegram_polling:
+        bot.start()
+
+    log.info("SparBit laeuft auf http://%s:%s", settings.host, settings.port)
     try:
         yield
     finally:
+        await bot.stop()
         await sched.shutdown()
         log.info("SparBit beendet")
 
@@ -54,6 +69,7 @@ app.include_router(notify_routes.quiet_router)
 app.include_router(system_routes.router)
 app.include_router(system_routes.sse_router)
 app.include_router(system_routes.claimer_router)
+app.include_router(extras_routes.router)
 
 
 @app.get("/api/health")
@@ -66,3 +82,30 @@ async def unhandled(request: Request, exc: Exception) -> JSONResponse:
     log.exception("Unbehandelter Fehler bei %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500,
                         content={"detail": "Interner Fehler - siehe Logs."})
+
+
+# --- Web-Oberflaeche ------------------------------------------------------
+# Liegt ein gebautes Frontend daneben, liefert das Backend es gleich mit aus.
+# Dann genuegt ein Prozess und ein Port - genau das, was man auf dem eigenen
+# Rechner will. Im Docker-Setup uebernimmt stattdessen nginx.
+
+DIST = settings.frontend_dist
+
+if (DIST / "index.html").exists():
+    if (DIST / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str) -> FileResponse:
+        """Single-Page-App: jeder unbekannte Pfad bekommt index.html, damit
+        Deep-Links wie /regeln direkt funktionieren."""
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Unbekannter API-Pfad")
+        # Echte Dateien (Manifest, Icons, robots.txt) direkt ausliefern.
+        candidate = (DIST / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(DIST.resolve()):
+            return FileResponse(candidate)
+        return FileResponse(DIST / "index.html")
+else:
+    log.warning("Kein gebautes Frontend unter %s - starte es separat mit "
+                "'npm run dev' oder baue es mit 'npm run build'.", DIST)
