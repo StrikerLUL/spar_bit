@@ -1,21 +1,14 @@
 # SparBit
 
 Deal- und Freebie-Zentrale für zu Hause: sammelt Gratis-Sachen, Preisfehler und
-starke Rabatte aus vielen Quellen, filtert sie nach deinen Regeln und meldet
-Treffer sofort — per Telegram und als Desktop-Meldung. Konfiguriert wird alles
-im Web-Interface.
+starke Rabatte aus vielen Quellen, **beurteilt sie am eigenen Preisverlauf**,
+filtert nach deinen Regeln und meldet Treffer sofort per Telegram oder als
+Desktop-Meldung.
 
 **Läuft auf deinem eigenen Rechner.** Kein Server, kein Docker, keine
 Konfigurationsdateien. Ein Befehl genügt.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb)
-
----
-
-## Loslegen
-
-Du brauchst nur **Python 3.11 oder neuer**. Node.js ist optional (wird nur
-gebraucht, wenn du die Oberfläche selbst neu bauen willst).
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-244-22c55e)
 
 ```bash
 git clone https://github.com/StrikerLUL/spar_bit.git
@@ -23,13 +16,34 @@ cd spar_bit
 python run.py
 ```
 
-Das war's. Beim ersten Mal legt SparBit eine virtuelle Umgebung an, installiert
-die Abhängigkeiten, baut die Oberfläche und startet — danach öffnet sich
-automatisch <http://localhost:8000>. Dauert etwa eine Minute; jeder weitere
-Start ein paar Sekunden.
+---
+
+**Inhalt** · [Loslegen](#loslegen) · [Die ersten 10 Minuten](#die-ersten-10-minuten)
+· [Was SparBit kann](#was-sparbit-kann) · [Telegram](#telegram-einrichten)
+· [API-Keys](#api-keys-optional) · [Mit Docker](#mit-docker)
+· [Entwicklung](#entwicklung) · [Sicherheit](#sicherheit)
+· [Problemlösung](#problemlösung) · [Bekannte Lücken](#bekannte-lücken)
+
+> **Vor dem ersten Start: [ENDPOINTS.md](ENDPOINTS.md) lesen.**
+> Kein Quellen-Endpoint konnte beim Bauen live geprüft werden — die
+> Build-Umgebung hatte keinen Netzzugang zu den Deal-Seiten. Alle Quellen
+> starten als *ungeprüft*; ein Befehl bzw. ein Knopf im UI verifiziert sie auf
+> deinem Rechner. Das ist Absicht: lieber ehrlich ungeprüft als falsch
+> „funktioniert".
+
+---
+
+## Loslegen
+
+Du brauchst **Python 3.11 oder neuer**. Node.js ist optional — nur nötig, wenn
+du die Oberfläche selbst neu bauen willst.
 
 **Windows:** `start.bat` doppelklicken.
 **macOS/Linux:** `./start.sh` oder `python3 run.py`.
+
+Beim ersten Mal legt SparBit eine virtuelle Umgebung an, installiert die
+Abhängigkeiten und startet — danach öffnet sich <http://localhost:8000>.
+Dauert etwa eine Minute; jeder weitere Start ein paar Sekunden.
 
 Beim ersten Aufruf legst du dein Konto an. Es gibt **kein Standard-Passwort** —
 was du setzt, gilt (mindestens 10 Zeichen, mit argon2 gehasht).
@@ -44,7 +58,7 @@ python run.py --rebuild        # Oberfläche neu bauen
 python run.py --dev            # Entwicklungsmodus mit Auto-Neuladen
 ```
 
-Alle Daten liegen in `./data/sparbit.db`. Ordner mitnehmen = Umzug erledigt.
+Alle Daten liegen in `./data/`. Ordner mitnehmen = Umzug erledigt.
 
 ---
 
@@ -52,64 +66,108 @@ Alle Daten liegen in `./data/sparbit.db`. Ordner mitnehmen = Umzug erledigt.
 
 **1. Quellen prüfen und einschalten.** Unter *Quellen* bei jeder interessanten
 Quelle **„Jetzt testen"** drücken — der Test ruft den echten Endpoint auf und
-zeigt die ersten Treffer. Grün heißt einschalten, rot zeigt dir den Grund.
-Fang mit **mydealz**, **Reddit** und **Epic** an, die decken schon viel ab.
+zeigt die ersten Treffer. Grün heißt einschalten, rot nennt den Grund. Fang mit
+**mydealz**, **Reddit** und **Epic** an, die decken schon viel ab.
 
-> Wichtig: Kein Endpoint konnte beim Bauen des Projekts geprüft werden — die
-> Build-Umgebung kam nicht ins offene Internet. Alles startet als *ungeprüft*,
-> und alle URLs sind im UI änderbar. Details in
-> [ENDPOINTS.md](ENDPOINTS.md).
+Alles auf einmal prüfen:
+
+```bash
+cd backend && python -m tools.verify_endpoints
+```
 
 **2. Benachrichtigung einrichten.** Zwei Wege, beide gehen parallel:
 
 * **Desktop-Meldungen** — unter *Benachrichtigungen* einschalten, einmal
-  erlauben, fertig. Kein Bot, kein Token. Ideal, wenn SparBit ohnehin läuft.
-* **Telegram** — für unterwegs, siehe unten.
+  erlauben, fertig. Kein Bot, kein Token.
+* **Telegram** — für unterwegs, [siehe unten](#telegram-einrichten).
 
 **3. Erste Regel.** Unter *Regeln* eine **Vorlage** anklicken („Alles Gratis",
-„Gratis-Spiele", „Preisfehler" …), anpassen, speichern. Rechts siehst du beim
-Tippen, wie viele der letzten 500 Deals die Regel getroffen hätte — samt
-Beispielen und den Deals, die *knapp* daneben lagen. Damit tunst du Regeln
-ohne Rauschen, statt zu raten.
+„Preisfehler" …), anpassen, speichern. Rechts siehst du beim Tippen, wie viele
+der letzten 500 Deals die Regel getroffen hätte — samt Beispielen und den
+Deals, die *knapp* daneben lagen. Damit tunst du Regeln ohne Rauschen.
 
 ---
 
 ## Was SparBit kann
 
-### Quellen
+### Finden
 
-14 Quellen als Plugins, jede einzeln schaltbar mit eigenem Intervall:
+**14 Quellen als Plugins**, jede einzeln schaltbar mit eigenem Intervall:
 
 | Gruppe | Quellen |
 |---|---|
 | Deal-Communities | mydealz, Preisjäger.at, HotUKDeals, Dealabs |
 | Blogs | Sparhamster.at, Schnäppchenfuchs |
-| Reddit | GameDeals, FreeGameFindings, freebies, googleplaydeals, AppHookup, Schnaeppchen — Subreddits im UI pflegbar |
+| Reddit | GameDeals, FreeGameFindings, freebies, googleplaydeals, AppHookup, Schnaeppchen — im UI pflegbar |
 | Gaming | Epic Games Store, GOG, Steam, CheapShark, IsThereAnyDeal, GG.deals |
 | Eigene | beliebige RSS/Atom-Feeds (z. B. deine Geizhals-Wunschliste) |
 
 Fällt eine Quelle aus, laufen die anderen weiter. Nach fünf Fehlern in Folge
 pausiert ein Schutzschalter sie automatisch; im UI steht, warum.
 
-### Filter, die man versteht
+**Wunschliste** — Artikel, die SparBit *selbst* beobachtet, unabhängig davon,
+ob sie jemand als Deal postet. Du trägst Shop-URL und Zielpreis ein, SparBit
+fragt regelmäßig nach und meldet den Preissturz.
 
-* Keywords (ODER), Pflicht-Keywords (UND), Blacklist — mit `lego*` als Präfix
-  und `"nintendo switch"` als Phrase
-* Preisgrenze, Mindestrabatt, „nur 0 €", Mindest-Temperatur
-* Quellen-, Kategorie- und Händlerfilter
-* Priorität **SOFORT** (Push in Sekunden) oder **NORMAL** (stündliche
-  Zusammenfassung)
-* **Live-Vorschau** beim Bauen: Trefferzahl, Beispiele, „knapp verfehlt" und
-  eine Begründung je Deal, warum er getroffen oder gescheitert ist
+Der Preis kommt aus **strukturierten Daten** (JSON-LD, Open Graph, Microdata) —
+denselben, die Shops für Suchmaschinen ausliefern, und dem stabilen Teil einer
+Produktseite: CSS-Klassen ändern sich bei jedem Redesign, `"@type": "Product"`
+nicht. Liefert eine Seite davon nichts, sagt SparBit das klar, statt einen
+brüchigen Selektor zu raten.
 
-Preise werden robust aus deutschem Text gelesen — `12,99€ statt 89,90€`,
-`-95%`, `gratis`, `geschenkt`, `1.299,00 €`. Alles wird in **Euro umgerechnet**,
-damit „max. 20 €" auch bei USD- und GBP-Quellen richtig greift.
+**[Browser-Erweiterung](browser-extension/)** für Chrome, Edge, Brave und
+Firefox — setzt Artikel in einem Klick von jeder Shop-Seite auf die
+Wunschliste und zeigt direkt dort, wenn SparBit ihn woanders günstiger kennt.
 
-### Suche
+### Beurteilen
 
-Volltextsuche über SQLite-FTS5 — sie bleibt auch bei 50.000 Deals schnell und
-kann Dinge, die eine einfache Suche nicht kann:
+Der von der Quelle gemeldete Rabatt sagt wenig: Händler rechnen gegen eine UVP,
+die nie jemand bezahlt hat. SparBit urteilt aus dem **eigenen Preisverlauf**:
+
+| Urteil | Bedeutung |
+|---|---|
+| **Bestpreis** | so günstig war es noch nie beobachtet |
+| **sehr gut / gut** | im unteren Viertel des bisher Gesehenen |
+| **normal** | üblicher Preis |
+| **war günstiger** | nennt dir, wann es billiger war |
+| **UVP fragwürdig** | kam nie in die Nähe seiner angeblichen UVP |
+
+Bei zu wenig Verlauf sagt SparBit **„zu wenig Daten"** statt zu raten. Regeln
+können darauf filtern — „nur echte Bestpreise" ist ein Klick.
+
+**Preisvergleich über Quellen.** Derselbe Deal aus vier Communities kommt
+einmal an, aber was jede Quelle verlangt, wird einzeln gespeichert. Die
+Detailansicht zeigt daraus eine Tabelle, günstigster zuerst, jede Zeile mit
+eigenem Link. Fremdwährungen stehen mit ihrem Euro-Gegenwert daneben — sonst
+ließe sich `265,00 $` nicht gegen `249,00 €` vergleichen (dort gewinnt der
+Dollarpreis).
+
+**Preisverlauf und Preisalarme.** Jede Preisänderung wird aufgezeichnet; in der
+Detailansicht siehst du die Kurve mit Tiefst- und Höchstpreis. Ein Preisalarm
+löst genau einmal aus, nicht bei jedem Durchlauf.
+
+Produktvarianten bleiben getrennt: „Hades" und „Hades II", „iPhone 15" und
+„iPhone 16", „990 Pro" und „990 Evo" sind nicht dasselbe.
+
+### Filtern
+
+Regeln aus Keywords (ODER), Pflicht-Keywords (UND) und Blacklist, dazu
+Preisgrenze, Mindestrabatt, „nur 0 €", Mindest-Temperatur, Preisurteil sowie
+Quellen-, Kategorie- und Händlerfilter. Priorität **SOFORT** (Push in Sekunden)
+oder **NORMAL** (Sammelmeldung).
+
+Die **Live-Vorschau** beim Bauen zeigt Trefferzahl, Beispiele, „knapp verfehlt"
+und je Deal eine Begründung, warum er getroffen oder gescheitert ist.
+
+**Der Feed lernt mit.** Was du dir merkst, öffnest oder mit einem Alarm
+versiehst, wertet SparBit aus — **lokal, ohne externen Dienst**. Der Feed lässt
+sich nach *Für dich* sortieren, und jede Empfehlung sagt, warum sie dasteht
+(„passt zu dir: „lego", Händler amazon"). Aus demselben Verhalten schlägt
+SparBit fertige Regeln vor: *„16 von 16 gemerkten Deals passen zu ‚lego'"*.
+Solange zu wenig Signal da ist, hält es den Mund.
+
+**Suche** über SQLite-FTS5 — schnell auch bei 50.000 Deals, und mit Dingen, die
+eine einfache Suche nicht kann:
 
 | Eingabe | Bedeutung |
 |---|---|
@@ -118,130 +176,53 @@ kann Dinge, die eine einfache Suche nicht kann:
 | `ssd -gebraucht` | „gebraucht" ausschließen |
 | `kopfhör*` | Präfix, findet auch „Kopfhörern" |
 
-Fehlt FTS5 in deiner SQLite-Version, fällt die Suche automatisch auf die
-einfache Variante zurück.
+Preise werden robust aus deutschem Text gelesen — `12,99€ statt 89,90€`, `-95%`,
+`gratis`, `1.299,00 €` — und in **Euro umgerechnet**, damit „max. 20 €" auch bei
+USD- und GBP-Quellen richtig greift.
 
-### Preisurteil statt Rabattzahl
+### Melden
 
-Der von der Quelle gemeldete Rabatt sagt wenig: Händler rechnen gegen eine
-UVP, die nie jemand bezahlt hat. SparBit urteilt stattdessen aus dem **eigenen
-Preisverlauf**:
-
-| Urteil | Bedeutung |
-|---|---|
-| **Bestpreis** | so günstig war es noch nie beobachtet |
-| **sehr gut / gut** | im unteren Viertel des bisher Gesehenen |
-| **normal** | üblicher Preis |
-| **war günstiger** | nennt dir, wann es billiger war |
-| **UVP fragwürdig** | der Artikel kam nie in die Nähe seiner angeblichen UVP |
-
-Bei zu wenig Verlauf sagt SparBit **„zu wenig Daten"** statt zu raten. Regeln
-können auf das Urteil filtern — „nur echte Bestpreise" ist ein Klick.
-
-### Der Feed lernt, was dich interessiert
-
-Was du dir merkst, öffnest oder mit einem Preisalarm versiehst, wertet SparBit
-aus — **lokal, ohne externen Dienst**. Der Feed lässt sich dann nach *Für dich*
-sortieren, und jede Empfehlung sagt, warum sie dasteht („passt zu dir: „lego",
-Händler amazon"). Ein Naive-Bayes-Modell, bewusst kein neuronales Netz: bei
-einer Empfehlung ist *warum* die wichtigste Frage.
-
-Aus demselben Verhalten schlägt SparBit **fertige Regeln** vor: „16 von 16
-gemerkten Deals passen zu „lego" — als Regel anlegen?" Solange zu wenig Signal
-da ist, hält es den Mund.
-
-### Wunschliste: selbst beobachten
-
-Bisher fand SparBit nur, was jemand gepostet hat. Auf der **Wunschliste**
-trägst du einen Artikel mit seiner Shop-URL und einem Zielpreis ein — SparBit
-fragt ihn selbst regelmäßig ab und meldet sich beim Preissturz, auch wenn ihn
-niemand als Deal meldet.
-
-Der Preis kommt aus **strukturierten Daten** (JSON-LD, Open Graph, Microdata)
-— denselben, die Shops für Suchmaschinen ausliefern. Liefert eine Seite davon
-nichts, sagt SparBit das klar, statt einen brüchigen CSS-Selektor zu raten.
-
-Mit der **[Browser-Erweiterung](browser-extension/)** geht das in einem Klick
-von jeder Shop-Seite aus — und sie zeigt dir direkt dort, wenn SparBit den
-Artikel woanders günstiger kennt.
-
-### Preisvergleich über Quellen
-
-Derselbe Deal aus vier Communities kommt **einmal** an (URL-Hash plus
-Titelvergleich). Produktvarianten bleiben getrennt: „Hades" und „Hades II",
-„990 Pro" und „990 Evo" sind nicht dasselbe.
-
-Was jede Quelle verlangt, wird trotzdem einzeln gespeichert. Die
-Detailansicht zeigt daraus eine Tabelle — günstigster zuerst, jede Zeile mit
-eigenem Link. Fremdwährungen stehen mit ihrem Euro-Gegenwert daneben, sonst
-ließe sich `265,00 $` nicht gegen `249,00 €` vergleichen (in dem Beispiel
-gewinnt der Dollarpreis).
-
-### Benachrichtigungen
-
-* **Telegram** mit Bild, Preis, Direktlink und Knöpfen — *gemerkt* und *Quelle
-  6 h stumm* funktionieren wirklich
+* **Telegram** mit Bild, Preis, Direktlink und Knöpfen — *gemerkt* und
+  *Quelle 6 h stumm* funktionieren wirklich
 * **Desktop-Meldungen** im Browser
 * **E-Mail**, **Discord/Webhook**, **ntfy**
 * Ruhezeiten, die SOFORT-Regeln durchlassen
 * Global pausieren — im UI oder per `/pause` in Telegram
 
 **Telegram-Befehle:** `/status`, `/neueste`, `/gratis`, `/pause`, `/weiter`,
-`/hilfe`. Der Bot nutzt Long Polling und braucht deshalb **keinen offenen
-Port** — er funktioniert hinter jedem Heimrouter.
+`/hilfe`. Der Bot nutzt Long Polling und braucht **keinen offenen Port** — er
+funktioniert hinter jedem Heimrouter.
 
-### Preisverlauf und Preisalarme
+### Drumherum
 
-Jede Preisänderung wird aufgezeichnet. In der Detailansicht siehst du die Kurve,
-Tiefst- und Höchstpreis. Und du kannst einen **Preisalarm** setzen: „melde dich,
-wenn das unter 20 € fällt". Löst genau einmal aus, nicht bei jedem Durchlauf.
+**Statistiken** — Verlauf, Ausbeute je Quelle inklusive *Signalanteil* (wie viel
+Prozent der Funde eine Regel getroffen haben) und häufigste Händler. Damit
+siehst du, welche Quelle nur Rauschen liefert.
 
-### Statistiken
+**Bilder bleiben bei dir** — Deal-Bilder werden einmal geholt, verkleinert unter
+`./data/images` abgelegt und von SparBit ausgeliefert. Ohne das erführe jeder
+Händler bei jedem Öffnen des Feeds, welche Deals du dir ansiehst.
 
-Welche Quelle liefert Signal, welche nur Rauschen? Die Statistik-Seite zeigt
-Verlauf, Ausbeute je Quelle (inklusive **Signalanteil** — wie viel Prozent der
-Funde eine Regel getroffen haben) und die häufigsten Händler. Damit weißt du,
-welche Quelle du seltener abfragen oder abschalten solltest.
+**Bedienung** — hell/dunkel/wie im System, **Strg/Cmd + K** für den
+Schnellzugriff, `/` springt in die Suche, `g` gefolgt von
+`d`/`f`/`s`/`w`/`q`/`r` navigiert. Gespeicherte Suchen, CSV-Export,
+JSON-Backup und -Import. Als App installierbar (PWA), voll bedienbar auf dem
+Handy.
 
-### Bilder bleiben bei dir
-
-Deal-Bilder werden einmal geholt, verkleinert unter `./data/images` abgelegt
-und von SparBit selbst ausgeliefert. Ohne das erführe jeder Händler bei jedem
-Öffnen des Feeds, welche Deals du dir gerade ansiehst. Abschaltbar, und der
-Cache räumt sich mit den Deals zusammen auf.
-
-### Bedienung
-
-* Hell, dunkel oder wie im System
-* **Strg/Cmd + K** öffnet den Schnellzugriff
-* `/` springt in die Suche, `g` gefolgt von `d`/`f`/`s`/`w`/`q`/`r` navigiert
-* Gespeicherte Suchen im Feed
-* CSV-Export, JSON-Backup und **Backup-Import**
-* Als App installierbar (PWA), voll bedienbar auf dem Handy
-
-### Browser-Erweiterung
-
-Für Chrome, Edge, Brave und Firefox. Setzt Artikel von jeder Shop-Seite auf
-die Wunschliste und zeigt, ob SparBit sie günstiger kennt. Einrichtung in
-[`browser-extension/`](browser-extension/) — Schlüssel holst du in SparBit
-unter *Logs & System → Browser-Erweiterung*.
-
-### Auto-Claimer
-
-Epic, Prime Gaming und GOG holen ihre Gratis-Titel selbst — über
-[vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) in
-einem eigenen Container. Siehe [Mit Docker](#mit-docker).
+**Auto-Claimer** — Epic, Prime Gaming und GOG holen ihre Gratis-Titel selbst,
+über [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer)
+in einem eigenen Container. Einrichtung [unter Docker](#auto-claimer-einrichten).
 
 ---
 
-## Telegram einrichten (3 Minuten)
+## Telegram einrichten
 
 1. In Telegram **@BotFather** anschreiben, `/newbot` senden.
 2. Namen vergeben (der Benutzername muss auf `bot` enden). Du bekommst den
    **Token** — sieht aus wie `123456789:AAE...`.
 3. **@userinfobot** anschreiben, der nennt dir deine numerische **Chat-ID**.
 4. **Deinem eigenen Bot einmal `/start` senden.** Ohne das darf er dir nicht
-   schreiben — das ist der häufigste Stolperstein.
+   schreiben — der häufigste Stolperstein.
 5. Im UI unter *Benachrichtigungen* → **Telegram** → Token und Chat-ID
    eintragen → speichern → **Test senden**.
 
@@ -278,14 +259,7 @@ Danach <http://server-ip:8080>. Ohne Claimer:
 docker compose up -d --build backend frontend
 ```
 
-### Browser-Erweiterung
-
-Für Chrome, Edge, Brave und Firefox. Setzt Artikel von jeder Shop-Seite auf
-die Wunschliste und zeigt, ob SparBit sie günstiger kennt. Einrichtung in
-[`browser-extension/`](browser-extension/) — Schlüssel holst du in SparBit
-unter *Logs & System → Browser-Erweiterung*.
-
-### Auto-Claimer
+### Auto-Claimer einrichten
 
 Zugangsdaten in die `.env` (`EG_EMAIL`, `PG_EMAIL`, … siehe `.env.example`).
 Zeitplan über `CLAIMER_SCHEDULE`, Vorgabe täglich 4 Uhr.
@@ -303,8 +277,7 @@ Volume `claimer-data` und überlebt Neustarts. Manuell auslösen:
 
 Falls das Image Probleme macht, ist
 [claabs/epicgames-freegames-node](https://github.com/claabs/epicgames-freegames-node)
-der Fallback (nur Epic). Das Log-Parsing kommt mit beiden Formaten zurecht und
-zeigt im Zweifel das Rohlog.
+der Fallback (nur Epic). Das Log-Parsing kommt mit beiden Formaten zurecht.
 
 ### Hinter Caddy oder Traefik
 
@@ -329,14 +302,8 @@ automatisch mit `Secure`.
 
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
-
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-```
-
-Tests laufen ohne Netzwerk gegen gespeicherte Fixtures:
-
-```bash
-cd backend && pytest tests/ -q   # 244 Tests
+cd backend && pytest tests/ -q   # 244 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -389,18 +356,19 @@ Backend die gebaute Oberfläche gleich mit aus — ein Prozess, ein Port.
 
 * Passwort mit **argon2** gehasht, kein Standard-Passwort im Code
 * **Bremse gegen Durchprobieren:** ab 5 Fehlversuchen wachsende Wartezeit, ab
-  10 für 15 Minuten gesperrt. Die Zähler liegen in der Datenbank — ein
-  Neustart hebt die Sperre nicht auf.
+  10 für 15 Minuten gesperrt. Die Zähler liegen in der Datenbank — ein Neustart
+  hebt die Sperre nicht auf.
 * Session-Cookie signiert, `HttpOnly`, `SameSite=Lax`, `Secure` bei HTTPS
-* Deal-Bilder werden lokal zwischengespeichert, statt sie bei jedem Aufruf
-  vom Händler zu laden
-* Secrets in der Datenbank bzw. `.env`, nichts im Repository
-* Lokal lauscht SparBit nur auf `127.0.0.1` — erst `--host 0.0.0.0` macht es
-  im Netz sichtbar
+* Die Browser-Erweiterung nutzt ein eigenes Token, das sich einzeln
+  zurückziehen lässt
+* Deal-Bilder werden lokal zwischengespeichert statt bei jedem Aufruf vom
+  Händler geladen
+* Lokal lauscht SparBit nur auf `127.0.0.1` — erst `--host 0.0.0.0` macht es im
+  Netz sichtbar
 * **Der Backup-Export enthält API-Keys und Telegram-Token im Klartext.**
   Behandle die Datei wie ein Passwort.
 
-## Höfliches Crawling
+### Höfliches Crawling
 
 Fremde Server kosten fremdes Geld:
 
@@ -412,6 +380,8 @@ Fremde Server kosten fremdes Geld:
 
 Bitte dreh die Intervalle nicht ohne Grund runter. Eine Quelle, die dich
 sperrt, nützt dir nichts.
+
+---
 
 ## Problemlösung
 
@@ -425,11 +395,29 @@ sperrt, nützt dir nichts.
 | Telegram schweigt | Dem Bot einmal selbst `/start` senden. Dann „Test senden" im UI. |
 | Live-Ticker steht | Hinter einem Reverse-Proxy: Puffern für `/api/events` abschalten. |
 | „Zu viele Fehlversuche" | Die Anmeldebremse greift. Warte die angezeigte Zeit ab — der Knopf zählt herunter. |
-| Bilder fehlen | Unter *Logs & System → Bild-Cache* nachsehen. Nicht erreichbare Bilder werden einmal versucht und dann übersprungen. |
 | „zu wenig Daten" statt Urteil | SparBit braucht mindestens vier Preismessungen. Nach ein paar Tagen füllt sich das von selbst. |
 | „Für dich" sortiert nach Datum | Noch zu wenig gelernt. Merk dir ein Dutzend Deals, dann greift die Empfehlung. |
 | Wunschliste: „kein Preis gefunden" | Die Seite liefert keine strukturierten Daten. Oft hilft die Detailseite statt der Übersicht. |
-| Erweiterung verbindet nicht | Schlüssel abgelaufen oder zurückgezogen? Neuen anlegen. Läuft SparBit nicht auf localhost, muss die Adresse in `manifest.json` unter `host_permissions` stehen. |
+| Erweiterung verbindet nicht | Schlüssel zurückgezogen? Neuen anlegen. Läuft SparBit nicht auf localhost, muss die Adresse in `manifest.json` unter `host_permissions` stehen. |
+| Bilder fehlen | Unter *Logs & System → Bild-Cache* nachsehen. Nicht erreichbare Bilder werden einmal versucht und dann übersprungen. |
+
+---
+
+## Bekannte Lücken
+
+Ehrlich benannt statt verschwiegen:
+
+* **Kein Endpoint ist vorab verifiziert.** Siehe [ENDPOINTS.md](ENDPOINTS.md) —
+  der erste Schritt ist `python -m tools.verify_endpoints`.
+* **Der stündliche Digest ist keiner.** NORMAL-Regeln verschicken aufgestaute
+  Treffer weiterhin als Einzelnachrichten statt als eine Sammelmeldung.
+* **Der Claimer hat keinen Startknopf.** Die Claimer-Seite zeigt den Befehl zum
+  Abtippen, statt den Container selbst zu starten.
+* **Sechs Quellen fehlen bewusst** — itch.io, Indiegala, Fanatical, Humble,
+  Unreal/FAB und Kleinanzeigen hätten HTML-Scraping erfordert. Gründe und
+  Alternativen stehen in [ENDPOINTS.md](ENDPOINTS.md).
+
+---
 
 ## Lizenz
 
