@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import status as http_status  # 'status' ist hier eine Route
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..auth import (authenticate, clear_session, create_user, current_user,
                     issue_session, setup_done)
 from ..db import get_db
+from ..loginguard import (SANFT_AB, LoginGesperrt, client_ip, fehlversuch,
+                          pruefen, zuruecksetzen)
 from ..models import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -47,9 +50,38 @@ def setup(body: SetupBody, request: Request, response: Response,
 @router.post("/login")
 def login(body: Credentials, request: Request, response: Response,
           db: Session = Depends(get_db)) -> dict:
-    user = authenticate(db, body.username, body.password)
+    ip = client_ip(request)
+    try:
+        pruefen(db, ip)
+    except LoginGesperrt as gesperrt:
+        # 429 mit Retry-After: das UI kann daraus einen Countdown bauen.
+        raise HTTPException(
+            http_status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(f"Zu viele Fehlversuche. Bitte "
+                    f"{_dauer(gesperrt.sekunden)} warten."),
+            headers={"Retry-After": str(int(gesperrt.sekunden))},
+        ) from None
+
+    try:
+        user = authenticate(db, body.username, body.password)
+    except HTTPException:
+        versuche = fehlversuch(db, ip, body.username)
+        rest = SANFT_AB - versuche
+        hinweis = ("Benutzername oder Passwort falsch."
+                   + (f" Noch {rest} Versuche, dann wird gebremst."
+                      if 0 < rest <= 2 else ""))
+        raise HTTPException(http_status.HTTP_401_UNAUTHORIZED, hinweis) from None
+
+    zuruecksetzen(db, ip)
     issue_session(response, user, secure=request.url.scheme == "https")
     return {"ok": True, "username": user.username}
+
+
+def _dauer(sekunden: float) -> str:
+    if sekunden < 60:
+        return f"{int(sekunden)} Sekunden"
+    minuten = int(sekunden // 60)
+    return f"{minuten} Minute{'n' if minuten != 1 else ''}"
 
 
 @router.post("/logout")

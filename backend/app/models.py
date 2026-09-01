@@ -106,6 +106,8 @@ class Deal(Base):
     duplicate_of: Mapped[int | None] = mapped_column(ForeignKey("deals.id"), index=True)
     also_from: Mapped[list] = mapped_column(JSON, default=list)
     bookmarked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Dateiname im lokalen Bild-Cache, falls das Bild geholt werden konnte.
+    bild_lokal: Mapped[str | None] = mapped_column(String(128))
     # Preisalarm: melden, sobald der Preis unter diese Schwelle faellt.
     alarm_preis: Mapped[float | None] = mapped_column(Float)
     alarm_ausgeloest: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -228,3 +230,64 @@ class SavedSearch(Base):
     name: Mapped[str] = mapped_column(String(128))
     filter: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DealOffer(Base):
+    """Ein Angebot fuer denselben Artikel aus einer bestimmten Quelle.
+
+    Derselbe Deal kommt aus mydealz, Reddit und CheapShark - oft zu
+    verschiedenen Preisen und mit verschiedenen Links. Der Deal-Datensatz
+    haelt den besten Preis; hier steht, welche Quelle was verlangt.
+    """
+    __tablename__ = "deal_offers"
+    __table_args__ = (UniqueConstraint("deal_id", "quelle", name="uq_deal_quelle"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"),
+                                         index=True)
+    quelle: Mapped[str] = mapped_column(String(64))
+    url: Mapped[str] = mapped_column(Text)
+    preis: Mapped[float | None] = mapped_column(Float)
+    waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
+    preis_eur: Mapped[float | None] = mapped_column(Float)
+    originalpreis: Mapped[float | None] = mapped_column(Float)
+    rabatt_prozent: Mapped[float | None] = mapped_column(Float)
+    haendler: Mapped[str | None] = mapped_column(String(128))
+    ist_gratis: Mapped[bool] = mapped_column(Boolean, default=False)
+    zuerst_gesehen: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                     default=utcnow)
+    zuletzt_gesehen: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                      default=utcnow)
+
+
+class LoginAttempt(Base):
+    """Fehlversuche bei der Anmeldung, je Absender-IP.
+
+    Liegt in der Datenbank und nicht im Speicher: sonst haette ein Neustart
+    die Sperre aufgehoben, und genau darauf wuerde ein Angreifer setzen.
+    """
+    __tablename__ = "login_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ip: Mapped[str] = mapped_column(String(64), index=True)
+    benutzername: Mapped[str | None] = mapped_column(String(64))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                         index=True)
+
+
+class CachedImage(Base):
+    """Lokal abgelegtes Deal-Bild.
+
+    Ohne das laedt jede Deal-Karte direkt beim Haendler - der sieht dann bei
+    jedem Oeffnen des Feeds deine IP.
+    """
+    __tablename__ = "cached_images"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url_hash: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    quell_url: Mapped[str] = mapped_column(Text)
+    datei: Mapped[str | None] = mapped_column(String(128))
+    content_type: Mapped[str | None] = mapped_column(String(64))
+    bytes: Mapped[int] = mapped_column(Integer, default=0)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    fehler: Mapped[str | None] = mapped_column(Text)
+    geholt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                default=utcnow, index=True)

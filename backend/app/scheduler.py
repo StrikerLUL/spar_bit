@@ -15,9 +15,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, select
 
 from .config import settings
-from .db import SessionLocal, session_scope
+from .db import SessionLocal, get_setting, session_scope
 from .events import broker
 from .http import NotModified, PoliteClient, RateLimited
+from .images import aufraeumen as bilder_aufraeumen
+from .images import hole_fuer_deals
 from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
 from .pipeline import (check_price_alarms, dispatch, dispatch_alarms,
                        ingest, match_rules, send_digest)
@@ -138,6 +140,14 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
                 fresh = ingest(db, source_id, items)
                 new_count = len(fresh)
 
+                # Bilder einmal holen und lokal ablegen, damit der Feed sie
+                # nicht bei jedem Oeffnen beim Haendler nachlaedt.
+                if fresh and get_setting(db, "bilder_lokal", True):
+                    try:
+                        await hole_fuer_deals(db, fresh, get_http())
+                    except Exception as exc:
+                        log.debug("Bilder holen fehlgeschlagen: %s", exc)
+
                 # Preisalarme greifen auch, wenn der Deal nicht neu ist -
                 # gerade dann ist er ja im Preis gefallen.
                 try:
@@ -233,8 +243,12 @@ def cleanup_job() -> None:
             db.execute(delete(SourceRun).where(SourceRun.started_at < log_cut))
             db.execute(delete(NotificationLog).where(NotificationLog.created_at < log_cut))
             db.execute(delete(LogEntry).where(LogEntry.ts < log_cut))
+            from .loginguard import aufraeumen as login_aufraeumen
+            login_aufraeumen(db)
             if deals.rowcount:
                 log.info("Aufraeumen: %d alte Deals entfernt", deals.rowcount)
+            db.flush()
+            bilder_aufraeumen(db)
     except Exception as exc:
         log.error("Aufraeumen fehlgeschlagen: %s", exc)
 

@@ -70,6 +70,7 @@ app.include_router(system_routes.router)
 app.include_router(system_routes.sse_router)
 app.include_router(system_routes.claimer_router)
 app.include_router(extras_routes.router)
+app.include_router(extras_routes.bilder_router)
 
 
 @app.get("/api/health")

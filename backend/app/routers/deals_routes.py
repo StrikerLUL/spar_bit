@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import current_user
 from ..db import get_db
 from ..models import Deal, Match, Rule, SourceConfig, utcnow
+from ..search import fts_verfuegbar, match_bedingung
 
 router = APIRouter(prefix="/api", tags=["deals"],
                    dependencies=[Depends(current_user)])
@@ -25,6 +26,9 @@ def _deal_dict(d: Deal) -> dict:
         "veroeffentlicht_am": d.veroeffentlicht_am, "first_seen": d.first_seen,
         "last_seen": d.last_seen, "seen_count": d.seen_count,
         "also_from": d.also_from or [], "bookmarked": d.bookmarked,
+        "preis_eur": d.preis_eur, "bild_lokal": d.bild_lokal,
+        "beste_quelle": d.quelle,
+        "anzahl_angebote": 1 + len(d.also_from or []),
     }
 
 
@@ -44,10 +48,17 @@ def list_deals(
     conditions = []
 
     if q:
-        like = f"%{q.strip()}%"
-        conditions.append(or_(Deal.titel.ilike(like),
-                              Deal.beschreibung.ilike(like),
-                              Deal.haendler.ilike(like)))
+        # Volltextindex bevorzugen; er kennt Phrasen und Ausschluss und
+        # muss nicht die ganze Tabelle lesen. Faellt er aus (kein FTS5 in
+        # dieser SQLite-Version, kaputte Eingabe), greift LIKE.
+        treffer = match_bedingung(q) if fts_verfuegbar(db.get_bind()) else None
+        if treffer is not None:
+            conditions.append(Deal.id.in_(treffer))
+        else:
+            like = f"%{q.strip()}%"
+            conditions.append(or_(Deal.titel.ilike(like),
+                                  Deal.beschreibung.ilike(like),
+                                  Deal.haendler.ilike(like)))
     if quelle:
         conditions.append(Deal.quelle == quelle)
     if nur_gratis:

@@ -15,15 +15,41 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from ..auth import current_user
-from ..currency import DEFAULT_RATES, get_rates, set_rates
+from ..images import aufraeumen as bilder_aufraeumen
+from ..images import bild_verzeichnis, statistik as bild_statistik
+from ..currency import DEFAULT_RATES, get_rates, set_rates, to_eur
 from ..db import get_db, get_setting, set_setting
-from ..models import (Channel, Deal, Match, PriceHistory, Rule, SavedSearch,
-                      SourceConfig, utcnow)
+from ..models import (Channel, Deal, DealOffer, Match, PriceHistory, Rule,
+                      SavedSearch, SourceConfig, utcnow)
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["extras"],
                    dependencies=[Depends(current_user)])
+
+
+# --- Bilder ----------------------------------------------------------------
+# Eigener Router ohne Login-Pflicht: das <img>-Tag im Browser schickt zwar das
+# Cookie mit, aber ein 401 auf ein Bild waere nur ein kaputtes Bild ohne
+# erkennbaren Grund. Ausgeliefert werden ausschliesslich Dateien aus dem
+# eigenen Cache-Verzeichnis, benannt nach einem Hash - erraten kann man die
+# nicht, und Deal-Bilder sind ohnehin oeffentliche Produktfotos.
+
+bilder_router = APIRouter(prefix="/api/bilder", tags=["bilder"])
+
+
+@bilder_router.get("/{datei}")
+def bild_ausliefern(datei: str):
+    from fastapi.responses import FileResponse, Response
+
+    verzeichnis = bild_verzeichnis().resolve()
+    ziel = (verzeichnis / datei).resolve()
+    # Kein Ausbrechen aus dem Verzeichnis ueber ".." im Dateinamen.
+    if not ziel.is_relative_to(verzeichnis) or not ziel.is_file():
+        # 1x1-Platzhalter statt 404: eine kaputte Karte sieht schlimmer aus
+        # als ein leeres Bild, und das Frontend blendet es ohnehin aus.
+        return Response(status_code=404)
+    return FileResponse(ziel, headers={"Cache-Control": "public, max-age=604800"})
 
 
 # --- Statistiken -----------------------------------------------------------
@@ -129,17 +155,30 @@ def deal_detail(deal_id: int, db: Session = Depends(get_db)) -> dict:
     verlauf = db.scalars(
         select(PriceHistory).where(PriceHistory.deal_id == deal_id)
         .order_by(PriceHistory.ts.asc()).limit(200))
+    # Der Verlauf kann Waehrungen mischen (erst EUR von mydealz, dann USD von
+    # CheapShark). Fuer Kurve und Tiefst-/Hoechstwert zaehlt darum der
+    # Euro-Betrag - sonst entsteht beim Waehrungswechsel ein Sprung, den es
+    # nie gegeben hat, und die Beschriftung waere schlicht falsch.
     punkte = [{"ts": p.ts, "preis": p.preis, "waehrung": p.waehrung,
-               "quelle": p.quelle} for p in verlauf]
+               "preis_eur": to_eur(p.preis, p.waehrung), "quelle": p.quelle}
+              for p in verlauf]
 
     regeln = db.execute(
         select(Rule.name, Match.created_at).join(Match, Match.rule_id == Rule.id)
         .where(Match.deal_id == deal_id)).all()
 
-    preise = [p["preis"] for p in punkte]
+    angebote = sorted(
+        db.scalars(select(DealOffer).where(DealOffer.deal_id == deal_id)),
+        # Guenstigster zuerst; Angebote ohne erkannten Preis ans Ende.
+        key=lambda a: (a.preis_eur if a.preis_eur is not None
+                       else (a.preis if a.preis is not None else float("inf"))),
+    )
+
+    preise_eur = [p["preis_eur"] for p in punkte if p["preis_eur"] is not None]
     return {
         "id": deal.id, "titel": deal.titel, "beschreibung": deal.beschreibung,
-        "url": deal.url, "bild": deal.bild, "preis": deal.preis,
+        "url": deal.url, "bild": deal.bild, "bild_lokal": deal.bild_lokal,
+        "preis": deal.preis,
         "preis_eur": deal.preis_eur, "originalpreis": deal.originalpreis,
         "rabatt_prozent": deal.rabatt_prozent, "waehrung": deal.waehrung,
         "ist_gratis": deal.ist_gratis, "haendler": deal.haendler,
@@ -150,9 +189,19 @@ def deal_detail(deal_id: int, db: Session = Depends(get_db)) -> dict:
         "alarm_preis": deal.alarm_preis, "alarm_ausgeloest": deal.alarm_ausgeloest,
         "notiz": deal.notiz,
         "verlauf": punkte,
-        "tiefstpreis": min(preise) if preise else None,
-        "hoechstpreis": max(preise) if preise else None,
+        "tiefstpreis": min(preise_eur) if preise_eur else None,
+        "hoechstpreis": max(preise_eur) if preise_eur else None,
+        # Bestes Angebot: darauf bezieht sich der grosse Preis oben.
+        "beste_quelle": angebote[0].quelle if angebote else deal.quelle,
+        "beste_url": angebote[0].url if angebote else deal.url,
         "regeltreffer": [{"regel": r[0], "wann": r[1]} for r in regeln],
+        "angebote": [{
+            "quelle": a.quelle, "url": a.url, "preis": a.preis,
+            "waehrung": a.waehrung, "preis_eur": a.preis_eur,
+            "originalpreis": a.originalpreis, "rabatt_prozent": a.rabatt_prozent,
+            "haendler": a.haendler, "ist_gratis": a.ist_gratis,
+            "zuletzt_gesehen": a.zuletzt_gesehen,
+        } for a in angebote],
     }
 
 
@@ -307,6 +356,17 @@ def put_settings(body: GeneralSettings, db: Session = Depends(get_db)) -> dict:
     db.commit()
     set_rates(body.waehrungskurse)
     return get_settings(db)
+
+
+@router.get("/bilder-status")
+def bilder_status(db: Session = Depends(get_db)) -> dict:
+    return {**bild_statistik(db),
+            "aktiv": get_setting(db, "bilder_lokal", True)}
+
+
+@router.post("/bilder-aufraeumen")
+def bilder_putzen(db: Session = Depends(get_db)) -> dict:
+    return {"entfernt": bilder_aufraeumen(db)}
 
 
 @router.post("/sources/{source_id}/snooze")

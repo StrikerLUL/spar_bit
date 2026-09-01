@@ -1,6 +1,6 @@
 import { Sparkles } from "lucide-react";
 import * as React from "react";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { Button, Card, Input, Label } from "@/components/ui";
 
 /** Login und Setup-Assistent in einem - je nachdem, ob es schon einen
@@ -17,6 +17,14 @@ export function Login({
   const [confirm, setConfirm] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [sperreBis, setSperreBis] = React.useState(0);
+
+  // Countdown, damit man nicht ins Leere klickt, sondern sieht wie lange noch.
+  React.useEffect(() => {
+    if (sperreBis <= 0) return;
+    const timer = window.setInterval(() => setSperreBis((s) => Math.max(0, s - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [sperreBis]);
 
   const tooShort = setupMode && password.length > 0 && password.length < 10;
   const mismatch = setupMode && confirm.length > 0 && password !== confirm;
@@ -35,6 +43,9 @@ export function Login({
       onDone();
     } catch (err) {
       setError((err as Error).message);
+      if (err instanceof ApiError && err.status === 429 && err.retryAfter) {
+        setSperreBis(err.retryAfter);
+      }
     } finally {
       setBusy(false);
     }
@@ -112,8 +123,10 @@ export function Login({
           )}
 
           <Button type="submit" className="w-full" loading={busy}
-            disabled={tooShort || mismatch}>
-            {setupMode ? "Konto anlegen" : "Anmelden"}
+            disabled={tooShort || mismatch || sperreBis > 0}>
+            {sperreBis > 0
+              ? `Gesperrt — noch ${sperreBis} Sekunden`
+              : setupMode ? "Konto anlegen" : "Anmelden"}
           </Button>
         </form>
       </Card>

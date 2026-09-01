@@ -110,3 +110,18 @@ export const SOURCE_LABELS: Record<string, string> = {
 };
 
 export const sourceLabel = (id: string): string => SOURCE_LABELS[id] ?? id;
+
+
+/** Woher ein Deal-Bild geladen wird.
+ *
+ *  Lokal zwischengespeicherte Bilder gewinnen: sonst erfaehrt der Haendler
+ *  bei jedem Oeffnen des Feeds, dass du dir seine Deals ansiehst. Nur wenn
+ *  SparBit das Bild nicht holen konnte, wird auf das Original ausgewichen.
+ */
+export function bildQuelle(deal: {
+  bild_lokal?: string | null;
+  bild?: string | null;
+}): string | null {
+  if (deal.bild_lokal) return `/api/bilder/${deal.bild_lokal}`;
+  return deal.bild ?? null;
+}

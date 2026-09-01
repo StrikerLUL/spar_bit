@@ -45,6 +45,7 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("deals", "alarm_ausgeloest", "DATETIME"),
     ("deals", "notiz", "TEXT"),
     ("source_configs", "snooze_until", "DATETIME"),
+    ("deals", "bild_lokal", "VARCHAR(128)"),
 ]
 
 
@@ -64,6 +65,12 @@ def init_db() -> None:
     with engine.begin() as conn:
         _migrate(conn)
     Base.metadata.create_all(engine)
+
+    # Volltextindex nach create_all, damit die deals-Tabelle sicher existiert.
+    from .search import einrichten, fts_verfuegbar
+    if fts_verfuegbar(engine):
+        with engine.begin() as conn:
+            einrichten(conn)
     with SessionLocal() as db:
         if not get_setting(db, "secret_key"):
             set_setting(db, "secret_key", secrets.token_urlsafe(48))

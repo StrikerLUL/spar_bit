@@ -130,8 +130,12 @@ export function Feed() {
               data-suchfeld
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Titel, Beschreibung oder Händler durchsuchen…  (Taste /)"
+              placeholder={'Suchen…  "genaue phrase"  -ausschluss  präfix*   (Taste /)'}
               className="pl-9"
+              title={'Mehrere Wörter werden UND-verknüpft.\n'
+                + '"nintendo switch" sucht die genaue Wortfolge.\n'
+                + '-gebraucht schließt Treffer aus.\n'
+                + 'kopfhör* findet auch Kopfhörern.'}
             />
           </div>
           <Button

@@ -13,3 +13,6 @@ itsdangerous>=2.2.0,<3.0
 rapidfuzz>=3.14.6,<4.0
 python-multipart>=0.0.32
 anyio>=4.14.2,<5.0
+# Verkleinert zwischengespeicherte Deal-Bilder. Fehlt Pillow,
+# werden sie unveraendert abgelegt - SparBit laeuft trotzdem.
+Pillow>=11.0

@@ -1,8 +1,12 @@
-import { Bell, BellOff, Bookmark, ExternalLink, TrendingDown } from "lucide-react";
+import {
+  Bell, BellOff, Bookmark, Check, ExternalLink, TrendingDown,
+} from "lucide-react";
 import * as React from "react";
-import { api, type DealDetail as Detail } from "@/lib/api";
+import { api, type Angebot, type DealDetail as Detail } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
-import { cn, formatDateTime, formatPrice, sourceLabel, timeAgo } from "@/lib/utils";
+import {
+  bildQuelle, cn, formatDateTime, formatPrice, sourceLabel, timeAgo,
+} from "@/lib/utils";
 import { Sparkline } from "@/components/charts";
 import { Badge, Button, Dialog, Input, Label, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/Toast";
@@ -47,7 +51,11 @@ export function DealDetailDialog({
     onChanged?.();
   };
 
-  const preise = (data?.verlauf ?? []).map((p) => p.preis);
+  // Der Verlauf wird in Euro gezeichnet: sonst entsteht beim Wechsel der
+  // guenstigsten Quelle (EUR -> USD) ein Sprung, den es nie gegeben hat.
+  const preise = (data?.verlauf ?? [])
+    .map((p) => p.preis_eur ?? p.preis)
+    .filter((v): v is number => v != null);
   const gefallen = preise.length > 1 && preise[preise.length - 1] < preise[0];
 
   return (
@@ -58,9 +66,10 @@ export function DealDetailDialog({
               <>
                 <Button variant="ghost" onClick={onClose}>Schließen</Button>
                 {data && (
-                  <Button onClick={() => window.open(data.url, "_blank", "noopener,noreferrer")}>
+                  <Button onClick={() => window.open(
+                    data.beste_url || data.url, "_blank", "noopener,noreferrer")}>
                     <ExternalLink className="h-4 w-4" />
-                    Zum Deal
+                    {data.angebote.length > 1 ? "Zum besten Angebot" : "Zum Deal"}
                   </Button>
                 )}
               </>
@@ -70,8 +79,8 @@ export function DealDetailDialog({
       ) : (
         <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-4">
-            {data.bild && (
-              <img src={data.bild} alt="" loading="lazy"
+            {bildQuelle(data) && (
+              <img src={bildQuelle(data)!} alt="" loading="lazy"
                    className="max-h-52 w-full rounded-md object-cover"
                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
             )}
@@ -90,6 +99,17 @@ export function DealDetailDialog({
                 <Badge variant="warning">−{Math.round(data.rabatt_prozent)}%</Badge>
               )}
             </div>
+            {/* Der grosse Preis ist der beste ueber alle Quellen - ohne
+                diesen Hinweis wirkt er wie der Preis der Kopfzeilen-Quelle. */}
+            {data.angebote.length > 1 && (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                bester Preis bei{" "}
+                <a href={data.beste_url} target="_blank" rel="noopener noreferrer"
+                   className="text-primary hover:underline">
+                  {sourceLabel(data.beste_quelle)}
+                </a>
+              </p>
+            )}
             {data.waehrung !== "EUR" && data.preis_eur != null && (
               <p className="text-xs text-muted-foreground">
                 entspricht {formatPrice(data.preis_eur)} — Regeln rechnen mit
@@ -102,10 +122,6 @@ export function DealDetailDialog({
               </p>
             )}
             <div className="flex flex-wrap gap-1.5">
-              <Badge variant="outline">{sourceLabel(data.quelle)}</Badge>
-              {data.also_from.map((q) => (
-                <Badge key={q} variant="secondary">auch: {sourceLabel(q)}</Badge>
-              ))}
               {(data.tags ?? []).slice(0, 6).map((t) => (
                 <Badge key={t} variant="outline">{t}</Badge>
               ))}
@@ -118,6 +134,8 @@ export function DealDetailDialog({
           </div>
 
           <div className="space-y-5">
+            <Angebote angebote={data.angebote} />
+
             <section className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">Preisverlauf</h3>
@@ -132,9 +150,9 @@ export function DealDetailDialog({
               {preise.length > 1 && (
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Tiefst: <span className="tabular text-foreground">
-                    {formatPrice(data.tiefstpreis, data.waehrung)}</span></span>
+                    {formatPrice(data.tiefstpreis, "EUR")}</span></span>
                   <span>Höchst: <span className="tabular text-foreground">
-                    {formatPrice(data.hoechstpreis, data.waehrung)}</span></span>
+                    {formatPrice(data.hoechstpreis, "EUR")}</span></span>
                   <span>{preise.length} Messungen</span>
                 </div>
               )}
@@ -200,3 +218,77 @@ const Zeile = ({ label, wert }: { label: string; wert: string }) => (
     <dd className="truncate text-right">{wert}</dd>
   </div>
 );
+
+
+/** Preisvergleich: dieselbe Sache, verschiedene Quellen, verschiedene Preise.
+ *  Sortiert nach dem Euro-Betrag, damit USD-Angebote fair einsortiert sind. */
+function Angebote({ angebote }: { angebote: Angebot[] }) {
+  if (angebote.length <= 1) return null;
+
+  const guenstigster = angebote[0];   // Backend liefert bereits sortiert
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">
+        Preisvergleich{" "}
+        <span className="font-normal text-muted-foreground">
+          ({angebote.length} Quellen)
+        </span>
+      </h3>
+      <div className="overflow-hidden rounded-md border border-border">
+        <table className="w-full text-xs">
+          <tbody className="divide-y divide-border">
+            {angebote.map((angebot) => {
+              const bester = angebot === guenstigster;
+              return (
+                <tr key={angebot.quelle}
+                    className={cn(bester && "bg-primary/5")}>
+                  <td className="px-2.5 py-2">
+                    <div className="flex items-center gap-1.5">
+                      {bester && <Check className="h-3 w-3 shrink-0 text-primary" />}
+                      <span className={cn("truncate", bester && "font-medium")}>
+                        {sourceLabel(angebot.quelle)}
+                      </span>
+                    </div>
+                    {angebot.haendler && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {angebot.haendler}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2.5 py-2 text-right">
+                    <span className={cn("tabular font-medium",
+                                        bester && "text-primary")}>
+                      {angebot.ist_gratis
+                        ? "gratis"
+                        : formatPrice(angebot.preis, angebot.waehrung)}
+                    </span>
+                    {/* Fremdwaehrung: den Euro-Wert dazuschreiben, sonst kann
+                        man die Zeilen nicht vergleichen. */}
+                    {angebot.waehrung !== "EUR" && angebot.preis_eur != null && (
+                      <span className="block text-[10px] text-muted-foreground">
+                        ≈ {formatPrice(angebot.preis_eur)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="w-8 px-1.5 py-2 text-right">
+                    <a href={angebot.url} target="_blank" rel="noopener noreferrer"
+                       title={`Bei ${sourceLabel(angebot.quelle)} öffnen`}
+                       className="inline-flex text-muted-foreground hover:text-primary">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {guenstigster.waehrung !== "EUR" && (
+        <p className="text-[11px] text-muted-foreground">
+          Vergleich rechnet in Euro — Kurse unter Benachrichtigungen anpassbar.
+        </p>
+      )}
+    </section>
+  );
+}

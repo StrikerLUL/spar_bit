@@ -1,6 +1,6 @@
 import { Bookmark, ExternalLink, Flame, LineChart, Store } from "lucide-react";
 import type { Deal } from "@/lib/api";
-import { cn, formatPrice, sourceLabel, timeAgo } from "@/lib/utils";
+import { bildQuelle, cn, formatPrice, sourceLabel, timeAgo } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui";
 
 export function DealCard({
@@ -16,9 +16,9 @@ export function DealCard({
   return (
     <Card hover className="group flex flex-col overflow-hidden">
       <div className="relative aspect-[16/9] overflow-hidden bg-muted/40">
-        {deal.bild ? (
+        {bildQuelle(deal) ? (
           <img
-            src={deal.bild}
+            src={bildQuelle(deal)!}
             alt=""
             loading="lazy"
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
@@ -106,9 +106,15 @@ export function DealCard({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <Badge variant="outline">{sourceLabel(deal.quelle)}</Badge>
             {deal.also_from.length > 0 && (
-              <span title={`Auch gemeldet von: ${deal.also_from.join(", ")}`}>
-                +{deal.also_from.length}
-              </span>
+              <button
+                type="button"
+                onClick={() => onOpen?.(deal.id)}
+                title={`${deal.anzahl_angebote} Angebote — auch bei ${
+                  deal.also_from.map(sourceLabel).join(", ")}`}
+                className="text-primary transition-colors hover:underline"
+              >
+                {deal.anzahl_angebote} Angebote
+              </button>
             )}
             {deal.haendler && <span className="truncate">{deal.haendler}</span>}
             <span className="ml-auto shrink-0">{timeAgo(deal.first_seen)}</span>

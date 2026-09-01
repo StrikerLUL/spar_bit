@@ -106,9 +106,32 @@ Preise werden robust aus deutschem Text gelesen — `12,99€ statt 89,90€`,
 `-95%`, `gratis`, `geschenkt`, `1.299,00 €`. Alles wird in **Euro umgerechnet**,
 damit „max. 20 €" auch bei USD- und GBP-Quellen richtig greift.
 
+### Suche
+
+Volltextsuche über SQLite-FTS5 — sie bleibt auch bei 50.000 Deals schnell und
+kann Dinge, die eine einfache Suche nicht kann:
+
+| Eingabe | Bedeutung |
+|---|---|
+| `lego technic` | beide Wörter |
+| `"nintendo switch"` | genau diese Wortfolge — trifft *nicht* „Nintendo 3DS und Switch Lite" |
+| `ssd -gebraucht` | „gebraucht" ausschließen |
+| `kopfhör*` | Präfix, findet auch „Kopfhörern" |
+
+Fehlt FTS5 in deiner SQLite-Version, fällt die Suche automatisch auf die
+einfache Variante zurück.
+
+### Preisvergleich über Quellen
+
 Derselbe Deal aus vier Communities kommt **einmal** an (URL-Hash plus
 Titelvergleich). Produktvarianten bleiben getrennt: „Hades" und „Hades II",
 „990 Pro" und „990 Evo" sind nicht dasselbe.
+
+Was jede Quelle verlangt, wird trotzdem einzeln gespeichert. Die
+Detailansicht zeigt daraus eine Tabelle — günstigster zuerst, jede Zeile mit
+eigenem Link. Fremdwährungen stehen mit ihrem Euro-Gegenwert daneben, sonst
+ließe sich `265,00 $` nicht gegen `249,00 €` vergleichen (in dem Beispiel
+gewinnt der Dollarpreis).
 
 ### Benachrichtigungen
 
@@ -135,6 +158,13 @@ Welche Quelle liefert Signal, welche nur Rauschen? Die Statistik-Seite zeigt
 Verlauf, Ausbeute je Quelle (inklusive **Signalanteil** — wie viel Prozent der
 Funde eine Regel getroffen haben) und die häufigsten Händler. Damit weißt du,
 welche Quelle du seltener abfragen oder abschalten solltest.
+
+### Bilder bleiben bei dir
+
+Deal-Bilder werden einmal geholt, verkleinert unter `./data/images` abgelegt
+und von SparBit selbst ausgeliefert. Ohne das erführe jeder Händler bei jedem
+Öffnen des Feeds, welche Deals du dir gerade ansiehst. Abschaltbar, und der
+Cache räumt sich mit den Deals zusammen auf.
 
 ### Bedienung
 
@@ -248,7 +278,7 @@ cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
 Tests laufen ohne Netzwerk gegen gespeicherte Fixtures:
 
 ```bash
-cd backend && pytest tests/ -q   # 113 Tests
+cd backend && pytest tests/ -q   # 168 Tests
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -297,7 +327,12 @@ Backend die gebaute Oberfläche gleich mit aus — ein Prozess, ein Port.
 ## Sicherheit
 
 * Passwort mit **argon2** gehasht, kein Standard-Passwort im Code
+* **Bremse gegen Durchprobieren:** ab 5 Fehlversuchen wachsende Wartezeit, ab
+  10 für 15 Minuten gesperrt. Die Zähler liegen in der Datenbank — ein
+  Neustart hebt die Sperre nicht auf.
 * Session-Cookie signiert, `HttpOnly`, `SameSite=Lax`, `Secure` bei HTTPS
+* Deal-Bilder werden lokal zwischengespeichert, statt sie bei jedem Aufruf
+  vom Händler zu laden
 * Secrets in der Datenbank bzw. `.env`, nichts im Repository
 * Lokal lauscht SparBit nur auf `127.0.0.1` — erst `--host 0.0.0.0` macht es
   im Netz sichtbar
@@ -328,6 +363,8 @@ sperrt, nützt dir nichts.
 | Quelle liefert 403 | Manche Seiten stehen hinter Cloudflare. „Jetzt testen" zeigt den Grund; siehe [ENDPOINTS.md](ENDPOINTS.md). |
 | Telegram schweigt | Dem Bot einmal selbst `/start` senden. Dann „Test senden" im UI. |
 | Live-Ticker steht | Hinter einem Reverse-Proxy: Puffern für `/api/events` abschalten. |
+| „Zu viele Fehlversuche" | Die Anmeldebremse greift. Warte die angezeigte Zeit ab — der Knopf zählt herunter. |
+| Bilder fehlen | Unter *Logs & System → Bild-Cache* nachsehen. Nicht erreichbare Bilder werden einmal versucht und dann übersprungen. |
 
 ## Lizenz
 

@@ -1,8 +1,8 @@
 import {
-  Download, HardDrive, Keyboard, RefreshCw, ScrollText, Upload,
+  Download, HardDrive, Image, Keyboard, RefreshCw, ScrollText, Trash2, Upload,
 } from "lucide-react";
 import * as React from "react";
-import { api, type LogLine, type SystemInfo } from "@/lib/api";
+import { api, type BilderStatus, type LogLine, type SystemInfo } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { useToast } from "@/components/Toast";
 import { cn, formatBytes, formatDuration, formatDateTime } from "@/lib/utils";
@@ -163,6 +163,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
             </CardContent>
           </Card>
 
+          <BilderCard />
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -259,5 +261,63 @@ function RestoreButton() {
         Backup einspielen
       </Button>
     </>
+  );
+}
+
+
+/** Bild-Cache: Zustand und Aufräumen. */
+function BilderCard() {
+  const toast = useToast();
+  const { data, loading, reload } = useAsync<BilderStatus>(
+    () => api.bilder.status(), []);
+  const [putzt, setPutzt] = React.useState(false);
+
+  if (loading || !data) return <Skeleton className="h-40" />;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Image className="h-4 w-4 text-primary" />
+          Bild-Cache
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Deal-Bilder werden einmal geholt und lokal ausgeliefert. Ohne das
+          erfährt jeder Händler bei jedem Öffnen des Feeds, welche Deals du
+          dir ansiehst.
+        </p>
+        <Row label="Gespeichert" value={`${data.dateien} Bilder`} />
+        <Row label="Belegt" value={formatBytes(data.bytes)} />
+        {data.fehlgeschlagen > 0 && (
+          <Row label="Nicht erreichbar" value={String(data.fehlgeschlagen)} />
+        )}
+        {!data.pillow && (
+          <p className="rounded-md bg-warning/10 px-2.5 py-2 text-xs text-warning">
+            Pillow fehlt — Bilder werden unverkleinert abgelegt und brauchen
+            mehr Platz.
+          </p>
+        )}
+        <Button
+          variant="outline" size="sm" className="w-full" loading={putzt}
+          onClick={async () => {
+            setPutzt(true);
+            try {
+              const r = await api.bilder.aufraeumen();
+              toast.push("success", `${r.entfernt} verwaiste Bilder entfernt`);
+              reload();
+            } catch (err) {
+              toast.push("error", "Aufräumen fehlgeschlagen", (err as Error).message);
+            } finally {
+              setPutzt(false);
+            }
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Verwaiste Bilder entfernen
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

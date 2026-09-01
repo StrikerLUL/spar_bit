@@ -12,8 +12,8 @@ from .db import get_setting
 from .dedupe import canonical_url, normalize_title, titles_match, url_hash
 from .events import broker
 from .filters import RuleSpec, evaluate
-from .models import (Channel, Deal, Match, NotificationLog, PriceHistory,
-                     Rule, SourceConfig, utcnow)
+from .models import (Channel, Deal, DealOffer, Match, NotificationLog,
+                     PriceHistory, Rule, SourceConfig, utcnow)
 from .notify import Notification, get_channel
 from .sources.base import DealItem
 
@@ -67,6 +67,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
     if existing:
         existing.last_seen = utcnow()
         existing.seen_count += 1
+        _merke_angebot(db, existing, item, source_id)
         _apply_price(db, existing, item, source_id)
         if source_id not in (existing.also_from or []) and source_id != existing.quelle:
             existing.also_from = list(existing.also_from or []) + [source_id]
@@ -82,6 +83,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
             cand.seen_count += 1
             if source_id not in (cand.also_from or []) and source_id != cand.quelle:
                 cand.also_from = list(cand.also_from or []) + [source_id]
+            _merke_angebot(db, cand, item, source_id)
             _apply_price(db, cand, item, source_id)
             log.debug("Duplikat: '%s' (%s) == '%s' (%s)",
                       item.titel[:60], source_id, cand.titel[:60], cand.quelle)
@@ -111,10 +113,48 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
     )
     db.add(deal)
     db.flush()
+    _merke_angebot(db, deal, item, source_id)
     if deal.preis is not None:
         db.add(PriceHistory(deal_id=deal.id, preis=deal.preis,
                             waehrung=deal.waehrung, quelle=source_id))
     return deal
+
+
+def _merke_angebot(db: Session, deal: Deal, item: DealItem, source_id: str) -> None:
+    """Was diese Quelle fuer diesen Artikel verlangt.
+
+    Der Deal-Datensatz haelt nur den besten Preis. Fuer den Vergleich
+    ("wo ist es wie teuer") braucht es das Angebot je Quelle - sonst weiss
+    man am Ende nur, dass es irgendwo guenstiger war.
+    """
+    # Schluessel ist die laufende Quelle, nicht item.quelle: also_from wird
+    # ebenfalls damit gefuehrt, und die beiden muessen zusammenpassen, sonst
+    # zeigt die Karte "3 Angebote" und die Detailansicht nur zwei.
+    quelle = source_id or item.quelle
+    angebot = db.scalar(select(DealOffer).where(DealOffer.deal_id == deal.id,
+                                                DealOffer.quelle == quelle))
+    preis_eur = to_eur(item.preis, item.waehrung)
+
+    if angebot is None:
+        db.add(DealOffer(
+            deal_id=deal.id, quelle=quelle, url=item.url,
+            preis=item.preis, waehrung=item.waehrung, preis_eur=preis_eur,
+            originalpreis=item.originalpreis, rabatt_prozent=item.rabatt_prozent,
+            haendler=(item.haendler or None) and item.haendler[:128],
+            ist_gratis=item.ist_gratis,
+        ))
+        return
+
+    angebot.zuletzt_gesehen = utcnow()
+    angebot.url = item.url
+    angebot.preis = item.preis
+    angebot.waehrung = item.waehrung
+    angebot.preis_eur = preis_eur
+    angebot.originalpreis = item.originalpreis
+    angebot.rabatt_prozent = item.rabatt_prozent
+    angebot.ist_gratis = item.ist_gratis
+    if item.haendler:
+        angebot.haendler = item.haendler[:128]
 
 
 def _apply_price(db: Session, deal: Deal, item: DealItem, source_id: str) -> None:

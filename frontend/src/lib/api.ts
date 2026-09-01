@@ -1,7 +1,12 @@
 /** Typisierter API-Client. Alle Aufrufe gehen mit Session-Cookie raus. */
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    /** Sekunden bis zum naechsten erlaubten Versuch (bei 429). */
+    public retryAfter?: number,
+  ) {
     super(message);
     this.name = "ApiError";
   }
@@ -26,7 +31,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* Antwort war kein JSON - Statuszeile reicht. */
     }
-    throw new ApiError(response.status, detail);
+    const retry = Number(response.headers.get("Retry-After"));
+    throw new ApiError(response.status, detail,
+                       Number.isFinite(retry) && retry > 0 ? retry : undefined);
   }
 
   if (response.status === 204) return undefined as T;
@@ -72,6 +79,24 @@ export interface Deal {
   seen_count: number;
   also_from: string[];
   bookmarked: boolean;
+  preis_eur: number | null;
+  /** Dateiname im lokalen Bild-Cache, falls das Bild geholt werden konnte. */
+  bild_lokal: string | null;
+  beste_quelle: string;
+  anzahl_angebote: number;
+}
+
+export interface Angebot {
+  quelle: string;
+  url: string;
+  preis: number | null;
+  waehrung: string;
+  preis_eur: number | null;
+  originalpreis: number | null;
+  rabatt_prozent: number | null;
+  haendler: string | null;
+  ist_gratis: boolean;
+  zuletzt_gesehen: string;
 }
 
 export interface OptionSpec {
@@ -238,6 +263,8 @@ export interface PricePoint {
   ts: string;
   preis: number;
   waehrung: string;
+  /** In Euro umgerechnet - der Verlauf kann Währungen mischen. */
+  preis_eur: number | null;
   quelle: string | null;
 }
 
@@ -250,6 +277,18 @@ export interface DealDetail extends Deal {
   tiefstpreis: number | null;
   hoechstpreis: number | null;
   regeltreffer: Array<{ regel: string; wann: string }>;
+  angebote: Angebot[];
+  beste_quelle: string;
+  beste_url: string;
+}
+
+export interface BilderStatus {
+  aktiv: boolean;
+  pillow: boolean;
+  dateien: number;
+  fehlgeschlagen: number;
+  bytes: number;
+  verzeichnis: string;
 }
 
 export interface SavedSearch {
@@ -411,6 +450,10 @@ export const api = {
     set: (body: { waehrungskurse: Record<string, number>;
                   benachrichtigungen_pausiert: boolean }) =>
       put<AppSettings>("/settings", body),
+  },
+  bilder: {
+    status: () => get<BilderStatus>("/bilder-status"),
+    aufraeumen: () => post<{ entfernt: number }>("/bilder-aufraeumen"),
   },
   snooze: (sourceId: string, stunden: number) =>
     post<{ id: string; snooze_until: string | null }>(
