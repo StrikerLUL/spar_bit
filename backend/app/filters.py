@@ -25,6 +25,7 @@ class RuleSpec:
     min_rabatt_prozent: float | None = None
     nur_gratis: bool = False
     min_temperatur: float | None = None
+    min_urteil: str | None = None
     sources: list[str] = field(default_factory=list)
     kategorien: list[str] = field(default_factory=list)
     haendler: list[str] = field(default_factory=list)
@@ -39,6 +40,7 @@ class RuleSpec:
             min_rabatt_prozent=rule.min_rabatt_prozent,
             nur_gratis=bool(rule.nur_gratis),
             min_temperatur=rule.min_temperatur,
+            min_urteil=getattr(rule, "min_urteil", None),
             sources=list(rule.sources or []),
             kategorien=list(rule.kategorien or []),
             haendler=list(rule.haendler or []),
@@ -168,6 +170,19 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
         else:
             reasons.append(f"Temperatur {temp:.0f}")
 
+    # --- Preisurteil ---
+    if rule.min_urteil:
+        from .verdict import LABEL, mindestens
+        urteil = getattr(deal, "urteil", None)
+        erlaubt = mindestens(rule.min_urteil)
+        if urteil is None:
+            failed.append("noch kein Preisurteil (zu wenig Verlauf)")
+        elif urteil not in erlaubt:
+            failed.append(f"Urteil '{LABEL.get(urteil, urteil)}' "
+                          f"schlechter als '{LABEL.get(rule.min_urteil)}'")
+        else:
+            reasons.append(f"Urteil: {LABEL.get(urteil, urteil)}")
+
     # --- Kategorie / Haendler ---
     if rule.kategorien:
         kat = (getattr(deal, "kategorie", "") or "").lower()
@@ -188,8 +203,8 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
     # Eine Regel ohne jede Bedingung soll nicht alles durchwinken.
     if not any([rule.keywords, rule.required_keywords, rule.nur_gratis,
                 rule.max_preis is not None, rule.min_rabatt_prozent is not None,
-                rule.min_temperatur is not None, rule.sources, rule.kategorien,
-                rule.haendler]):
+                rule.min_temperatur is not None, rule.min_urteil, rule.sources,
+                rule.kategorien, rule.haendler]):
         return MatchResult(False, [], ["Regel hat keine Bedingungen"])
 
     return MatchResult(not failed, reasons, failed)

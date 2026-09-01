@@ -1,10 +1,10 @@
 import {
-  Bookmark, Boxes, Download, Search, SlidersHorizontal, Star, Trash2, X,
+  Bookmark, Boxes, Download, Search, SlidersHorizontal, Sparkles, Star, Trash2, X,
 } from "lucide-react";
 import * as React from "react";
 import { api, type Deal, type SavedSearch, type Source } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
-import { sourceLabel } from "@/lib/utils";
+import { cn, sourceLabel } from "@/lib/utils";
 import {
   Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton, Switch,
 } from "@/components/ui";
@@ -24,6 +24,8 @@ export function Feed() {
   const [nurGemerkt, setNurGemerkt] = React.useState(false);
   const [minRabatt, setMinRabatt] = React.useState("");
   const [maxPreis, setMaxPreis] = React.useState("");
+  const [urteil, setUrteil] = React.useState("");
+  const [sortierung, setSortierung] = React.useState("neu");
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [offset, setOffset] = React.useState(0);
   const [items, setItems] = React.useState<Deal[]>([]);
@@ -47,8 +49,11 @@ export function Feed() {
       bookmarked: nurGemerkt,
       min_rabatt: minRabatt ? Number(minRabatt) : undefined,
       max_preis: maxPreis ? Number(maxPreis) : undefined,
+      urteil: urteil || undefined,
+      sortierung,
     }),
-    [debounced, quelle, nurGratis, nurGemerkt, minRabatt, maxPreis],
+    [debounced, quelle, nurGratis, nurGemerkt, minRabatt, maxPreis, urteil,
+     sortierung],
   );
 
   // Filterwechsel setzt die Paginierung zurueck.
@@ -68,11 +73,14 @@ export function Feed() {
   }, [data, offset]);
 
   const activeFilters =
-    [quelle, nurGratis, nurGemerkt, minRabatt, maxPreis].filter(Boolean).length;
+    [quelle, nurGratis, nurGemerkt, minRabatt, maxPreis, urteil].filter(Boolean).length;
 
   const bookmark = async (id: number) => {
     try {
       const result = await api.deals.bookmark(id);
+      // Merken ist das staerkste Signal fuer den lernenden Feed.
+      void api.lernen.notiere(id, result.bookmarked ? "gemerkt" : "verworfen")
+        .catch(() => undefined);
       setItems((current) =>
         current.map((d) => (d.id === id ? { ...d, bookmarked: result.bookmarked } : d)),
       );
@@ -87,6 +95,7 @@ export function Feed() {
     setNurGemerkt(false);
     setMinRabatt("");
     setMaxPreis("");
+    setUrteil("");
   };
 
   const sucheSpeichern = async () => {
@@ -148,6 +157,24 @@ export function Feed() {
               <Badge variant="secondary" className="ml-1">{activeFilters}</Badge>
             )}
           </Button>
+          <div className="flex gap-1 rounded-md bg-muted/40 p-1 text-xs">
+            {([["neu", "Neueste"], ["fuer_mich", "Für dich"]] as const).map(
+              ([wert, label]) => (
+                <button
+                  key={wert}
+                  type="button"
+                  onClick={() => setSortierung(wert)}
+                  className={cn(
+                    "rounded px-2.5 py-1.5 font-medium transition-colors",
+                    sortierung === wert
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+          </div>
           <Button variant="ghost" size="icon" title="Als CSV herunterladen"
                   onClick={() => window.open(
                     api.csvUrl({ nur_gratis: nurGratis, nur_gemerkt: nurGemerkt }),
@@ -196,6 +223,15 @@ export function Feed() {
                     {source.display_name}
                   </option>
                 ))}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Preisurteil</Label>
+              <Select value={urteil} onChange={(e) => setUrteil(e.target.value)}>
+                <option value="">egal</option>
+                <option value="bestpreis">nur Bestpreise</option>
+                <option value="sehr_gut">sehr gut oder besser</option>
+                <option value="gut">gut oder besser</option>
               </Select>
             </div>
             <div className="space-y-1.5">
@@ -265,13 +301,28 @@ export function Feed() {
         </Card>
       ) : (
         <>
+          {sortierung === "fuer_mich" && data?.hinweis && (
+            <Card className="mb-4 border-warning/30 bg-warning/5 p-3">
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                <Sparkles className="mr-1 inline h-3.5 w-3.5 text-warning" />
+                {data.hinweis}
+              </p>
+            </Card>
+          )}
           <p className="mb-4 text-sm text-muted-foreground">
             {data?.total ?? 0} Treffer
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {items.map((deal) => (
-              <DealCard key={deal.id} deal={deal} onBookmark={bookmark}
-                        onOpen={setDetailId} />
+              <DealCard
+                key={deal.id}
+                deal={deal}
+                onBookmark={bookmark}
+                onOpen={(id) => {
+                  setDetailId(id);
+                  void api.lernen.notiere(id, "geoeffnet").catch(() => undefined);
+                }}
+              />
             ))}
           </div>
           {data && items.length < data.total && (

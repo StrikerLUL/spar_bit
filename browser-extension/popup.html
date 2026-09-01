@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>SparBit</title>
+</head>
+<body>
+  <header>
+    <span class="marke">SparBit</span>
+    <button id="zahnrad" class="stumm" title="Einstellungen" aria-label="Einstellungen">⚙</button>
+  </header>
+
+  <!-- Einrichtung: erscheint, solange kein Schlüssel hinterlegt ist -->
+  <section id="einrichtung" hidden>
+    <p class="hinweis">
+      Einmalig einrichten. Den Schlüssel legst du in SparBit unter
+      <strong>Logs &amp; System → Browser-Erweiterung</strong> an.
+    </p>
+    <label>Adresse
+      <input id="adresse" type="url" placeholder="http://localhost:8000" />
+    </label>
+    <label>Zugangsschlüssel
+      <input id="token" type="password" placeholder="sparbit_…" />
+    </label>
+    <button id="verbinden" class="haupt">Verbinden</button>
+    <p id="einrichtung-status" class="status"></p>
+  </section>
+
+  <!-- Normalbetrieb -->
+  <section id="inhalt" hidden>
+    <div id="produkt" class="produkt">
+      <img id="bild" alt="" hidden />
+      <div class="text">
+        <p id="titel" class="titel">…</p>
+        <p id="preis" class="preis"></p>
+        <p id="verfahren" class="klein"></p>
+      </div>
+    </div>
+
+    <div id="bekannt" class="karte" hidden></div>
+
+    <label class="ziel">Zielpreis (optional)
+      <input id="ziel" type="number" step="0.01" min="0" placeholder="z. B. 199,00" />
+    </label>
+
+    <button id="beobachten" class="haupt">Auf die Wunschliste</button>
+    <p id="status" class="status"></p>
+    <a id="oeffnen" href="#" target="_blank" class="klein link">SparBit öffnen</a>
+  </section>
+</body>
+<script type="module" src="popup.js"></script>
+</html>

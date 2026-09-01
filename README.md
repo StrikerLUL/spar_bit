@@ -121,6 +121,50 @@ kann Dinge, die eine einfache Suche nicht kann:
 Fehlt FTS5 in deiner SQLite-Version, fällt die Suche automatisch auf die
 einfache Variante zurück.
 
+### Preisurteil statt Rabattzahl
+
+Der von der Quelle gemeldete Rabatt sagt wenig: Händler rechnen gegen eine
+UVP, die nie jemand bezahlt hat. SparBit urteilt stattdessen aus dem **eigenen
+Preisverlauf**:
+
+| Urteil | Bedeutung |
+|---|---|
+| **Bestpreis** | so günstig war es noch nie beobachtet |
+| **sehr gut / gut** | im unteren Viertel des bisher Gesehenen |
+| **normal** | üblicher Preis |
+| **war günstiger** | nennt dir, wann es billiger war |
+| **UVP fragwürdig** | der Artikel kam nie in die Nähe seiner angeblichen UVP |
+
+Bei zu wenig Verlauf sagt SparBit **„zu wenig Daten"** statt zu raten. Regeln
+können auf das Urteil filtern — „nur echte Bestpreise" ist ein Klick.
+
+### Der Feed lernt, was dich interessiert
+
+Was du dir merkst, öffnest oder mit einem Preisalarm versiehst, wertet SparBit
+aus — **lokal, ohne externen Dienst**. Der Feed lässt sich dann nach *Für dich*
+sortieren, und jede Empfehlung sagt, warum sie dasteht („passt zu dir: „lego",
+Händler amazon"). Ein Naive-Bayes-Modell, bewusst kein neuronales Netz: bei
+einer Empfehlung ist *warum* die wichtigste Frage.
+
+Aus demselben Verhalten schlägt SparBit **fertige Regeln** vor: „16 von 16
+gemerkten Deals passen zu „lego" — als Regel anlegen?" Solange zu wenig Signal
+da ist, hält es den Mund.
+
+### Wunschliste: selbst beobachten
+
+Bisher fand SparBit nur, was jemand gepostet hat. Auf der **Wunschliste**
+trägst du einen Artikel mit seiner Shop-URL und einem Zielpreis ein — SparBit
+fragt ihn selbst regelmäßig ab und meldet sich beim Preissturz, auch wenn ihn
+niemand als Deal meldet.
+
+Der Preis kommt aus **strukturierten Daten** (JSON-LD, Open Graph, Microdata)
+— denselben, die Shops für Suchmaschinen ausliefern. Liefert eine Seite davon
+nichts, sagt SparBit das klar, statt einen brüchigen CSS-Selektor zu raten.
+
+Mit der **[Browser-Erweiterung](browser-extension/)** geht das in einem Klick
+von jeder Shop-Seite aus — und sie zeigt dir direkt dort, wenn SparBit den
+Artikel woanders günstiger kennt.
+
 ### Preisvergleich über Quellen
 
 Derselbe Deal aus vier Communities kommt **einmal** an (URL-Hash plus
@@ -170,10 +214,17 @@ Cache räumt sich mit den Deals zusammen auf.
 
 * Hell, dunkel oder wie im System
 * **Strg/Cmd + K** öffnet den Schnellzugriff
-* `/` springt in die Suche, `g` gefolgt von `d`/`f`/`s`/`q`/`r` navigiert
+* `/` springt in die Suche, `g` gefolgt von `d`/`f`/`s`/`w`/`q`/`r` navigiert
 * Gespeicherte Suchen im Feed
 * CSV-Export, JSON-Backup und **Backup-Import**
 * Als App installierbar (PWA), voll bedienbar auf dem Handy
+
+### Browser-Erweiterung
+
+Für Chrome, Edge, Brave und Firefox. Setzt Artikel von jeder Shop-Seite auf
+die Wunschliste und zeigt, ob SparBit sie günstiger kennt. Einrichtung in
+[`browser-extension/`](browser-extension/) — Schlüssel holst du in SparBit
+unter *Logs & System → Browser-Erweiterung*.
 
 ### Auto-Claimer
 
@@ -227,6 +278,13 @@ Danach <http://server-ip:8080>. Ohne Claimer:
 docker compose up -d --build backend frontend
 ```
 
+### Browser-Erweiterung
+
+Für Chrome, Edge, Brave und Firefox. Setzt Artikel von jeder Shop-Seite auf
+die Wunschliste und zeigt, ob SparBit sie günstiger kennt. Einrichtung in
+[`browser-extension/`](browser-extension/) — Schlüssel holst du in SparBit
+unter *Logs & System → Browser-Erweiterung*.
+
 ### Auto-Claimer
 
 Zugangsdaten in die `.env` (`EG_EMAIL`, `PG_EMAIL`, … siehe `.env.example`).
@@ -278,7 +336,7 @@ cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
 Tests laufen ohne Netzwerk gegen gespeicherte Fixtures:
 
 ```bash
-cd backend && pytest tests/ -q   # 168 Tests
+cd backend && pytest tests/ -q   # 244 Tests
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -309,13 +367,16 @@ automatisch im UI — mit Optionsfeldern, Intervall-Regler und Testknopf.
 ### Aufbau
 
 ```
-Quellen (Plugins) ─► Dedupe ─► SQLite (WAL) ─► Regeln ─► Kanäle
-  isoliert,          URL-Hash    Deals,         Keywords,   Telegram
-  Schutzschalter   + Fuzzy-Titel Historie,      Preis EUR,  Desktop
-  je Quelle                      Regeln,        Rabatt,     E-Mail
-                                 Treffer        Temperatur  Discord, ntfy
-       │                              │                          │
-       └──── APScheduler ─────────────┴──── SSE ──► Web-UI ◄──────┘
+Quellen (Plugins) ─┐
+Wunschliste ───────┼─► Dedupe ─► SQLite (WAL) ─► Regeln ─► Kanäle
+Erweiterung ───────┘   URL-Hash    Deals,         Keywords,   Telegram
+  isoliert,          + Zahlen-     Historie,      Preis EUR,  Desktop
+  Schutzschalter     + Titel-      Angebote,      Rabatt,     E-Mail
+  je Quelle            vergleich   Urteile        Urteil      Discord, ntfy
+       │                   │            │             │           │
+       │              Preisurteil   Lernmodell        │           │
+       │              (Verlauf)     (lokal)           │           │
+       └──── APScheduler ───────────┴──── SSE ──► Web-UI ◄────────┘
 ```
 
 Backend: Python 3.11+, FastAPI, SQLAlchemy 2, SQLite (WAL), APScheduler, httpx.
@@ -365,6 +426,10 @@ sperrt, nützt dir nichts.
 | Live-Ticker steht | Hinter einem Reverse-Proxy: Puffern für `/api/events` abschalten. |
 | „Zu viele Fehlversuche" | Die Anmeldebremse greift. Warte die angezeigte Zeit ab — der Knopf zählt herunter. |
 | Bilder fehlen | Unter *Logs & System → Bild-Cache* nachsehen. Nicht erreichbare Bilder werden einmal versucht und dann übersprungen. |
+| „zu wenig Daten" statt Urteil | SparBit braucht mindestens vier Preismessungen. Nach ein paar Tagen füllt sich das von selbst. |
+| „Für dich" sortiert nach Datum | Noch zu wenig gelernt. Merk dir ein Dutzend Deals, dann greift die Empfehlung. |
+| Wunschliste: „kein Preis gefunden" | Die Seite liefert keine strukturierten Daten. Oft hilft die Detailseite statt der Übersicht. |
+| Erweiterung verbindet nicht | Schlüssel abgelaufen oder zurückgezogen? Neuen anlegen. Läuft SparBit nicht auf localhost, muss die Adresse in `manifest.json` unter `host_permissions` stehen. |
 
 ## Lizenz
 

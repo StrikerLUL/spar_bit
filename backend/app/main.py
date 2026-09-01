@@ -17,7 +17,8 @@ from .db import get_setting, init_db, session_scope
 from .events import broker
 from .logging_setup import setup_logging
 from .routers import (auth_routes, deals_routes, extras_routes, notify_routes,
-                      rules_routes, sources_routes, system_routes)
+                      rules_routes, sources_routes, system_routes,
+                      watch_routes)
 
 setup_logging()
 log = logging.getLogger("sparbit")
@@ -71,6 +72,8 @@ app.include_router(system_routes.sse_router)
 app.include_router(system_routes.claimer_router)
 app.include_router(extras_routes.router)
 app.include_router(extras_routes.bilder_router)
+app.include_router(watch_routes.router)
+app.include_router(watch_routes.extern_router)
 
 
 @app.get("/api/health")

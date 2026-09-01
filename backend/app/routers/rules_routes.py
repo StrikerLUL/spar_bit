@@ -25,6 +25,7 @@ class RuleBody(BaseModel):
     min_rabatt_prozent: float | None = None
     nur_gratis: bool = False
     min_temperatur: float | None = None
+    min_urteil: str | None = None
     sources: list[str] = []
     kategorien: list[str] = []
     haendler: list[str] = []
@@ -37,7 +38,8 @@ def _rule_dict(r: Rule) -> dict:
         "keywords": r.keywords or [], "required_keywords": r.required_keywords or [],
         "blacklist": r.blacklist or [], "max_preis": r.max_preis,
         "min_rabatt_prozent": r.min_rabatt_prozent, "nur_gratis": r.nur_gratis,
-        "min_temperatur": r.min_temperatur, "sources": r.sources or [],
+        "min_temperatur": r.min_temperatur, "min_urteil": r.min_urteil,
+        "sources": r.sources or [],
         "kategorien": r.kategorien or [], "haendler": r.haendler or [],
         "channels": r.channels or [], "created_at": r.created_at,
         "match_count": r.match_count, "last_match": r.last_match,
@@ -91,7 +93,8 @@ def preview_rule(body: RuleBody, sample: int = Query(500, le=2000),
         keywords=body.keywords, required_keywords=body.required_keywords,
         blacklist=body.blacklist, max_preis=body.max_preis,
         min_rabatt_prozent=body.min_rabatt_prozent, nur_gratis=body.nur_gratis,
-        min_temperatur=body.min_temperatur, sources=body.sources,
+        min_temperatur=body.min_temperatur, min_urteil=body.min_urteil,
+        sources=body.sources,
         kategorien=body.kategorien, haendler=body.haendler,
     )
     return preview(spec, deals)

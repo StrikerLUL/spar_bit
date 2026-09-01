@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "SparBit",
+  "version": "1.0.0",
+  "description": "Artikel von jeder Shop-Seite auf die SparBit-Wunschliste setzen und sehen, ob SparBit ihn günstiger kennt.",
+  "default_locale": "de",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SparBit",
+    "default_icon": { "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "icons": { "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "browser_specific_settings": {
+    "gecko": { "id": "sparbit@localhost", "strict_min_version": "115.0" }
+  }
+}

@@ -1,3 +1,5 @@
+import pytest
+
 from app.dedupe import canonical_url, normalize_title, titles_match, url_hash
 
 
@@ -52,3 +54,44 @@ def test_zusatzwoerter_stoeren_nicht():
     assert titles_match("Portal 2 gratis auf Steam", "[Steam] Portal 2 (Free to keep)")
     assert titles_match("LEGO Technic 42115 Lamborghini",
                         "LEGO Technic 42115 Lamborghini Sian")
+
+
+def test_lange_titel_mit_anderer_nummer_bleiben_getrennt():
+    """Bei langen, sonst gleichen Titeln lag der Aehnlichkeitswert frueher
+    ueber der Schwelle - zwei verschiedene Artikel fielen zusammen."""
+    assert not titles_match("Kaffeekapseln Vorratspack 12",
+                            "Kaffeekapseln Vorratspack 13")
+    assert not titles_match("LEGO Technic Bausatz 1", "LEGO Technic Bausatz 2")
+
+
+@pytest.mark.parametrize("a,b", [
+    ("iPhone 15", "iPhone 16"),
+    ("iPhone 15 Pro 256GB", "iPhone 16 Pro 256GB"),
+    ("Samsung Galaxy S24", "Samsung Galaxy S25"),
+    ("PlayStation 5 Slim", "PlayStation 4 Slim"),
+    ("Die Siedler 7", "Die Siedler 8"),
+])
+def test_nachfolger_sind_nicht_derselbe_artikel(a, b):
+    assert not titles_match(a, b)
+
+
+def test_schreibweise_der_gleichen_zahl_stoert_nicht():
+    """'2TB' und '2 TB' sind derselbe Artikel - die Zahl zaehlt, nicht wie
+    sie im Text klebt."""
+    assert titles_match("Samsung SSD 2TB", "Samsung SSD 2 TB")
+
+
+def test_beide_nennen_etwas_eigenes_heisst_verschieden():
+    """token_set_ratio wertet Teilmengen als Volltreffer - bei langem
+    gemeinsamem Text fielen dadurch verschiedene Artikel zusammen."""
+    assert not titles_match("Kaffeekapseln Lungo Vorratspack",
+                            "Kaffeekapseln Espresso Vorratspack")
+    assert not titles_match("LEGO Technic Bausatz", "LEGO City Bausatz")
+
+
+def test_einseitiger_zusatz_ist_nur_beiwerk():
+    """Nur eine Seite nennt etwas zusaetzlich - das ist Herkunft, kein
+    anderer Artikel."""
+    assert titles_match("Portal 2 gratis auf Steam", "[Steam] Portal 2")
+    assert titles_match("Sony WH-1000XM5 Kopfhörer",
+                        "Sony WH-1000XM5 Kopfhörer bei Amazon")

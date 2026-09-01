@@ -84,6 +84,70 @@ export interface Deal {
   bild_lokal: string | null;
   beste_quelle: string;
   anzahl_angebote: number;
+  urteil: string | null;
+  urteil_text: string | null;
+  /** Nur bei Sortierung "fuer_mich" gesetzt. */
+  passt_zu_mir?: number;
+  passt_weil?: string[];
+}
+
+export interface WatchItem {
+  id: number;
+  name: string;
+  url: string;
+  ziel_preis: number | null;
+  aktiv: boolean;
+  intervall_minuten: number;
+  letzter_preis: number | null;
+  waehrung: string;
+  bester_preis: number | null;
+  bild: string | null;
+  haendler: string | null;
+  letzter_lauf: string | null;
+  letzter_erfolg: string | null;
+  letzter_fehler: string | null;
+  fehler_in_folge: number;
+  erstellt_am: string;
+  ziel_erreicht: boolean;
+  verlauf: Array<{ ts: string; preis: number; waehrung: string }>;
+  erster_abruf?: { ok: boolean; preis?: number; verfahren?: string; fehler?: string };
+}
+
+export interface WatchTest {
+  ok: boolean;
+  preis?: number;
+  waehrung?: string;
+  name?: string | null;
+  bild?: string | null;
+  verfahren?: string;
+  fehler?: string;
+}
+
+export interface UrteilStufe {
+  stufe: string;
+  label: string;
+}
+
+export interface LernStatus {
+  bereit: boolean;
+  positiv: number;
+  negativ: number;
+  hinweis: string;
+}
+
+export interface RegelVorschlag {
+  titel: string;
+  begruendung: string;
+  regel: Record<string, unknown>;
+  treffer: number;
+}
+
+export interface ApiTokenInfo {
+  id: number;
+  name: string;
+  praefix: string;
+  erstellt_am: string;
+  zuletzt_genutzt: string | null;
 }
 
 export interface Angebot {
@@ -168,6 +232,7 @@ export interface Rule {
   min_rabatt_prozent: number | null;
   nur_gratis: boolean;
   min_temperatur: number | null;
+  min_urteil: string | null;
   sources: string[];
   kategorien: string[];
   haendler: string[];
@@ -381,7 +446,10 @@ export const api = {
           query.set(key, String(value));
         }
       }
-      return get<{ total: number; items: Deal[] }>(`/deals?${query}`);
+      return get<{
+        total: number; items: Deal[];
+        empfehlung_aktiv?: boolean; hinweis?: string;
+      }>(`/deals?${query}`);
     },
     bookmark: (id: number) =>
       post<{ id: number; bookmarked: boolean }>(`/deals/${id}/bookmark`),
@@ -454,6 +522,35 @@ export const api = {
   bilder: {
     status: () => get<BilderStatus>("/bilder-status"),
     aufraeumen: () => post<{ entfernt: number }>("/bilder-aufraeumen"),
+  },
+  watch: {
+    list: () => get<WatchItem[]>("/watch"),
+    einzeln: (id: number) => get<WatchItem>(`/watch/${id}`),
+    create: (body: Partial<WatchItem>) => post<WatchItem>("/watch", body),
+    update: (id: number, body: Partial<WatchItem>) =>
+      put<WatchItem>(`/watch/${id}`, body),
+    remove: (id: number) => del<{ ok: boolean }>(`/watch/${id}`),
+    pruefen: (id: number) => post<WatchTest>(`/watch/${id}/pruefen`),
+    testen: (url: string) => post<WatchTest>("/watch-test", { url }),
+  },
+  urteil: {
+    stufen: () => get<UrteilStufe[]>("/urteile"),
+    neu: (dealId: number) =>
+      post<{ stufe: string; label: string; text: string; punkte: number }>(
+        `/deals/${dealId}/urteil`),
+  },
+  lernen: {
+    status: () => get<LernStatus>("/empfehlungen/status"),
+    regeln: () => get<RegelVorschlag[]>("/empfehlungen/regeln"),
+    notiere: (dealId: number, art: string) =>
+      post<{ ok: boolean }>(`/deals/${dealId}/interaktion`, { art }),
+  },
+  tokens: {
+    list: () => get<ApiTokenInfo[]>("/tokens"),
+    create: (name: string) =>
+      post<{ id: number; name: string; token: string; hinweis: string }>(
+        "/tokens", { name }),
+    remove: (id: number) => del<{ ok: boolean }>(`/tokens/${id}`),
   },
   snooze: (sourceId: string, stunden: number) =>
     post<{ id: string; snooze_until: string | null }>(

@@ -12,7 +12,7 @@ from datetime import timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import delete, select
+from sqlalchemy import delete, desc, select
 
 from .config import settings
 from .db import SessionLocal, get_setting, session_scope
@@ -20,6 +20,7 @@ from .events import broker
 from .http import NotModified, PoliteClient, RateLimited
 from .images import aufraeumen as bilder_aufraeumen
 from .images import hole_fuer_deals
+from .verdict import aktualisiere as urteile_aktualisieren
 from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
 from .pipeline import (check_price_alarms, dispatch, dispatch_alarms,
                        ingest, match_rules, send_digest)
@@ -148,6 +149,14 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
                     except Exception as exc:
                         log.debug("Bilder holen fehlgeschlagen: %s", exc)
 
+                # Urteil sofort berechnen, damit der Feed nicht erst beim
+                # naechsten Lauf einen Wert zeigt.
+                if fresh:
+                    try:
+                        urteile_aktualisieren(db, fresh)
+                    except Exception as exc:
+                        log.debug("Urteile fehlgeschlagen: %s", exc)
+
                 # Preisalarme greifen auch, wenn der Deal nicht neu ist -
                 # gerade dann ist er ja im Preis gefallen.
                 try:
@@ -222,6 +231,73 @@ def sync_jobs() -> None:
             schedule_source(cfg)
 
 
+async def watch_job() -> None:
+    """Wunschliste abfragen und bei Preisstuerzen melden.
+
+    Laeuft alle 10 Minuten, prueft aber nur, was laut eigenem Intervall
+    faellig ist - so bleibt jeder Shop hoeflich bedient.
+    """
+    from .models import Channel
+    from .notify import Notification, get_channel
+    from .pricewatch import faellige, pruefe, soll_melden
+
+    try:
+        with SessionLocal() as db:
+            offen = faellige(db)
+            if not offen:
+                return
+            kanaele = [c for c in db.scalars(select(Channel)) if c.enabled]
+
+            for eintrag in offen:
+                fund = await pruefe(db, eintrag, get_http())
+                if fund is None:
+                    continue
+                grund = soll_melden(eintrag, fund)
+                if not grund:
+                    continue
+
+                log.info("Wunschliste: %s - %s", eintrag.name, grund)
+                note = Notification(
+                    titel=eintrag.name, url=eintrag.url, quelle="wunschliste",
+                    regel="Wunschliste", preis=fund.preis,
+                    waehrung=fund.waehrung, haendler=eintrag.haendler,
+                    bild=eintrag.bild, beschreibung=grund,
+                    prioritaet="SOFORT")
+                for kanal in kanaele:
+                    impl = get_channel(kanal.type)
+                    if impl is None:
+                        continue
+                    try:
+                        await impl.send(kanal.config or {}, note, get_http())
+                    except Exception as exc:
+                        log.error("Wunschliste-Meldung ueber %s: %s",
+                                  kanal.type, exc)
+
+                eintrag.zuletzt_gemeldet = fund.preis
+                broker.publish("watch", {
+                    "id": eintrag.id, "name": eintrag.name, "grund": grund,
+                    "preis": fund.preis, "waehrung": fund.waehrung,
+                    "url": eintrag.url, "bild": eintrag.bild})
+            db.commit()
+    except Exception as exc:
+        log.error("Wunschliste fehlgeschlagen: %s", exc)
+
+
+def urteile_job() -> None:
+    """Urteile der letzten Tage nachziehen - der Verlauf waechst ja weiter."""
+    try:
+        from datetime import timedelta as _td
+        with session_scope() as db:
+            frisch = list(db.scalars(
+                select(Deal).where(Deal.first_seen >= utcnow() - _td(days=14))
+                .order_by(desc(Deal.first_seen)).limit(500)))
+            geaendert = urteile_aktualisieren(db, frisch)
+            if geaendert:
+                log.info("Preisurteile: %d aktualisiert", geaendert)
+    except Exception as exc:
+        log.error("Urteile fehlgeschlagen: %s", exc)
+
+
 async def digest_job() -> None:
     try:
         with SessionLocal() as db:
@@ -259,6 +335,10 @@ def start() -> None:
     scheduler.add_job(digest_job, IntervalTrigger(hours=1), id="digest",
                       max_instances=1, coalesce=True)
     scheduler.add_job(cleanup_job, IntervalTrigger(hours=6), id="cleanup",
+                      max_instances=1, coalesce=True)
+    scheduler.add_job(watch_job, IntervalTrigger(minutes=10), id="watch",
+                      max_instances=1, coalesce=True)
+    scheduler.add_job(urteile_job, IntervalTrigger(hours=3), id="urteile",
                       max_instances=1, coalesce=True)
     try:
         from .claimer import scan_job

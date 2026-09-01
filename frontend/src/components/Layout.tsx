@@ -1,5 +1,5 @@
 import {
-  BarChart3, Bell, Bookmark, Boxes, Command, Gift, LayoutDashboard, LogOut,
+  BarChart3, Bell, Bookmark, Boxes, Command, Eye, Gift, LayoutDashboard, LogOut,
   Menu, Monitor, Moon, Radio, ScrollText, SlidersHorizontal, Sparkles, Sun, X,
 } from "lucide-react";
 import * as React from "react";
@@ -11,6 +11,7 @@ import { Button, StatusDot } from "@/components/ui";
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/feed", label: "Feed", icon: Boxes },
+  { to: "/wunschliste", label: "Wunschliste", icon: Eye },
   { to: "/statistiken", label: "Statistiken", icon: BarChart3 },
   { to: "/quellen", label: "Quellen", icon: Radio },
   { to: "/regeln", label: "Regeln", icon: SlidersHorizontal },

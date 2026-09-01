@@ -108,6 +108,10 @@ class Deal(Base):
     bookmarked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # Dateiname im lokalen Bild-Cache, falls das Bild geholt werden konnte.
     bild_lokal: Mapped[str | None] = mapped_column(String(128))
+    # Preisurteil aus der eigenen Historie - siehe app/verdict.py.
+    urteil: Mapped[str | None] = mapped_column(String(24), index=True)
+    urteil_text: Mapped[str | None] = mapped_column(Text)
+    urteil_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Preisalarm: melden, sobald der Preis unter diese Schwelle faellt.
     alarm_preis: Mapped[float | None] = mapped_column(Float)
     alarm_ausgeloest: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -134,6 +138,8 @@ class Rule(Base):
     min_rabatt_prozent: Mapped[float | None] = mapped_column(Float)
     nur_gratis: Mapped[bool] = mapped_column(Boolean, default=False)
     min_temperatur: Mapped[float | None] = mapped_column(Float)
+    # Nur Deals ab dieser Urteilsstufe (siehe app/verdict.py).
+    min_urteil: Mapped[str | None] = mapped_column(String(24))
 
     sources: Mapped[list] = mapped_column(JSON, default=list)     # leer = alle
     kategorien: Mapped[list] = mapped_column(JSON, default=list)
@@ -291,3 +297,76 @@ class CachedImage(Base):
     fehler: Mapped[str | None] = mapped_column(Text)
     geholt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                 default=utcnow, index=True)
+
+
+class WatchItem(Base):
+    """Ein selbst beobachteter Artikel.
+
+    Der Unterschied zum Rest von SparBit: hier wartet man nicht darauf, dass
+    jemand einen Deal postet, sondern schaut selbst regelmaessig nach.
+    """
+    __tablename__ = "watch_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    url: Mapped[str] = mapped_column(Text)
+    ziel_preis: Mapped[float | None] = mapped_column(Float)
+    aktiv: Mapped[bool] = mapped_column(Boolean, default=True)
+    intervall_minuten: Mapped[int] = mapped_column(Integer, default=180)
+
+    letzter_preis: Mapped[float | None] = mapped_column(Float)
+    waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
+    bester_preis: Mapped[float | None] = mapped_column(Float)
+    bild: Mapped[str | None] = mapped_column(Text)
+    haendler: Mapped[str | None] = mapped_column(String(128))
+
+    letzter_lauf: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    letzter_erfolg: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    letzter_fehler: Mapped[str | None] = mapped_column(Text)
+    fehler_in_folge: Mapped[int] = mapped_column(Integer, default=0)
+    zuletzt_gemeldet: Mapped[float | None] = mapped_column(Float)
+    erstellt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                  default=utcnow)
+
+
+class WatchPrice(Base):
+    """Preispunkt eines beobachteten Artikels."""
+    __tablename__ = "watch_prices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    watch_id: Mapped[int] = mapped_column(ForeignKey("watch_items.id",
+                                                     ondelete="CASCADE"), index=True)
+    preis: Mapped[float] = mapped_column(Float)
+    waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                         index=True)
+
+
+class Interaction(Base):
+    """Was ich mit einem Deal gemacht habe - Grundlage des lernenden Feeds.
+
+    Ohne diese Spuren kann SparBit nur raten, was mich interessiert.
+    """
+    __tablename__ = "interactions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"),
+                                         index=True)
+    # angesehen | geoeffnet | geklickt | gemerkt | alarm | verworfen
+    art: Mapped[str] = mapped_column(String(16), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+                                         index=True)
+
+
+class ApiToken(Base):
+    """Zugangstoken fuer die Browser-Erweiterung.
+
+    Die Erweiterung laeuft auf einer fremden Seite und kann das
+    Sitzungs-Cookie nicht nutzen - sie braucht einen eigenen Schluessel,
+    der sich einzeln zurueckziehen laesst.
+    """
+    __tablename__ = "api_tokens"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    praefix: Mapped[str] = mapped_column(String(12))
+    erstellt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                  default=utcnow)
+    zuletzt_genutzt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

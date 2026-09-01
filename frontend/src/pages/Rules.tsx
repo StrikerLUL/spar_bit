@@ -1,11 +1,13 @@
 import {
-  CheckCircle2, Plus, SlidersHorizontal, Sparkles, Target, Trash2, XCircle, Zap,
+  CheckCircle2, Lightbulb, Plus, SlidersHorizontal, Sparkles, Target, Trash2,
+  XCircle, Zap,
 } from "lucide-react";
 import * as React from "react";
 import {
-  api, type Channel, type Rule, type RuleDraft, type RulePreview,
-  type PreviewSample, type Source,
+  api, type Channel, type RegelVorschlag, type Rule, type RuleDraft,
+  type RulePreview, type PreviewSample, type Source,
 } from "@/lib/api";
+import { urteilLabel } from "@/components/Urteil";
 import { useAsync } from "@/lib/useEvents";
 import {
   cn, formatPrice, linesToList, listToLines, sourceLabel, timeAgo,
@@ -69,6 +71,7 @@ const EMPTY_RULE: RuleDraft = {
   min_rabatt_prozent: null,
   nur_gratis: false,
   min_temperatur: null,
+  min_urteil: null,
   sources: [],
   kategorien: [],
   haendler: [],
@@ -112,6 +115,9 @@ export function Rules() {
           </Button>
         }
       />
+
+      <Vorschlaege onUebernehmen={(regel) =>
+        setEditing({ rule: { ...EMPTY_RULE, ...regel } as RuleDraft })} />
 
       <Card className="mb-6 p-4">
         <p className="mb-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -189,6 +195,9 @@ export function Rules() {
                 {rule.min_temperatur != null && (
                   <Badge variant="outline">≥ {rule.min_temperatur}°</Badge>
                 )}
+                {rule.min_urteil && (
+                  <Badge variant="default">≥ {urteilLabel(rule.min_urteil)}</Badge>
+                )}
                 {rule.keywords.slice(0, 3).map((keyword) => (
                   <Badge key={keyword}>{keyword}</Badge>
                 ))}
@@ -243,6 +252,7 @@ const toDraft = (rule: Rule): RuleDraft => ({
   min_rabatt_prozent: rule.min_rabatt_prozent,
   nur_gratis: rule.nur_gratis,
   min_temperatur: rule.min_temperatur,
+  min_urteil: rule.min_urteil,
   sources: rule.sources,
   kategorien: rule.kategorien,
   haendler: rule.haendler,
@@ -385,6 +395,24 @@ function RuleEditor({
               onChange={(v) => set("min_rabatt_prozent", v)} />
             <NumberField label="Min. Temp." suffix="°" value={draft.min_temperatur}
               onChange={(v) => set("min_temperatur", v)} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Mindestens dieses Preisurteil</Label>
+            <Select
+              value={draft.min_urteil ?? ""}
+              onChange={(e) => set("min_urteil", e.target.value || null)}
+            >
+              <option value="">egal</option>
+              <option value="bestpreis">nur echte Bestpreise</option>
+              <option value="sehr_gut">sehr gut oder besser</option>
+              <option value="gut">gut oder besser</option>
+              <option value="normal">normal oder besser</option>
+            </Select>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Gerechnet aus dem eigenen Preisverlauf, nicht aus dem Rabatt der
+              Quelle. Deals ohne genug Verlauf fallen dabei heraus.
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -630,5 +658,44 @@ function NumberField({
         onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
       />
     </div>
+  );
+}
+
+
+/** Regelvorschläge aus dem eigenen Verhalten.
+ *  Erscheint nur, wenn wirklich etwas gelernt wurde – sonst wäre es geraten. */
+function Vorschlaege({
+  onUebernehmen,
+}: {
+  onUebernehmen: (regel: Record<string, unknown>) => void;
+}) {
+  const { data } = useAsync<RegelVorschlag[]>(() => api.lernen.regeln(), []);
+  if (!data?.length) return null;
+
+  return (
+    <Card className="mb-6 border-primary/25 bg-primary/5 p-4">
+      <div className="mb-2.5 flex items-center gap-2">
+        <Lightbulb className="h-4 w-4 text-primary" />
+        <p className="text-xs font-medium uppercase tracking-wide text-primary">
+          Aus deinem Verhalten abgeleitet
+        </p>
+      </div>
+      <div className="space-y-2">
+        {data.map((vorschlag) => (
+          <div key={vorschlag.titel}
+               className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-background/40 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{vorschlag.titel}</p>
+              <p className="text-xs text-muted-foreground">{vorschlag.begruendung}</p>
+            </div>
+            <Button size="sm" variant="outline"
+                    onClick={() => onUebernehmen({ name: vorschlag.titel,
+                                                   ...vorschlag.regel })}>
+              Als Regel anlegen
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }

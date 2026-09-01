@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from ..auth import current_user
 from ..db import get_db
 from ..models import Deal, Match, Rule, SourceConfig, utcnow
+from ..learning import trainiere
 from ..search import fts_verfuegbar, match_bedingung
+from ..verdict import mindestens
 
 router = APIRouter(prefix="/api", tags=["deals"],
                    dependencies=[Depends(current_user)])
@@ -29,6 +31,7 @@ def _deal_dict(d: Deal) -> dict:
         "preis_eur": d.preis_eur, "bild_lokal": d.bild_lokal,
         "beste_quelle": d.quelle,
         "anzahl_angebote": 1 + len(d.also_from or []),
+        "urteil": d.urteil, "urteil_text": d.urteil_text,
     }
 
 
@@ -40,6 +43,8 @@ def list_deals(
     min_rabatt: float | None = None,
     max_preis: float | None = None,
     bookmarked: bool = False,
+    urteil: str | None = None,
+    sortierung: str = "neu",
     limit: int = Query(60, le=200),
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -69,13 +74,62 @@ def list_deals(
         conditions.append(and_(Deal.preis.isnot(None), Deal.preis <= max_preis))
     if bookmarked:
         conditions.append(Deal.bookmarked.is_(True))
+    if urteil:
+        # "mindestens gut" heisst: gut, sehr gut oder Bestpreis.
+        conditions.append(Deal.urteil.in_(mindestens(urteil)))
 
     if conditions:
         stmt = stmt.where(*conditions)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+    if sortierung == "fuer_mich":
+        return _fuer_mich(db, stmt, total, limit, offset)
+
     rows = db.scalars(stmt.order_by(desc(Deal.first_seen)).limit(limit).offset(offset))
     return {"total": total, "items": [_deal_dict(d) for d in rows]}
+
+
+# Wie viele Deals der Empfehlung zur Auswahl stehen. Das Modell rechnet in
+# Python, darum wird die Menge begrenzt - es soll die Seite nicht bremsen.
+EMPFEHLUNG_POOL = 600
+# Ab welcher Punktzahl eine Begruendung gezeigt wird. 0,5 heisst "keine
+# Meinung" - darueber muss es deutlich liegen, sonst ist es keine Empfehlung.
+PASST_AB = 0.6
+
+
+def _fuer_mich(db: Session, stmt, total: int, limit: int, offset: int) -> dict:
+    """Nach gelerntem Interesse sortieren.
+
+    Faellt zurueck auf "neu zuerst", solange zu wenig gelernt wurde - eine
+    Reihenfolge aus drei Beispielen waere geraten, nicht empfohlen.
+    """
+    modell = trainiere(db)
+    kandidaten = list(db.scalars(
+        stmt.order_by(desc(Deal.first_seen)).limit(EMPFEHLUNG_POOL)))
+
+    if not modell.bereit:
+        seite = kandidaten[offset:offset + limit]
+        return {"total": total, "items": [_deal_dict(d) for d in seite],
+                "empfehlung_aktiv": False,
+                "hinweis": ("Noch zu wenig gelernt — sortiert nach Datum. "
+                            "Merk dir ein paar Deals, dann wird daraus eine "
+                            "Empfehlung.")}
+
+    bewertet = sorted(((modell.punkte(d), d) for d in kandidaten),
+                      key=lambda paar: paar[0], reverse=True)
+    seite = bewertet[offset:offset + limit]
+    items = []
+    for wert, deal in seite:
+        eintrag = _deal_dict(deal)
+        eintrag["passt_zu_mir"] = round(wert, 3)
+        # Begruendung nur, wenn der Deal wirklich passt. Ein Artikel mit
+        # 0,04 Punkten steht ganz unten in der Liste - "passt zu dir" waere
+        # dort schlicht gelogen, auch wenn einzelne Merkmale dafuer sprechen.
+        eintrag["passt_weil"] = modell.gruende(deal) if wert > PASST_AB else []
+        items.append(eintrag)
+    return {"total": min(total, len(kandidaten)), "items": items,
+            "empfehlung_aktiv": True}
 
 
 @router.post("/deals/{deal_id}/bookmark")

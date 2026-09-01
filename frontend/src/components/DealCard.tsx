@@ -2,6 +2,7 @@ import { Bookmark, ExternalLink, Flame, LineChart, Store } from "lucide-react";
 import type { Deal } from "@/lib/api";
 import { bildQuelle, cn, formatPrice, sourceLabel, timeAgo } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui";
+import { UrteilBadge } from "@/components/Urteil";
 
 export function DealCard({
   deal,
@@ -45,6 +46,8 @@ export function DealCard({
               {Math.round(deal.temperatur)}°
             </Badge>
           )}
+          <UrteilBadge stufe={deal.urteil} text={deal.urteil_text}
+                       className="shadow-lg" />
         </div>
 
         {onBookmark && (
@@ -102,6 +105,13 @@ export function DealCard({
                 </span>
               )}
           </div>
+
+          {deal.passt_weil && deal.passt_weil.length > 0 && (
+            <p className="text-[11px] leading-relaxed text-primary/80"
+               title="So kommt SparBit auf diesen Vorschlag">
+              passt zu dir: {deal.passt_weil.join(", ")}
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <Badge variant="outline">{sourceLabel(deal.quelle)}</Badge>

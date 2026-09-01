@@ -89,9 +89,24 @@ _EDITION = {
 
 
 def _distinguishing(token: str) -> bool:
-    """Unterscheidet dieses Token eine Variante von einer anderen?"""
-    return (token.isdigit() or bool(_ROMAN.match(token))
-            or token in _EDITION or any(ch.isdigit() for ch in token))
+    """Unterscheidet dieses Token eine Ausgabe von einer anderen?
+
+    Zahlen sind hier bewusst NICHT dabei - die werden ueber `_zahlen`
+    verglichen, weil "2TB" und "2 TB" derselbe Artikel sind, "15" und "16"
+    aber nicht.
+    """
+    return bool(_ROMAN.match(token)) or token in _EDITION
+
+
+def _zahlen(titel: str) -> list[str]:
+    """Alle Zahlen im Titel, sortiert.
+
+    Der verlaesslichste Unterschied zwischen zwei Produktvarianten ist die
+    Zahl darin: iPhone 15 / 16, Galaxy S24 / S25, WH-1000XM5 / XM4. Ob sie
+    an einem Wort klebt ("2TB") oder getrennt steht ("2 TB"), ist egal -
+    darum wird ueber den ganzen Titel gesucht, nicht ueber Tokens.
+    """
+    return sorted(re.findall(r"\d+", titel))
 
 
 def titles_match(a: str, b: str, threshold: int = 88) -> bool:
@@ -101,19 +116,41 @@ def titles_match(a: str, b: str, threshold: int = 88) -> bool:
     if na == nb:
         return True
 
+    # Verschiedene Zahlen heissen verschiedene Artikel. Das gilt ohne
+    # Ausnahme - fruehere Versionen liessen hier einen Aehnlichkeitswert
+    # entscheiden, und bei langen Titeln ("Kaffeekapseln Vorratspack 12"
+    # gegen "... 13") lag der so hoch, dass zwei verschiedene Artikel
+    # zusammenfielen.
+    if _zahlen(na) != _zahlen(nb):
+        return False
+
     ta, tb = set(na.split()), set(nb.split())
-    # Unterscheiden sich die Titel in einer Ausgabe/Nummer ("Hades" vs
-    # "Hades II", "990 Pro" vs "990 Evo"), sind es verschiedene Artikel.
+
+    # Nennt JEDE Seite etwas, das die andere nicht nennt, sind es verschiedene
+    # Artikel ("Kaffeekapseln Lungo ..." gegen "Kaffeekapseln Espresso ...").
+    # Nennt nur eine Seite etwas zusaetzlich, ist das meist Beiwerk
+    # ("... bei Amazon", "... auf Steam") und stoert nicht.
+    #
+    # Das ist noetig, weil token_set_ratio eine Teilmenge als perfekten
+    # Treffer wertet: je laenger der gemeinsame Text, desto leichter fielen
+    # sonst zwei verschiedene Artikel zusammen.
+    nur_a = "".join(sorted(ta - tb))
+    nur_b = "".join(sorted(tb - ta))
+    # Verglichen wird der Buchstabenbestand, damit "2TB" und "2 TB" gleich
+    # bleiben - da unterscheidet sich nur die Schreibweise, nicht der Artikel.
+    if nur_a and nur_b and nur_a != nur_b:
+        return False
+
+    # Ausgaben und Varianten ("Hades" vs "Hades II", "990 Pro" vs "990 Evo").
     if any(_distinguishing(t) for t in ta ^ tb):
-        return fuzz.token_sort_ratio(na, nb) >= 96
+        return False
 
     if max(len(na), len(nb)) < 12:
         threshold = 95   # kurze Titel kollidieren sonst zu leicht
 
     # token_set_ratio wertet Teilmengen als perfekten Treffer - das ist hier
-    # erwuenscht ("Portal 2" == "Portal 2 auf Steam"), weil der Check oben
-    # bereits ausgeschlossen hat, dass sich die Titel in einer Ausgabe oder
-    # Modellnummer unterscheiden.
+    # erwuenscht ("Portal 2" == "Portal 2 auf Steam"), weil die Pruefungen
+    # oben bereits ausgeschlossen haben, dass es verschiedene Artikel sind.
     return fuzz.token_set_ratio(na, nb) >= threshold
 
 

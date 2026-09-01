@@ -11,7 +11,7 @@ def deal(**kw):
                 preis=None, preis_eur=None, originalpreis=None,
                 rabatt_prozent=None, ist_gratis=False, temperatur=None,
                 quelle="mydealz", kategorie="community",
-                url="https://example.com/x", bild=None)
+                url="https://example.com/x", bild=None, urteil=None)
     return SimpleNamespace(**{**base, **kw})
 
 
@@ -186,3 +186,30 @@ def test_ohne_eur_preis_zaehlt_der_rohpreis():
     verschwinden."""
     rule = RuleSpec(max_preis=20.0)
     assert evaluate(rule, deal(titel="x", preis=15.0, preis_eur=None)).matched
+
+
+# --- Preisurteil ----------------------------------------------------------
+
+def test_mindest_urteil_laesst_bessere_durch():
+    rule = RuleSpec(min_urteil="gut")
+    assert evaluate(rule, deal(titel="x", urteil="bestpreis")).matched
+    assert evaluate(rule, deal(titel="x", urteil="gut")).matched
+
+
+def test_mindest_urteil_haelt_schlechtere_zurueck():
+    rule = RuleSpec(min_urteil="gut")
+    res = evaluate(rule, deal(titel="x", urteil="normal"))
+    assert not res.matched
+    assert "schlechter als" in res.failed[0]
+
+
+def test_ohne_urteil_kein_treffer():
+    """Lieber nichts melden als etwas, das noch nicht bewertet ist."""
+    res = evaluate(RuleSpec(min_urteil="gut"), deal(titel="x", urteil=None))
+    assert not res.matched and "kein Preisurteil" in res.failed[0]
+
+
+def test_urteil_allein_ist_eine_gueltige_bedingung():
+    """Sonst wuerde 'nur echte Bestpreise' als leere Regel gelten."""
+    assert evaluate(RuleSpec(min_urteil="bestpreis"),
+                    deal(titel="x", urteil="bestpreis")).matched

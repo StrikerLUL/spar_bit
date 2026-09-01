@@ -17,6 +17,7 @@ import { Notifications } from "@/pages/Notifications";
 import { Rules } from "@/pages/Rules";
 import { Sources } from "@/pages/Sources";
 import { Statistics } from "@/pages/Statistics";
+import { Watchlist } from "@/pages/Watchlist";
 import { System } from "@/pages/System";
 
 const MAX_LIVE = 60;
@@ -55,6 +56,16 @@ export default function App() {
             item.waehrung ?? "EUR")} · ${item.regel ?? item.quelle}`,
           item.url,
         );
+      },
+      watch: (data: unknown) => {
+        // Der Wunschlisten-Event nennt das Feld "name"; der Ticker
+        // erwartet "titel".
+        const roh = data as { name?: string; grund?: string } & LiveItem;
+        const item = { ...roh, titel: roh.titel ?? roh.name ?? "Wunschliste" };
+        setLive((current) =>
+          [{ ...item, regel: "Wunschliste", _at: Date.now() }, ...current]
+            .slice(0, MAX_LIVE));
+        showDesktop(`Wunschliste: ${item.titel}`, item.grund ?? "", item.url);
       },
       alarm: (data: unknown) => {
         const item = data as LiveItem;
@@ -141,6 +152,7 @@ function Shell({
         <Routes>
           <Route path="/" element={<Dashboard live={live} />} />
           <Route path="/feed" element={<Feed />} />
+          <Route path="/wunschliste" element={<Watchlist />} />
           <Route path="/statistiken" element={<Statistics />} />
           <Route path="/quellen" element={<Sources />} />
           <Route path="/regeln" element={<Rules />} />

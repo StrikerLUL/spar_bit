@@ -1,5 +1,5 @@
 import {
-  Bell, Boxes, Gift, LayoutDashboard, Moon, Radio, ScrollText, Search,
+  Bell, Boxes, Eye, Gift, LayoutDashboard, Moon, Radio, ScrollText, Search,
   SlidersHorizontal, Sun, BarChart3, Monitor,
 } from "lucide-react";
 import * as React from "react";
@@ -38,6 +38,8 @@ export function CommandPalette({
         icon: <LayoutDashboard className="h-4 w-4" />, run: go("/") },
       { id: "feed", label: "Feed", hint: "g f",
         icon: <Boxes className="h-4 w-4" />, run: go("/feed") },
+      { id: "watch", label: "Wunschliste", hint: "g w",
+        icon: <Eye className="h-4 w-4" />, run: go("/wunschliste") },
       { id: "stats", label: "Statistiken", hint: "g s",
         icon: <BarChart3 className="h-4 w-4" />, run: go("/statistiken") },
       { id: "src", label: "Quellen", hint: "g q",
@@ -156,7 +158,8 @@ export function useShortcuts(openPalette: () => void) {
 
   React.useEffect(() => {
     const ziele: Record<string, string> = {
-      d: "/", f: "/feed", s: "/statistiken", q: "/quellen", r: "/regeln",
+      d: "/", f: "/feed", s: "/statistiken", w: "/wunschliste",
+      q: "/quellen", r: "/regeln",
       b: "/benachrichtigungen", c: "/claimer", l: "/system",
     };
 

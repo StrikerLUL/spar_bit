@@ -46,6 +46,10 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("deals", "notiz", "TEXT"),
     ("source_configs", "snooze_until", "DATETIME"),
     ("deals", "bild_lokal", "VARCHAR(128)"),
+    ("deals", "urteil", "VARCHAR(24)"),
+    ("deals", "urteil_text", "TEXT"),
+    ("deals", "urteil_am", "DATETIME"),
+    ("rules", "min_urteil", "VARCHAR(24)"),
 ]
 
 

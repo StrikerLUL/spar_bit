@@ -1,11 +1,16 @@
 import {
-  Download, HardDrive, Image, Keyboard, RefreshCw, ScrollText, Trash2, Upload,
+  Copy, Download, HardDrive, Image, Keyboard, Puzzle, RefreshCw,
+  ScrollText, Trash2, Upload,
 } from "lucide-react";
 import * as React from "react";
-import { api, type BilderStatus, type LogLine, type SystemInfo } from "@/lib/api";
+import {
+  api, type ApiTokenInfo, type BilderStatus, type LogLine, type SystemInfo,
+} from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { useToast } from "@/components/Toast";
-import { cn, formatBytes, formatDuration, formatDateTime } from "@/lib/utils";
+import {
+  cn, formatBytes, formatDateTime, formatDuration, timeAgo,
+} from "@/lib/utils";
 import {
   Badge, Button, Card, CardContent, CardHeader, CardTitle, Select, Skeleton,
 } from "@/components/ui";
@@ -163,6 +168,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
             </CardContent>
           </Card>
 
+          <ErweiterungCard />
+
           <BilderCard />
 
           <Card>
@@ -316,6 +323,105 @@ function BilderCard() {
         >
           <Trash2 className="h-3.5 w-3.5" />
           Verwaiste Bilder entfernen
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/** Zugangsschlüssel für die Browser-Erweiterung. */
+function ErweiterungCard() {
+  const toast = useToast();
+  const { data, reload } = useAsync<ApiTokenInfo[]>(() => api.tokens.list(), []);
+  const [neu, setNeu] = React.useState<string | null>(null);
+  const [legtAn, setLegtAn] = React.useState(false);
+
+  const anlegen = async () => {
+    setLegtAn(true);
+    try {
+      const ergebnis = await api.tokens.create("Browser-Erweiterung");
+      setNeu(ergebnis.token);
+      reload();
+    } catch (err) {
+      toast.push("error", "Anlegen fehlgeschlagen", (err as Error).message);
+    } finally {
+      setLegtAn(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Puzzle className="h-4 w-4 text-primary" />
+          Browser-Erweiterung
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Mit der Erweiterung setzt du Artikel von jeder Shop-Seite aus auf die
+          Wunschliste. Sie braucht einen eigenen Schlüssel — das Sitzungs-Cookie
+          kann sie auf fremden Seiten nicht nutzen. Ordner{" "}
+          <code className="text-primary">browser-extension/</code> im Projekt.
+        </p>
+
+        {neu && (
+          <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+            <p className="text-xs font-medium text-primary">
+              Jetzt kopieren — dieser Schlüssel wird nie wieder angezeigt.
+            </p>
+            <code className="block break-all rounded bg-background/60 px-2 py-1.5 font-mono text-[11px]">
+              {neu}
+            </code>
+            <Button
+              size="sm" variant="outline" className="w-full"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(neu);
+                  toast.push("success", "In die Zwischenablage kopiert");
+                } catch {
+                  toast.push("error", "Kopieren nicht möglich",
+                    "Bitte von Hand markieren.");
+                }
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Kopieren
+            </Button>
+          </div>
+        )}
+
+        {data?.map((token) => (
+          <div key={token.id}
+               className="flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-xs">
+            <div className="min-w-0">
+              <p className="truncate font-medium">{token.name}</p>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                {token.praefix}… ·{" "}
+                {token.zuletzt_genutzt
+                  ? `zuletzt ${timeAgo(token.zuletzt_genutzt)}`
+                  : "noch nie genutzt"}
+              </p>
+            </div>
+            <Button
+              variant="ghost" size="sm" aria-label="Schlüssel zurückziehen"
+              onClick={async () => {
+                if (!window.confirm("Diesen Schlüssel zurückziehen? Die "
+                  + "Erweiterung muss dann neu verbunden werden.")) return;
+                await api.tokens.remove(token.id);
+                setNeu(null);
+                reload();
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+
+        <Button variant="outline" size="sm" className="w-full" loading={legtAn}
+                onClick={anlegen}>
+          Neuen Schlüssel anlegen
         </Button>
       </CardContent>
     </Card>
