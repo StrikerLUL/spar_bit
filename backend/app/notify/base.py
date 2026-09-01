@@ -25,6 +25,42 @@ class Notification:
     deal_id: int | None = None
     prioritaet: str = "NORMAL"
     tags: list[str] = field(default_factory=list)
+    # Preisurteil aus dem eigenen Verlauf - das Interessanteste an der
+    # Meldung, darum tragen es alle Kanaele mit.
+    urteil: str | None = None
+    urteil_text: str | None = None
+
+    @property
+    def kopfzeile(self) -> str:
+        """Eine Zeile, die sagt worum es geht - fuer Kanaele ohne Formatierung."""
+        if self.ist_gratis:
+            return f"GRATIS: {self.titel}"
+        if self.urteil == "bestpreis":
+            return f"Bestpreis: {self.titel}"
+        return self.titel
+
+    @property
+    def farbe(self) -> int:
+        """Akzentfarbe als 24-Bit-Zahl, fuer Discord und Slack."""
+        if self.ist_gratis or self.urteil == "bestpreis":
+            return 0x22C55E          # gruen
+        if self.urteil == "uvp_fragwuerdig":
+            return 0xEF4444          # rot
+        if self.prioritaet == "SOFORT":
+            return 0xF59E0B          # gelb
+        return 0x3987E5              # blau
+
+    def zeilen(self) -> list[tuple[str, str]]:
+        """Die Eckdaten als Feld/Wert-Paare - jeder Kanal formatiert sie selbst."""
+        raus = [("Preis", self.preis_text())]
+        if self.haendler:
+            raus.append(("Händler", self.haendler))
+        raus.append(("Quelle", self.quelle))
+        if self.regel:
+            raus.append(("Regel", self.regel))
+        if self.urteil_text:
+            raus.append(("Preisurteil", self.urteil_text))
+        return raus
 
     def preis_text(self) -> str:
         sym = {"EUR": "€", "USD": "$", "GBP": "£"}.get(self.waehrung, self.waehrung)

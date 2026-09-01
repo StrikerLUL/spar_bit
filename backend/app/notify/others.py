@@ -18,12 +18,12 @@ class SMTPChannel(Channel):
     beschreibung = "Klassische Mail. Bei Gmail App-Passwort verwenden."
 
     options_schema = [
-        OptionSpec("host", "SMTP-Host", "string", ""),
+        OptionSpec("host", "SMTP-Host", "string", "", pflicht=True),
         OptionSpec("port", "Port", "int", 587),
-        OptionSpec("username", "Benutzer", "string", ""),
-        OptionSpec("password", "Passwort", "string", ""),
-        OptionSpec("from_addr", "Absender", "string", ""),
-        OptionSpec("to_addr", "Empfaenger", "string", ""),
+        OptionSpec("username", "Benutzer", "string", "", pflicht=True),
+        OptionSpec("password", "Passwort", "string", "", pflicht=True),
+        OptionSpec("from_addr", "Absender", "string", "", pflicht=True),
+        OptionSpec("to_addr", "Empfänger", "string", "", pflicht=True),
         OptionSpec("tls", "STARTTLS", "bool", True),
     ]
 
@@ -74,13 +74,16 @@ class SMTPChannel(Channel):
 
 class WebhookChannel(Channel):
     type = "webhook"
-    display_name = "Webhook / Discord"
-    beschreibung = ("Discord-Webhook-URL erkennt SparBit automatisch und schickt "
-                    "ein Embed. Andere URLs bekommen generisches JSON.")
+    display_name = "Webhook (eigenes System)"
+    beschreibung = ("Schickt den Deal als JSON an eine beliebige URL - fuer "
+                    "Home Assistant, n8n, eigene Skripte. Fuer Discord gibt es "
+                    "einen eigenen Kanal mit huebscherer Darstellung; eine "
+                    "Discord-URL wird hier aber weiterhin erkannt.")
 
     options_schema = [
-        OptionSpec("url", "Webhook-URL", "string", ""),
-        OptionSpec("username", "Anzeigename (Discord)", "string", "SparBit"),
+        OptionSpec("url", "Webhook-URL", "string", "", pflicht=True),
+        OptionSpec("username", "Absendername (nur bei Discord-URLs)", "string",
+                   "SparBit"),
     ]
 
     async def send(self, config: dict[str, Any], note: Notification, http: Any) -> None:
@@ -98,9 +101,11 @@ class WebhookChannel(Channel):
                 "haendler": note.haendler, "quelle": note.quelle,
                 "regel": note.regel, "ist_gratis": note.ist_gratis,
                 "bild": note.bild, "prioritaet": note.prioritaet,
+                "urteil": note.urteil, "urteil_text": note.urteil_text,
+                "deal_id": note.deal_id, "tags": note.tags,
             }
 
-        resp = await http._client.post(url, json=payload, timeout=20.0)
+        resp = await http.post(url, json=payload, timeout=20.0)
         if resp.status_code >= 300:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
@@ -134,9 +139,9 @@ class NtfyChannel(Channel):
 
     options_schema = [
         OptionSpec("server", "Server", "string", "https://ntfy.sh"),
-        OptionSpec("topic", "Topic", "string", ""),
+        OptionSpec("topic", "Topic", "string", "", pflicht=True),
         OptionSpec("token", "Access-Token (optional)", "string", ""),
-        OptionSpec("prioritaet", "ntfy-Prioritaet", "select", "default",
+        OptionSpec("prioritaet", "Priorität", "select", "default",
                    choices=["min", "low", "default", "high", "urgent"]),
     ]
 
@@ -166,7 +171,7 @@ class NtfyChannel(Channel):
         body = (f"**{note.preis_text()}**\n\n"
                 f"{note.haendler or ''} · {note.quelle}\n\n{note.url}")
 
-        resp = await http._client.post(f"{server}/{topic}", content=body.encode("utf-8"),
+        resp = await http.post(f"{server}/{topic}", content=body.encode("utf-8"),
                                        headers=headers, timeout=20.0)
         if resp.status_code >= 300:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")

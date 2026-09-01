@@ -18,7 +18,9 @@ router = APIRouter(prefix="/api/channels", tags=["notify"],
                    dependencies=[Depends(current_user)])
 
 # Felder, die nie im Klartext zurueckgehen.
-SECRET_KEYS = {"bot_token", "password", "token", "url"}
+# Was nie im Klartext zurueckgegeben wird. "topic" gehoert dazu: wer ein
+# ntfy-Topic kennt, liest alle Meldungen mit. "user" ist der Pushover-Schluessel.
+SECRET_KEYS = {"bot_token", "password", "token", "url", "user", "topic"}
 
 
 class ChannelBody(BaseModel):
@@ -49,6 +51,7 @@ def _channel_dict(c: ChannelRow) -> dict:
 def channel_types() -> list[dict]:
     return [{"type": c.type, "display_name": c.display_name,
              "beschreibung": c.beschreibung,
+             "supports_buttons": c.supports_buttons,
              "options_schema": [asdict(o) for o in c.options_schema]}
             for c in all_channels()]
 

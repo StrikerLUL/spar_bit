@@ -199,6 +199,14 @@ def _job_id(source_id: str) -> str:
     return f"src:{source_id}"
 
 
+def _aktuelles_intervall(job) -> int | None:
+    """Sekunden des laufenden Triggers - oder None, wenn kein Intervall."""
+    trigger = getattr(job, "trigger", None)
+    if isinstance(trigger, IntervalTrigger):
+        return int(trigger.interval.total_seconds())
+    return None
+
+
 def schedule_source(cfg: SourceConfig) -> None:
     """Job anlegen/aktualisieren. Respektiert das Mindestintervall der Quelle."""
     src = get_source(cfg.id)
@@ -214,21 +222,47 @@ def schedule_source(cfg: SourceConfig) -> None:
         return
 
     interval = max(int(cfg.interval_seconds or src.default_interval), src.min_interval)
-    trigger = IntervalTrigger(seconds=interval, jitter=min(60, interval // 10))
 
     if existing:
-        existing.reschedule(trigger=trigger)
+        # Nur umplanen, wenn sich wirklich etwas geaendert hat. Ein
+        # reschedule() setzt die naechste Laufzeit zurueck - beim
+        # regelmaessigen Abgleich wuerde eine Quelle mit langem Intervall
+        # dadurch nie an die Reihe kommen.
+        if _aktuelles_intervall(existing) == interval:
+            return
+        existing.reschedule(trigger=IntervalTrigger(
+            seconds=interval, jitter=min(60, interval // 10)))
+        log.info("Job fuer '%s' auf %ds umgestellt", cfg.id, interval)
     else:
-        scheduler.add_job(run_source, trigger=trigger, args=[cfg.id], id=job_id,
+        scheduler.add_job(run_source,
+                          trigger=IntervalTrigger(seconds=interval,
+                                                  jitter=min(60, interval // 10)),
+                          args=[cfg.id], id=job_id,
                           max_instances=1, coalesce=True, misfire_grace_time=300,
                           next_run_time=utcnow() + timedelta(seconds=5))
         log.info("Job fuer '%s' alle %ds", cfg.id, interval)
 
 
 def sync_jobs() -> None:
-    with session_scope() as db:
-        for cfg in db.scalars(select(SourceConfig)):
-            schedule_source(cfg)
+    """Jobs mit der Datenbank abgleichen.
+
+    Laeuft beim Start, nach Aenderungen ueber die API und minuetlich - so
+    greifen auch Aenderungen, die die CLI direkt in die Datenbank schreibt,
+    ohne dass der Server neu gestartet werden muss.
+    """
+    try:
+        with session_scope() as db:
+            bekannt = set()
+            for cfg in db.scalars(select(SourceConfig)):
+                bekannt.add(_job_id(cfg.id))
+                schedule_source(cfg)
+        # Quellen, deren Config-Zeile geloescht wurde, nicht weiterlaufen lassen.
+        for job in scheduler.get_jobs():
+            if job.id.startswith("src:") and job.id not in bekannt:
+                job.remove()
+                log.info("Job '%s' entfernt - keine Konfiguration mehr", job.id)
+    except Exception as exc:
+        log.error("Job-Abgleich fehlgeschlagen: %s", exc)
 
 
 async def watch_job() -> None:
@@ -339,6 +373,8 @@ def start() -> None:
     scheduler.add_job(watch_job, IntervalTrigger(minutes=10), id="watch",
                       max_instances=1, coalesce=True)
     scheduler.add_job(urteile_job, IntervalTrigger(hours=3), id="urteile",
+                      max_instances=1, coalesce=True)
+    scheduler.add_job(sync_jobs, IntervalTrigger(seconds=60), id="sync",
                       max_instances=1, coalesce=True)
     try:
         from .claimer import scan_job

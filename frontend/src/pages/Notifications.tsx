@@ -31,6 +31,22 @@ export function Notifications() {
     { channel: Partial<Channel>; type: ChannelType } | null
   >(null);
   const [testing, setTesting] = React.useState<number | null>(null);
+  const [picking, setPicking] = React.useState(false);
+
+  const anlegen = (type: ChannelType) => {
+    setPicking(false);
+    setEditing({
+      type,
+      channel: {
+        type: type.type,
+        name: type.display_name,
+        enabled: true,
+        config: Object.fromEntries(
+          type.options_schema.map((o) => [o.key, o.default]),
+        ),
+      },
+    });
+  };
 
   const test = async (channel: Channel) => {
     setTesting(channel.id);
@@ -66,31 +82,10 @@ export function Notifications() {
             <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
               Kanäle
             </h2>
-            <div className="flex flex-wrap gap-2">
-              {types?.map((type) => (
-                <Button
-                  key={type.type}
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setEditing({
-                      type,
-                      channel: {
-                        type: type.type,
-                        name: type.display_name,
-                        enabled: true,
-                        config: Object.fromEntries(
-                          type.options_schema.map((o) => [o.key, o.default]),
-                        ),
-                      },
-                    })
-                  }
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  {type.display_name}
-                </Button>
-              ))}
-            </div>
+            <Button variant="outline" size="sm" onClick={() => setPicking(true)}>
+              <Plus className="h-3.5 w-3.5" />
+              Kanal hinzufügen
+            </Button>
           </div>
 
           {loading ? (
@@ -208,6 +203,14 @@ export function Notifications() {
         </div>
       </div>
 
+      {picking && (
+        <ChannelPicker
+          types={types ?? []}
+          onPick={anlegen}
+          onClose={() => setPicking(false)}
+        />
+      )}
+
       {editing && (
         <ChannelDialog
           channel={editing.channel}
@@ -220,6 +223,51 @@ export function Notifications() {
         />
       )}
     </>
+  );
+}
+
+function ChannelPicker({
+  types,
+  onPick,
+  onClose,
+}: {
+  types: ChannelType[];
+  onPick: (type: ChannelType) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Kanal hinzufügen"
+      description="Wohin sollen die Treffer? Mehrere Kanäle parallel sind möglich."
+    >
+      <ul className="space-y-2">
+        {types.map((type) => (
+          <li key={type.type}>
+            <button
+              type="button"
+              onClick={() => onPick(type)}
+              className={cn(
+                "w-full rounded-lg border border-border p-3 text-left transition",
+                "hover:border-primary/60 hover:bg-muted/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <span className="font-medium">{type.display_name}</span>
+                {type.supports_buttons && (
+                  <Badge variant="outline">mit Knöpfen</Badge>
+                )}
+              </span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                {type.beschreibung}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Dialog>
   );
 }
 
@@ -303,7 +351,19 @@ function ChannelDialog({
   const [config, setConfig] = React.useState<Record<string, unknown>>(channel.config ?? {});
   const [saving, setSaving] = React.useState(false);
 
+  const fehlend = type.options_schema.filter(
+    (spec) =>
+      spec.pflicht
+      && !String(config[spec.key] ?? "").trim()
+      && !config[`${spec.key}__set`],
+  );
+
   const save = async () => {
+    if (fehlend.length) {
+      toast.push("error", "Es fehlt noch etwas",
+        fehlend.map((spec) => spec.label).join(", "));
+      return;
+    }
     setSaving(true);
     try {
       const body = { type: type.type, name, enabled: channel.enabled ?? true, config };
@@ -327,14 +387,17 @@ function ChannelDialog({
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
-          <Button onClick={save} loading={saving}>Speichern</Button>
+          <Button onClick={save} loading={saving} disabled={fehlend.length > 0}>
+            Speichern
+          </Button>
         </>
       }
     >
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <Label>Anzeigename</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
+          <Label htmlFor="kanal-name">Name in SparBit</Label>
+          <Input id="kanal-name" value={name}
+            onChange={(e) => setName(e.target.value)} />
         </div>
         {type.options_schema.map((spec) => (
           <ChannelField
@@ -374,7 +437,17 @@ function ChannelField({
   existing: boolean;
   onChange: (value: unknown) => void;
 }) {
-  const secret = ["bot_token", "password", "token"].includes(spec.key);
+  const secret = ["bot_token", "password", "token", "user"].includes(spec.key);
+  const feldId = React.useId();
+  const hilfeId = `${feldId}-hilfe`;
+  const beschriftung = (
+    <Label htmlFor={feldId}>
+      {spec.label}
+      {spec.pflicht && (
+        <span className="ml-1 text-destructive" title="Pflichtfeld">*</span>
+      )}
+    </Label>
+  );
 
   if (spec.type === "bool") {
     return (
@@ -391,21 +464,31 @@ function ChannelField({
   if (spec.type === "select") {
     return (
       <div className="space-y-1.5">
-        <Label>{spec.label}</Label>
-        <Select value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}>
+        {beschriftung}
+        <Select
+          id={feldId}
+          aria-describedby={spec.help ? hilfeId : undefined}
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        >
           {spec.choices.map((choice) => (
             <option key={choice} value={choice}>{choice}</option>
           ))}
         </Select>
-        {spec.help && <p className="text-xs text-muted-foreground">{spec.help}</p>}
+        {spec.help && (
+          <p id={hilfeId} className="text-xs text-muted-foreground">{spec.help}</p>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-1.5">
-      <Label>{spec.label}</Label>
+      {beschriftung}
       <Input
+        id={feldId}
+        aria-describedby={spec.help ? hilfeId : undefined}
+        aria-required={spec.pflicht || undefined}
         type={secret ? "password" : spec.type === "int" ? "number" : "text"}
         value={typeof value === "string" && value.includes("…") ? "" : String(value ?? "")}
         placeholder={existing ? "•••••••• (gesetzt — leer lassen zum Behalten)" : undefined}
@@ -415,7 +498,9 @@ function ChannelField({
         className={cn(secret && "font-mono text-xs")}
       />
       {spec.help && (
-        <p className="text-xs leading-relaxed text-muted-foreground">{spec.help}</p>
+        <p id={hilfeId} className="text-xs leading-relaxed text-muted-foreground">
+          {spec.help}
+        </p>
       )}
     </div>
   );

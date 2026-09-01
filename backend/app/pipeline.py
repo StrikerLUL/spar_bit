@@ -289,6 +289,7 @@ async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
             haendler=deal.haendler, bild=deal.bild, ist_gratis=deal.ist_gratis,
             beschreibung=deal.beschreibung, deal_id=deal.id,
             prioritaet="SOFORT" if sofort else "NORMAL", tags=deal.tags or [],
+            urteil=deal.urteil, urteil_text=deal.urteil_text,
         )
 
         for cid in target_ids:
@@ -390,6 +391,7 @@ async def dispatch_alarms(db: Session, deals: list[Deal], http) -> int:
             haendler=deal.haendler, bild=deal.bild, ist_gratis=deal.ist_gratis,
             beschreibung=f"Dein Zielpreis war {deal.alarm_preis:.2f} EUR.",
             deal_id=deal.id, prioritaet="SOFORT", tags=deal.tags or [],
+            urteil=deal.urteil, urteil_text=deal.urteil_text,
         )
         for row in channels:
             impl = get_channel(row.type)

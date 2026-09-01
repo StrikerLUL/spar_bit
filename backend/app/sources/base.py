@@ -85,6 +85,10 @@ class OptionSpec:
     default: Any = None
     help: str = ""
     choices: list[str] = field(default_factory=list)
+    # Ohne diesen Wert funktioniert die Quelle bzw. der Kanal nicht. Ein
+    # leerer Default heisst nicht automatisch Pflicht - viele Felder sind
+    # schlicht optional.
+    pflicht: bool = False
 
 
 @dataclass

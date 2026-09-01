@@ -154,6 +154,22 @@ class PoliteClient:
                 pass
         return 60.0
 
+    async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        """Fuer Benachrichtigungs-Kanaele.
+
+        Ohne Drosselung und ohne Wiederholung: das Ziel ist der eigene Bot
+        bzw. Webhook, nicht eine fremde Seite, die man schonen muesste. Wer
+        wiederholen will, tut das mit eigener Logik - eine doppelt
+        zugestellte Meldung ist schlimmer als eine ausgefallene.
+        """
+        kwargs.setdefault("timeout", 20.0)
+        return await self._client.post(url, **kwargs)
+
+    async def put(self, url: str, **kwargs: Any) -> httpx.Response:
+        """Wie post() - Matrix schickt Nachrichten per PUT."""
+        kwargs.setdefault("timeout", 20.0)
+        return await self._client.put(url, **kwargs)
+
     async def get_text(self, url: str, **kwargs: Any) -> str:
         return (await self.get(url, **kwargs)).text
 

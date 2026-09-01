@@ -22,9 +22,9 @@ class Telegram(Channel):
 
     options_schema = [
         OptionSpec("bot_token", "Bot-Token", "string", "",
-                   help="Von @BotFather. Format 123456:ABC-DEF..."),
+                   help="Von @BotFather. Format 123456:ABC-DEF...", pflicht=True),
         OptionSpec("chat_id", "Chat-ID", "string", "",
-                   help="Deine numerische ID (via @userinfobot) oder @kanalname."),
+                   help="Deine numerische ID (via @userinfobot) oder @kanalname.", pflicht=True),
         OptionSpec("bilder", "Bilder mitschicken", "bool", True),
         OptionSpec("stumm", "Stumm zustellen", "bool", False,
                    help="Wird bei SOFORT-Prioritaet ignoriert."),
@@ -55,7 +55,7 @@ class Telegram(Channel):
             payload |= {"text": text, "parse_mode": "HTML",
                         "link_preview_options": {"is_disabled": False}}
 
-        resp = await http._client.post(API.format(token=token, method=method),
+        resp = await http.post(API.format(token=token, method=method),
                                        json=payload, timeout=20.0)
         data = self._json(resp)
         if not data.get("ok"):
@@ -64,7 +64,7 @@ class Telegram(Channel):
                 payload.pop("photo", None)
                 payload.pop("caption", None)
                 payload |= {"text": text, "parse_mode": "HTML"}
-                resp = await http._client.post(
+                resp = await http.post(
                     API.format(token=token, method="sendMessage"),
                     json=payload, timeout=20.0)
                 data = self._json(resp)

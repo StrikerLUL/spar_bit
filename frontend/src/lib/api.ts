@@ -170,6 +170,8 @@ export interface OptionSpec {
   default: unknown;
   help: string;
   choices: string[];
+  /** Ohne diesen Wert funktioniert der Kanal bzw. die Quelle nicht. */
+  pflicht: boolean;
 }
 
 export interface Source {
@@ -281,6 +283,8 @@ export interface ChannelType {
   type: string;
   display_name: string;
   beschreibung: string;
+  /** Kann Aktions-Knöpfe unter die Nachricht setzen (bisher nur Telegram). */
+  supports_buttons: boolean;
   options_schema: OptionSpec[];
 }
 

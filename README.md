@@ -2,13 +2,14 @@
 
 Deal- und Freebie-Zentrale für zu Hause: sammelt Gratis-Sachen, Preisfehler und
 starke Rabatte aus vielen Quellen, **beurteilt sie am eigenen Preisverlauf**,
-filtert nach deinen Regeln und meldet Treffer sofort per Telegram oder als
-Desktop-Meldung.
+filtert nach deinen Regeln und meldet Treffer sofort — per Telegram, Discord,
+Slack, Matrix, Gotify, Pushover, ntfy, E-Mail, Webhook oder als
+Desktop-Meldung. Alles einstellbar **im Browser und auf der Kommandozeile**.
 
 **Läuft auf deinem eigenen Rechner.** Kein Server, kein Docker, keine
 Konfigurationsdateien. Ein Befehl genügt.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-244-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-319-22c55e)
 
 ```bash
 git clone https://github.com/StrikerLUL/spar_bit.git
@@ -19,10 +20,12 @@ python run.py
 ---
 
 **Inhalt** · [Loslegen](#loslegen) · [Die ersten 10 Minuten](#die-ersten-10-minuten)
-· [Was SparBit kann](#was-sparbit-kann) · [Telegram](#telegram-einrichten)
-· [API-Keys](#api-keys-optional) · [Mit Docker](#mit-docker)
-· [Entwicklung](#entwicklung) · [Sicherheit](#sicherheit)
-· [Problemlösung](#problemlösung) · [Bekannte Lücken](#bekannte-lücken)
+· [Was SparBit kann](#was-sparbit-kann)
+· [Benachrichtigungen](#benachrichtigungen-einrichten)
+· [Kommandozeile](#kommandozeile) · [API-Keys](#api-keys-optional)
+· [Mit Docker](#mit-docker) · [Entwicklung](#entwicklung)
+· [Sicherheit](#sicherheit) · [Problemlösung](#problemlösung)
+· [Bekannte Lücken](#bekannte-lücken)
 
 > **Vor dem ersten Start: [ENDPOINTS.md](ENDPOINTS.md) lesen.**
 > Kein Quellen-Endpoint konnte beim Bauen live geprüft werden — die
@@ -75,11 +78,13 @@ Alles auf einmal prüfen:
 cd backend && python -m tools.verify_endpoints
 ```
 
-**2. Benachrichtigung einrichten.** Zwei Wege, beide gehen parallel:
+**2. Benachrichtigung einrichten.** Unter *Benachrichtigungen* →
+**Kanal hinzufügen**. Neun Kanäle stehen zur Wahl, beliebig viele parallel:
 
-* **Desktop-Meldungen** — unter *Benachrichtigungen* einschalten, einmal
-  erlauben, fertig. Kein Bot, kein Token.
-* **Telegram** — für unterwegs, [siehe unten](#telegram-einrichten).
+* **Desktop-Meldungen** — einschalten, einmal erlauben, fertig. Kein Bot,
+  kein Token.
+* **Telegram, Discord, Slack, Matrix, Gotify, Pushover, ntfy, E-Mail,
+  Webhook** — [siehe unten](#benachrichtigungen-einrichten).
 
 **3. Erste Regel.** Unter *Regeln* eine **Vorlage** anklicken („Alles Gratis",
 „Preisfehler" …), anpassen, speichern. Rechts siehst du beim Tippen, wie viele
@@ -182,16 +187,28 @@ USD- und GBP-Quellen richtig greift.
 
 ### Melden
 
-* **Telegram** mit Bild, Preis, Direktlink und Knöpfen — *gemerkt* und
-  *Quelle 6 h stumm* funktionieren wirklich
-* **Desktop-Meldungen** im Browser
-* **E-Mail**, **Discord/Webhook**, **ntfy**
+**Neun Kanäle als Plugins**, beliebig viele parallel, jeder einzeln
+abschaltbar und mit *Test senden* sofort prüfbar:
+
+| Kanal | Wofür | Was du brauchst |
+|---|---|---|
+| **Telegram** | unterwegs, mit Aktions-Knöpfen | Bot-Token + Chat-ID |
+| **Discord** | eigener Server, Einbettung mit Farbe und Bild | Webhook-URL |
+| **Slack** | Team-Kanal, Block-Kit-Nachricht | Webhook-URL |
+| **Matrix** | eigener Homeserver, keine fremde Cloud | Zugangstoken + Raum-ID |
+| **Gotify** | selbst gehosteter Push | Server + App-Token |
+| **Pushover** | Push auf iOS/Android ohne eigenen Server | App-Token + Benutzerschlüssel |
+| **ntfy** | Push ohne Konto, ntfy.sh oder eigene Instanz | Topic |
+| **E-Mail** | Archiv, Weiterleitung, Filterregeln im Mailclient | SMTP-Zugang |
+| **Webhook** | Home Assistant, n8n, eigene Skripte | URL (bekommt JSON) |
+| **Desktop** | derselbe Rechner, kein Konto nötig | ein Klick im Browser |
+
+Jede Meldung trägt **das Preisurteil mit** — ein Bestpreis kommt grün, ein
+fragwürdiger UVP rot, eine SOFORT-Regel gelb. Discord erwähnt eine Rolle nur
+bei SOFORT, Gotify und ntfy heben dann die Priorität an; sonst bleibt es leise.
+
 * Ruhezeiten, die SOFORT-Regeln durchlassen
 * Global pausieren — im UI oder per `/pause` in Telegram
-
-**Telegram-Befehle:** `/status`, `/neueste`, `/gratis`, `/pause`, `/weiter`,
-`/hilfe`. Der Bot nutzt Long Polling und braucht **keinen offenen Port** — er
-funktioniert hinter jedem Heimrouter.
 
 ### Drumherum
 
@@ -215,7 +232,15 @@ in einem eigenen Container. Einrichtung [unter Docker](#auto-claimer-einrichten)
 
 ---
 
-## Telegram einrichten
+## Benachrichtigungen einrichten
+
+Im UI: *Benachrichtigungen* → **Kanal hinzufügen** → Typ wählen → Felder
+ausfüllen → **Speichern** → **Test senden**. Pflichtfelder sind mit `*`
+markiert; ohne sie lässt sich nicht speichern. Auf der Kommandozeile geht
+dasselbe mit `python cli.py kanaele` ([siehe unten](#kommandozeile)).
+
+<details>
+<summary><strong>Telegram</strong> — mit Knöpfen, funktioniert hinter jedem Heimrouter</summary>
 
 1. In Telegram **@BotFather** anschreiben, `/newbot` senden.
 2. Namen vergeben (der Benutzername muss auf `bot` enden). Du bekommst den
@@ -223,8 +248,178 @@ in einem eigenen Container. Einrichtung [unter Docker](#auto-claimer-einrichten)
 3. **@userinfobot** anschreiben, der nennt dir deine numerische **Chat-ID**.
 4. **Deinem eigenen Bot einmal `/start` senden.** Ohne das darf er dir nicht
    schreiben — der häufigste Stolperstein.
-5. Im UI unter *Benachrichtigungen* → **Telegram** → Token und Chat-ID
-   eintragen → speichern → **Test senden**.
+5. Token und Chat-ID eintragen, speichern, **Test senden**.
+
+**Befehle im Chat:** `/status`, `/neueste`, `/gratis`, `/pause`, `/weiter`,
+`/hilfe`. Der Bot nutzt Long Polling und braucht **keinen offenen Port**.
+
+```bash
+python cli.py kanaele hinzufuegen telegram "Handy" \
+  --set bot_token=123456789:AAE... --set chat_id=987654321
+```
+</details>
+
+<details>
+<summary><strong>Discord</strong> — eigener Server, Einbettung mit Farbe und Bild</summary>
+
+1. Im Discord-Kanal: *Kanaleinstellungen → Integrationen → Webhooks → Neuer
+   Webhook*, **Webhook-URL kopieren**.
+2. Im UI eintragen. Optional eine **Rollen-ID** — die wird dann bei
+   SOFORT-Meldungen erwähnt, sonst nie. (Rollen-ID: Entwicklermodus in Discord
+   einschalten, Rechtsklick auf die Rolle → *ID kopieren*.)
+
+```bash
+python cli.py kanaele hinzufuegen discord "Server" \
+  --set url=https://discord.com/api/webhooks/... --set rolle=123456789
+```
+</details>
+
+<details>
+<summary><strong>Slack</strong> — Team-Kanal</summary>
+
+1. <https://api.slack.com/apps> → *Create New App* → *From scratch*.
+2. *Incoming Webhooks* aktivieren → *Add New Webhook to Workspace* → Kanal
+   wählen → **URL kopieren**.
+
+```bash
+python cli.py kanaele hinzufuegen slack "Team" \
+  --set url=https://hooks.slack.com/services/...
+```
+</details>
+
+<details>
+<summary><strong>Matrix</strong> — eigener Homeserver, nichts verlässt deine Infrastruktur</summary>
+
+1. Einen Bot-Account anlegen und dessen **Zugangstoken** holen (in Element:
+   *Einstellungen → Hilfe & Info → Erweitert → Zugangstoken*).
+2. Den Bot in den Zielraum einladen und beitreten lassen.
+3. **Raum-ID** kopieren (*Raumeinstellungen → Erweitert*) — beginnt mit `!`,
+   nicht die `#alias:server`-Form.
+
+```bash
+python cli.py kanaele hinzufuegen matrix "Heim-Raum" \
+  --set homeserver=https://matrix.example.org \
+  --set token=syt_... --set raum='!abc123:example.org'
+```
+</details>
+
+<details>
+<summary><strong>Gotify</strong> — selbst gehosteter Push</summary>
+
+In Gotify eine **Anwendung** anlegen (*Apps → Create Application*) und deren
+Token übernehmen. Server-URL ohne abschließenden Schrägstrich.
+
+```bash
+python cli.py kanaele hinzufuegen gotify "Push" \
+  --set server=https://gotify.example.org --set token=A1b2C3...
+```
+</details>
+
+<details>
+<summary><strong>Pushover</strong> — Push auf iOS/Android, ohne eigenen Server</summary>
+
+Auf <https://pushover.net> anmelden: der **Benutzerschlüssel** steht auf der
+Startseite, den **Anwendungs-Token** bekommst du über *Create an
+Application/API Token*.
+
+```bash
+python cli.py kanaele hinzufuegen pushover "Handy" \
+  --set token=aTokenHier --set user=uSchluesselHier
+```
+</details>
+
+<details>
+<summary><strong>ntfy</strong> — Push ohne Konto</summary>
+
+Nur ein **Topic** ausdenken (rate schwer, sonst liest es jemand mit) und die
+ntfy-App auf dasselbe Topic abonnieren. Eigene Instanz? Server-URL anpassen.
+
+```bash
+python cli.py kanaele hinzufuegen ntfy "Handy" --set topic=sparbit-4f3a9c
+```
+</details>
+
+<details>
+<summary><strong>E-Mail</strong> — Archiv und Mailclient-Filter</summary>
+
+SMTP-Zugang deines Anbieters. Bei Gmail ein **App-Passwort** verwenden, nicht
+das Kontopasswort.
+
+```bash
+python cli.py kanaele hinzufuegen smtp "Postfach" \
+  --set host=smtp.example.com --set port=587 \
+  --set username=ich@example.com --set password=geheim \
+  --set from_addr=ich@example.com --set to_addr=ich@example.com
+```
+</details>
+
+<details>
+<summary><strong>Webhook</strong> — Home Assistant, n8n, eigene Skripte</summary>
+
+Bekommt den Treffer als JSON: Titel, URL, Preis, Originalpreis, Rabatt,
+Händler, Quelle, Regel, Tags, `ist_gratis`, `prioritaet`, `urteil` und
+`deal_id`. Eine Discord-URL wird hier weiterhin erkannt — für Discord ist der
+eigene Kanal oben aber schöner.
+
+```bash
+python cli.py kanaele hinzufuegen webhook "n8n" --set url=https://n8n.local/hook/deal
+```
+</details>
+
+---
+
+## Kommandozeile
+
+`cli.py` steuert dieselbe Datenbank wie die Oberfläche — **auch wenn der Server
+gerade aus ist**. Änderungen an Quellen übernimmt ein laufender Server
+innerhalb einer Minute, ohne Neustart.
+
+```bash
+python cli.py status                      # Überblick
+python cli.py kanaele typen               # alle 9 Kanäle mit ihren Feldern
+python cli.py quellen liste
+python cli.py regeln liste
+python cli.py deals lego --anzahl 10
+```
+
+| Bereich | Befehle |
+|---|---|
+| `kanaele` | `typen`, `liste`, `hinzufuegen <typ> <name> --set k=v`, `aendern <id>`, `loeschen <id>`, `testen [id]` |
+| `quellen` | `liste`, `an <quelle>`, `aus <quelle>`, `intervall <quelle> <minuten>`, `testen [quelle]`, `jetzt <quelle>` |
+| `regeln` | `liste`, `hinzufuegen <name> [Optionen]`, `an`, `aus`, `loeschen`, `testen <id>` |
+| `wunschliste` | `liste`, `hinzufuegen <url> --ziel 199`, `entfernen <id>`, `pruefen [id]` |
+| `deals` | `[suchbegriff] --gratis --urteil bestpreis --anzahl 20` |
+
+Ein paar Beispiele:
+
+```bash
+# Kanal anlegen und sofort ausprobieren
+python cli.py kanaele hinzufuegen ntfy "Handy" --set topic=sparbit-4f3a9c
+python cli.py kanaele testen
+
+# Quelle einschalten und einmalig laufen lassen
+python cli.py quellen an mydealz
+python cli.py quellen intervall mydealz 15
+python cli.py quellen jetzt mydealz
+
+# Regel bauen und gegen die letzten Deals gegenprüfen
+python cli.py regeln hinzufuegen "Alles Gratis" --gratis --sofort --kanal 1
+python cli.py regeln hinzufuegen "Lego" --keyword lego --max-preis 49.99 \
+  --min-rabatt 30 --blacklist gebraucht --kanal 1
+python cli.py regeln testen 2 --anzahl 500
+```
+
+`regeln testen` zeigt dieselbe Vorschau wie das UI: wie viele der letzten Deals
+die Regel getroffen hätte, mit Beispielen und den knapp verfehlten.
+
+Die CLI meckert früh statt spät: fehlende Pflichtfelder, vertippte Feldnamen
+(`--set urll=…`), Regeln ohne Bedingung und Stichworte, die zugleich auf der
+Blacklist stehen, werden abgelehnt — nicht klaglos gespeichert. Bei einem
+Tippfehler im Quellennamen schlägt sie die richtige vor.
+
+> Die CLI kennt kein eigenes Passwort. Wer die Datei `data/sparbit.db` lesen
+> kann, hat ohnehin Zugriff auf alles — ein zweites Passwort davor wäre nur
+> Theater.
 
 ---
 
@@ -303,7 +498,7 @@ automatisch mit `Secure`.
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 244 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 319 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -331,19 +526,58 @@ register(MeinShop())
 Dann in `backend/app/sources/__init__.py` importieren. Die Quelle erscheint
 automatisch im UI — mit Optionsfeldern, Intervall-Regler und Testknopf.
 
+### Einen neuen Kanal hinzufügen
+
+Kanäle sind genauso Plugins. `options_schema` beschreibt die Felder — daraus
+baut das UI das Formular und die CLI ihre `--set`-Schlüssel, ganz ohne
+zusätzlichen Code:
+
+```python
+# backend/app/notify/meinkanal.py
+from ..sources.base import OptionSpec
+from .base import Channel, Notification, register
+
+class MeinKanal(Channel):
+    type = "meinkanal"
+    display_name = "Mein Kanal"
+    beschreibung = "Wo bekommt man die Zugangsdaten?"
+    options_schema = [
+        OptionSpec("url", "Server-URL", "string", "", pflicht=True),
+        OptionSpec("bilder", "Bild mitschicken", "bool", True),
+    ]
+
+    async def send(self, config, note: Notification, http) -> None:
+        # note.kopfzeile, note.zeilen(), note.farbe und note.preis_text()
+        # liefern die fertige Aufbereitung — auch das Preisurteil.
+        resp = await http.post(config["url"], json={
+            "text": note.kopfzeile,
+            "felder": dict(note.zeilen()),
+        })
+        if resp.status_code >= 300:          # werfen; der Aufrufer protokolliert
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+register(MeinKanal())
+```
+
+In `backend/app/notify/__init__.py` importieren — fertig. Der Kanal steht
+danach in der Auswahl im UI, in `python cli.py kanaele typen` und beim
+Test-Versand. `pflicht=True` markiert Pflichtfelder; UI und CLI verweigern das
+Speichern, solange sie leer sind.
+
 ### Aufbau
 
 ```
-Quellen (Plugins) ─┐
-Wunschliste ───────┼─► Dedupe ─► SQLite (WAL) ─► Regeln ─► Kanäle
-Erweiterung ───────┘   URL-Hash    Deals,         Keywords,   Telegram
-  isoliert,          + Zahlen-     Historie,      Preis EUR,  Desktop
-  Schutzschalter     + Titel-      Angebote,      Rabatt,     E-Mail
-  je Quelle            vergleich   Urteile        Urteil      Discord, ntfy
+Quellen (Plugins) ─┐                                        Kanäle (Plugins)
+Wunschliste ───────┼─► Dedupe ─► SQLite (WAL) ─► Regeln ─►  Telegram, Discord,
+Erweiterung ───────┘   URL-Hash    Deals,         Keywords,  Slack, Matrix,
+  isoliert,          + Zahlen-     Historie,      Preis EUR, Gotify, Pushover,
+  Schutzschalter     + Titel-      Angebote,      Rabatt,    ntfy, E-Mail,
+  je Quelle            vergleich   Urteile        Urteil     Webhook, Desktop
        │                   │            │             │           │
        │              Preisurteil   Lernmodell        │           │
        │              (Verlauf)     (lokal)           │           │
        └──── APScheduler ───────────┴──── SSE ──► Web-UI ◄────────┘
+                    │                              CLI ◄─────────┘
 ```
 
 Backend: Python 3.11+, FastAPI, SQLAlchemy 2, SQLite (WAL), APScheduler, httpx.
@@ -365,8 +599,11 @@ Backend die gebaute Oberfläche gleich mit aus — ein Prozess, ein Port.
   Händler geladen
 * Lokal lauscht SparBit nur auf `127.0.0.1` — erst `--host 0.0.0.0` macht es im
   Netz sichtbar
-* **Der Backup-Export enthält API-Keys und Telegram-Token im Klartext.**
-  Behandle die Datei wie ein Passwort.
+* **Der Backup-Export enthält API-Keys und Kanal-Zugangsdaten im Klartext**
+  (Bot-Token, Webhook-URLs, SMTP-Passwort). Behandle die Datei wie ein
+  Passwort.
+* Kanal-Geheimnisse liegen in der Datenbank, nicht in Dateien, und kommen aus
+  der API nur maskiert zurück — beim Bearbeiten leer lassen heißt „behalten".
 
 ### Höfliches Crawling
 
@@ -393,6 +630,11 @@ sperrt, nützt dir nichts.
 | Port 8000 belegt | `python run.py --port 9000` |
 | Quelle liefert 403 | Manche Seiten stehen hinter Cloudflare. „Jetzt testen" zeigt den Grund; siehe [ENDPOINTS.md](ENDPOINTS.md). |
 | Telegram schweigt | Dem Bot einmal selbst `/start` senden. Dann „Test senden" im UI. |
+| Kanal schweigt, Test schlägt fehl | Der Verlauf unter *Benachrichtigungen* nennt den Fehler im Klartext. Auf der Konsole: `python cli.py kanaele testen`. |
+| Discord: „sieht nicht nach einer Discord-Webhook-URL aus" | Es ist die Kanal- statt der Webhook-URL. Die richtige beginnt mit `https://discord.com/api/webhooks/`. |
+| Matrix: 403 oder „Raum-ID beginnt mit !" | Die `#alias:server`-Form geht nicht; die interne ID steht unter *Raumeinstellungen → Erweitert*. Und der Bot muss dem Raum beigetreten sein. |
+| Pushover meldet „application token is invalid" | Token und Benutzerschlüssel vertauscht. Der Benutzerschlüssel steht auf der Pushover-Startseite. |
+| CLI: „Quelle gibt es nicht" | `python cli.py quellen liste` zeigt die gültigen IDs — bei Tippfehlern schlägt die CLI die richtige vor. |
 | Live-Ticker steht | Hinter einem Reverse-Proxy: Puffern für `/api/events` abschalten. |
 | „Zu viele Fehlversuche" | Die Anmeldebremse greift. Warte die angezeigte Zeit ab — der Knopf zählt herunter. |
 | „zu wenig Daten" statt Urteil | SparBit braucht mindestens vier Preismessungen. Nach ein paar Tagen füllt sich das von selbst. |
