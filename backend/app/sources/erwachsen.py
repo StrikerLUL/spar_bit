@@ -24,6 +24,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from .. import feedfinder
+from ..http import RateLimited
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
                    Verification, register)
@@ -59,18 +60,21 @@ class MyDealzErotik(PepperSource):
     category = Category.ERWACHSEN
     verification = Verification.UNVERIFIED
     docs_url = "https://www.mydealz.de/gruppe/erotik"
-    beschreibung = ("Erotik-Gruppe. Eingetragen ist die Seite, nicht der "
-                    "Feed - den sucht SparBit selbst.")
+    beschreibung = ("Erotik-Gruppe. Liegt der Feed woanders, sucht SparBit "
+                    "ihn selbst und traegt ihn hier ein.")
     options_schema = [
-        OptionSpec("feeds", "Feed- oder Seiten-Pfade", "list", ["/gruppe/erotik"],
-                   help="Die Gruppen-Seite. Kommt HTML statt Feed, liest "
-                        "SparBit die ausgezeichnete Feed-Adresse aus der "
-                        "Seite und traegt sie hier ein."),
+        OptionSpec("feeds", "Feed- oder Seiten-Pfade", "list",
+                   ["/rss/gruppe/erotik"],
+                   help="Vorbelegt ist der uebliche Pepper-Pfad fuer einen "
+                        "Gruppen-Feed. Liegt er anders, kommt hier HTML statt "
+                        "Feed an - dann probiert SparBit die bekannten "
+                        "Varianten durch und traegt die ein, die wirklich "
+                        "liefert."),
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", [],
                    help="Oft ergiebiger als die Gruppe: satisfyer, gleitgel, "
                         "womanizer, dessous, kondome"),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",
-                   "/search?q={term}&rss=1"),
+                   "/rss/search?q={term}"),
         OptionSpec("min_temperatur", "Nur ab Temperatur", "int", 0,
                    help="0 = alles uebernehmen."),
     ]
@@ -83,14 +87,18 @@ def _pepper_optionen(pfad: str, begriffe: list[str]) -> list[OptionSpec]:
     """Gleiche Felder fuer alle Pepper-Ableger - nur andere Vorbelegung."""
     return [
         OptionSpec("feeds", "Feed- oder Seiten-Pfade", "list", [pfad],
-                   help="Die Gruppen-Seite. Findet SparBit dort einen "
-                        "ausgezeichneten Feed, traegt es ihn hier ein. "
-                        "Der Pfad ist geraten - 'Jetzt testen' sagt dir, "
-                        "ob die Gruppe so heisst."),
+                   help="Der uebliche Pfad fuer einen Gruppen-Feed. Ob die "
+                        "Gruppe wirklich so heisst, sagt dir 'Jetzt testen' - "
+                        "kommt HTML statt Feed, probiert SparBit die "
+                        "bekannten Varianten durch und traegt die "
+                        "funktionierende hier ein."),
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", begriffe,
                    help="Greift auch dann, wenn es die Gruppe gar nicht gibt."),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",
-                   "/search?q={term}&rss=1"),
+                   "/rss/search?q={term}",
+                   help="Welcher Weg gilt, ist von Seite zu Seite "
+                        "verschieden. Findet SparBit einen Such-Feed unter "
+                        "einer anderen Adresse, steht die danach hier."),
         OptionSpec("min_temperatur", "Nur ab Temperatur", "int", 0),
     ]
 
@@ -103,7 +111,7 @@ class PreisjaegerErotik(PepperSource):
     verification = Verification.UNVERIFIED
     beschreibung = "Oesterreichischer Pepper-Ableger, gleiche Plattform wie mydealz."
     options_schema = _pepper_optionen(
-        "/gruppe/erotik", ["satisfyer", "gleitgel", "dessous"])
+        "/rss/gruppe/erotik", ["satisfyer", "gleitgel", "dessous"])
 
     def parse(self, text: str, min_temp: float = 0.0) -> list[DealItem]:
         return _markiere(super().parse(text, min_temp))
@@ -119,7 +127,7 @@ class DealabsErotik(PepperSource):
                     "Stichwort-Einstufung greift hier nicht, die Quelle "
                     "selbst schon.")
     options_schema = _pepper_optionen(
-        "/groupe/erotique", ["sextoy", "preservatif", "lingerie"])
+        "/rss/groupe/erotique", ["sextoy", "preservatif", "lingerie"])
 
     def parse(self, text: str, min_temp: float = 0.0) -> list[DealItem]:
         return _markiere(super().parse(text, min_temp))
@@ -134,7 +142,7 @@ class HotUKDealsErwachsen(PepperSource):
     default_currency = "GBP"
     beschreibung = "UK-Pepper-Ableger. Preise in GBP, werden in EUR umgerechnet."
     options_schema = _pepper_optionen(
-        "/tag/adult", ["sex toy", "lovehoney", "durex"])
+        "/rss/tag/adult", ["sex toy", "lovehoney", "durex"])
 
     def parse(self, text: str, min_temp: float = 0.0) -> list[DealItem]:
         return _markiere(super().parse(text, min_temp))
@@ -144,10 +152,20 @@ class RedditErwachsen(Reddit):
     """Subreddits, die 18+-Angebote sammeln.
 
     Die vorbelegten Namen sind **Vorschlaege, keine geprueften Adressen** -
-    ich konnte kein einziges davon aufrufen. Reddit gibt fuer einen
-    Subreddit, den es nicht gibt, eine leere bzw. 404-Antwort; die Quelle
-    ueberspringt einzelne Ausfaelle und meldet erst, wenn alle scheitern.
-    Was nicht liefert, gehoert aus der Liste gestrichen.
+    ich konnte kein einziges davon aufrufen. Einer davon, r/SexToyDeals,
+    ist inzwischen aus dem Betrieb widerlegt:
+
+        r/SexToyDeals: HTTPStatusError: Client error '404 Not Found'
+
+    Er steht darum nicht mehr in der Vorbelegung. Wichtiger als die Liste
+    ist aber, was die Quelle mit so einer Antwort macht: einen Namen, den
+    Reddit mit 404 beantwortet, streicht sie selbst heraus und legt ihn
+    unter "Automatisch entfernt" ab (siehe `sources/reddit.py`). Ein 429
+    dagegen ist kein kaputter Name, sondern eine Drosselung - danach macht
+    der naechste Lauf dort weiter, wo dieser aufgehoert hat.
+
+    Zwei Namen bleiben trotzdem nur Vorschlaege. Wenn hier nichts kommt,
+    ist die ergiebigere Quelle dieses Bereichs ohnehin "Eigene 18+-Quellen".
     """
 
     id = "reddit_erwachsen"
@@ -156,17 +174,25 @@ class RedditErwachsen(Reddit):
     default_interval = 900
     verification = Verification.UNVERIFIED
     beschreibung = ("Oeffentliche .rss-Feeds. Die vorbelegten Subreddits sind "
-                    "ungeprueft - erst testen, dann behalten.")
+                    "ungeprueft - was es nicht gibt, streicht SparBit selbst.")
 
     options_schema = [
         OptionSpec("subreddits", "Subreddits", "list",
-                   ["SexToyDeals", "NSFWdeals", "AdultDeals"],
-                   help="Ohne 'r/'. Ungeprueft vorbelegt: was 404 gibt, "
-                        "hier loeschen. Einer pro Zeile."),
+                   ["NSFWdeals", "AdultDeals"],
+                   help="Ohne 'r/'. Ungeprueft vorbelegt - was Reddit mit "
+                        "404 beantwortet, verschwindet von selbst aus dieser "
+                        "Liste. Einer pro Zeile."),
         OptionSpec("listing", "Sortierung", "select", "new",
                    choices=["new", "hot", "top"]),
         OptionSpec("base", "Basis-Host", "string", "https://www.reddit.com",
                    help="Alternative: https://old.reddit.com"),
+        OptionSpec("max_pro_lauf", "Subreddits pro Lauf", "int", 0,
+                   help="0 = alle. Reddit drosselt Server in Rechenzentren "
+                        "gern mit 429; dann hilft ein kleiner Wert, weil die "
+                        "Liste ueber mehrere Laeufe abgearbeitet wird."),
+        OptionSpec("entfernt", "Automatisch entfernt (404)", "list", [],
+                   help="Namen, die es laut Reddit nicht gibt. Nur zur "
+                        "Ansicht."),
     ]
 
     def parse(self, text: str, sub: str = "") -> list[DealItem]:
@@ -179,7 +205,14 @@ class ErotikFeed(Source):
     Viele Shops liefern einen Feed, ohne damit zu werben. Shopify haengt an
     jede Kollektion ein `.atom` (…/collections/sale.atom), WooCommerce und
     WordPress kennen `/feed`. Genau dafuer ist diese Quelle da: du traegst
-    ein, was du selbst im Browser geoeffnet hast, und nichts wird geraten.
+    ein, was du selbst im Browser geoeffnet hast.
+
+    Seit dem Umbau des Feed-Finders genuegt dafuer die Adresse der
+    Angebotsseite. Zeichnet die Seite ihren Feed aus, wird er uebernommen;
+    tut sie es nicht, klappert SparBit genau die Stellen ab, an denen die
+    ueblichen Shop-Systeme ihn ablegen. Geraten wird trotzdem nichts:
+    eingetragen wird nur eine Adresse, die tatsaechlich einen Feed
+    zurueckgegeben hat.
     """
 
     id = "erotik_feed"
@@ -194,9 +227,11 @@ class ErotikFeed(Source):
     options_schema = [
         OptionSpec("feeds", "Shop- oder Feed-Adressen", "list", [],
                    help="Eine vollstaendige Adresse pro Zeile - die "
-                        "Angebotsseite genuegt. Zeichnet die Seite einen "
-                        "Feed aus, traegt SparBit ihn hier ein. Mit "
-                        "'Feed suchen' vorher nachsehen."),
+                        "Angebotsseite genuegt. SparBit liest die "
+                        "Feed-Auszeichnung der Seite und probiert sonst die "
+                        "ueblichen Pfade (…/feed, …/rss, bei Shopify "
+                        "…/collections/xyz.atom). Was liefert, steht danach "
+                        "hier. Mit 'Feed suchen' vorher nachsehen."),
         OptionSpec("label", "Haendler-Label", "string", "",
                    help="Leer = Hostname der jeweiligen URL."),
         OptionSpec("nur_reduziert", "Nur reduzierte Eintraege", "bool", False,
@@ -219,6 +254,8 @@ class ErotikFeed(Source):
         items: list[DealItem] = []
         errors: list[str] = []
         korrigiert: dict[int, str] = {}
+        gedrosselt: RateLimited | None = None
+        drosselungen = 0
         for nummer, url in enumerate(feeds):
             try:
                 fund = await feedfinder.hole(ctx.http, url,
@@ -228,6 +265,12 @@ class ErotikFeed(Source):
                     korrigiert[nummer] = fund.url
                 geparst = self.parse(text, label or urlsplit(url).hostname or "")
                 items.extend(geparst[:cap])
+            except RateLimited as exc:
+                # Wer drosselt, drosselt fuer alle Adressen dieses Hosts -
+                # aber andere Hosts in der Liste koennen weiterlaufen.
+                gedrosselt = exc
+                drosselungen += 1
+                errors.append(f"{url}: gedrosselt ({exc})")
             except Exception as exc:
                 errors.append(f"{url}: {type(exc).__name__}: {exc}"[:260])
 
@@ -238,7 +281,16 @@ class ErotikFeed(Source):
             ctx.merke("feeds", neu)
 
         if not items and errors:
-            raise RuntimeError(" | ".join(errors[:3]))
+            if gedrosselt is not None and drosselungen == len(errors):
+                # Nur gedrosselt, nichts kaputt: als RateLimited
+                # weiterreichen, damit der Scheduler eine Pause macht statt
+                # die Quelle als defekt zu zaehlen. Steht daneben ein echter
+                # Fehler, gilt der - der waere sonst nicht zu sehen.
+                raise gedrosselt
+            text = " | ".join(errors[:3])
+            if len(errors) > 3:
+                text += f" | (+{len(errors) - 3} weitere)"
+            raise RuntimeError(text)
         if nur_reduziert:
             items = [i for i in items
                      if i.ist_gratis or (i.rabatt_prozent or 0) > 0]

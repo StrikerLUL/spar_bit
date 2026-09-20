@@ -210,9 +210,16 @@ function FeedSucher() {
 
 function healthOf(source: Source): { status: "ok" | "warn" | "error" | "off"; label: string } {
   if (!source.enabled) return { status: "off", label: "Aus" };
-  if (source.snooze_until && new Date(source.snooze_until) > new Date())
-    return { status: "warn", label: `stumm bis ${new Date(source.snooze_until)
-      .toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` };
+  if (source.snooze_until && new Date(source.snooze_until) > new Date()) {
+    const bis = new Date(source.snooze_until)
+      .toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    // Eine Pause nach HTTP 429 sieht im Datensatz aus wie eine
+    // Stummschaltung, ist aber keine: die hat niemand eingestellt, die hat
+    // die Gegenseite verlangt. Steht das falsch da, sucht man den Schalter,
+    // den man nie umgelegt hat.
+    const gedrosselt = (source.last_error || "").startsWith("Rate-Limit");
+    return { status: "warn", label: gedrosselt ? `gedrosselt bis ${bis}` : `stumm bis ${bis}` };
+  }
   if (source.circuit_open) return { status: "error", label: "Gesperrt" };
   if (source.consecutive_failures > 0)
     return { status: "warn", label: `${source.consecutive_failures} Fehler in Folge` };

@@ -550,6 +550,29 @@ steht gleich unten unter [Den Feed finden](#den-feed-finden-statt-ihn-zu-raten).
 Welche Anbieter als Kandidaten taugen, steht vollständig in
 **[ENDPOINTS.md](ENDPOINTS.md#18-bereich)**.
 
+Aus dem Betrieb kamen dazu drei Meldungen, und sie sind der Grund für den
+Umbau, der in den beiden nächsten Abschnitten steht:
+
+```
+r/SexToyDeals: HTTPStatusError: Client error '404 Not Found'
+r/NSFWdeals: RateLimited: HTTP 429, retry after 58s
+https://www.mydealz.de/gruppe/erotik-rss: KeinFeed: HTML-Seite statt Feed
+```
+
+Das sind drei verschiedene Probleme, die vorher gleich aussahen — *„Quelle
+liefert nichts"* — und bei jedem Lauf gleich wiederkamen. Jetzt gilt:
+
+* **404 bei Reddit** heißt, den Subreddit gibt es nicht. Der Name wird aus
+  der Liste gestrichen und landet im Feld *Automatisch entfernt*; vorbelegt
+  ist `r/SexToyDeals` deshalb nicht mehr.
+* **429** heißt, Reddit drosselt diesen Server — häufig, wenn der VPS in
+  einem Rechenzentrums-Netz steht. Das ist kein Defekt: die Quelle bricht
+  den Durchlauf ab, macht beim nächsten Lauf **dort weiter, wo sie stand**,
+  und der Schutzschalter bleibt offen. Im UI steht dann *gedrosselt bis …*
+  statt *Fehler*.
+* **HTML statt Feed** heißt, der Pfad war geraten — dafür siehe den
+  nächsten Abschnitt.
+
 ### Den Feed finden, statt ihn zu raten
 
 Nachgetragen, nachdem ein geratener Pfad im Betrieb danebenlag:
@@ -574,6 +597,41 @@ nach (höchstens drei) und **schreibt die funktionierende in die
 Quellen-Einstellungen zurück**. Beim nächsten Lauf steht dort die richtige
 Adresse, sichtbar im UI. Damit darf in einem Feed-Feld auch die blanke
 **Adresse eines Shops** stehen — die Angebotsseite genügt.
+
+#### Wenn die Seite ihren Feed gar nicht auszeichnet
+
+Der nächste Betriebsbericht zeigte den Fall, für den das noch nicht reichte —
+mydealz nennt auf seinen Gruppen-Seiten keinen Feed:
+
+```
+https://www.mydealz.de/gruppe/erotik-rss: KeinFeed: Der Server hat eine
+HTML-Seite geliefert, keinen Feed (Seitentitel: 'Erotik Angebote ⇒ …').
+Auf der Seite ist auch kein Feed ausgezeichnet.
+```
+
+Unbekannt ist die Adresse deshalb nicht: jede Shop- und Community-Software
+legt ihre Feeds an derselben Handvoll Stellen ab. Hilft die Seite nicht
+weiter, klappert SparBit deshalb **die Muster der jeweiligen Software** ab:
+
+| Software | Eingetragen | Probiert wird dann |
+|---|---|---|
+| Pepper (mydealz, Preisjäger, Dealabs, HotUKDeals) | `/gruppe/erotik` | `/rss/gruppe/erotik`, `/gruppe/erotik-rss`, `/gruppe/erotik?rss=1` |
+| Pepper-Suche | `/search?q=satisfyer&rss=1` | `/rss/search?q=satisfyer`, `/search/rss?q=satisfyer` |
+| Shopify | `/collections/sale` | `/collections/sale.atom` |
+| WordPress / WooCommerce | `https://shop.de/angebote/` | `…/feed`, `…/rss`, `…/feed.xml` |
+
+Geraten wird dabei trotzdem nichts: **übernommen wird nur eine Adresse, die
+tatsächlich einen Feed zurückgegeben hat** — und sie wird wieder in die
+Einstellungen geschrieben. Bei Suchbegriffen wandert nicht nur die eine
+Adresse zurück, sondern gleich die **Vorlage für alle Begriffe**; sonst
+müsste sich jeder Begriff einzeln heilen.
+
+Das bleibt höflich: höchstens vier Muster pro Adresse, und eine Adresse, bei
+der alle durchgefallen sind, wird eine Stunde lang nicht noch einmal
+durchprobiert (*Jetzt testen* hebt die Sperrfrist sofort auf). Auch ein 404
+löst die Suche aus — bei einem geratenen Pfad heißt er „hier nicht", nicht
+„nirgends". Nur dort, wo die Adresse nachweislich stimmt, ist das abgeschaltet:
+bei Reddit-Subreddits ist ein 404 endgültig (siehe unten).
 
 Willst du es vorher wissen: **Quellen → Feed suchen**, oder auf der
 Kommandozeile:
@@ -1216,6 +1274,10 @@ sperrt, nützt dir nichts.
 | Oberfläche fehlt, API läuft | Node.js installieren (<https://nodejs.org>), dann `python run.py --rebuild` |
 | Port 8000 belegt | `python run.py --port 9000` |
 | Quelle liefert 403 | Manche Seiten stehen hinter Cloudflare. „Jetzt testen" zeigt den Grund; siehe [ENDPOINTS.md](ENDPOINTS.md). |
+| `KeinFeed: HTML-Seite geliefert, keinen Feed` | Der eingetragene Pfad ist kein Feed. SparBit probiert die üblichen Adressen selbst durch (siehe [Den Feed finden](#den-feed-finden-statt-ihn-zu-raten)); bleibt die Meldung, nennt sie, was probiert wurde — dann im Browser nachsehen und die Adresse eintragen. |
+| `r/…: HTTPStatusError: 404 Not Found` | Den Subreddit gibt es nicht. SparBit streicht ihn beim nächsten Lauf selbst und legt ihn unter *Automatisch entfernt* ab. |
+| `RateLimited: HTTP 429, retry after 58s` | Reddit drosselt diesen Server — typisch für VPS in Rechenzentrums-Netzen. Die Quelle macht eine Pause und beim nächsten Lauf dort weiter, wo sie stand. Bleibt es dabei: Intervall hochsetzen und *Subreddits pro Lauf* auf 1–2 stellen. |
+| Quelle steht auf „gedrosselt bis …" | Kein Defekt und keine Stummschaltung, sondern die Pause, um die die Gegenseite gebeten hat. Danach läuft sie von selbst weiter. |
 | Telegram schweigt | Dem Bot einmal selbst `/start` senden. Dann „Test senden" im UI. |
 | Kanal schweigt, Test schlägt fehl | Der Verlauf unter *Benachrichtigungen* nennt den Fehler im Klartext. Auf der Konsole: `python cli.py kanaele testen`. |
 | Discord: „sieht nicht nach einer Discord-Webhook-URL aus" | Es ist die Kanal- statt der Webhook-URL. Die richtige beginnt mit `https://discord.com/api/webhooks/`. |
@@ -1262,14 +1324,21 @@ Ehrlich benannt statt verschwiegen:
   bleibt alles, wie die Quelle es gemeldet hat. Das ist so gewollt, heißt
   aber: sie fängt nicht jeden Fall.
 * **Die 18+-Quellen sind ungeprüft wie alle anderen** — die vorbelegten
-  Gruppen-Pfade und Subreddit-Namen sind geraten. Neu ist, dass ein
-  falscher Pfad sich selbst heilt, solange die Seite ihren Feed auszeichnet;
-  tut sie das nicht, sagt die Fehlermeldung es im Klartext. Erst testen,
+  Gruppen-Pfade und Subreddit-Namen sind geraten. Ein falscher Pfad heilt
+  sich inzwischen selbst: erst über die Feed-Auszeichnung der Seite, und
+  wenn die fehlt, über die bekannten Muster der Shop-Software. Was Reddit
+  mit 404 beantwortet, verschwindet von selbst aus der Liste. Erst testen,
   dann behalten; Kandidaten und Feed-Konventionen stehen in
   [ENDPOINTS.md](ENDPOINTS.md#18-bereich).
-* **Die Feed-Suche findet nur, was ausgezeichnet ist.** Seiten, die ihren
-  Feed nirgends nennen, bleiben Handarbeit — dafür steht die Tabelle der
-  üblichen Adressen je Shop-System in ENDPOINTS.md.
+* **Auch die Muster-Suche hat eine Grenze.** Sie kennt Pepper, Shopify,
+  WordPress und die üblichen `/feed`-Varianten — eine Seite, die ihren Feed
+  weder auszeichnet noch an einer dieser Stellen hat, bleibt Handarbeit.
+  Die Tabelle der üblichen Adressen je Shop-System steht in ENDPOINTS.md.
+* **Ob es die vorbelegten Subreddits gibt, weiß ich weiterhin nicht.**
+  `r/SexToyDeals` ist aus dem Betrieb widerlegt und draußen; `r/NSFWdeals`
+  und `r/AdultDeals` sind in deinen Läufen nie bis zu einer Antwort
+  gekommen, weil vorher das Rate-Limit griff. Bleiben sie leer, ist
+  *Eigene 18+-Quellen* der Weg, der nichts rät.
 
 ---
 

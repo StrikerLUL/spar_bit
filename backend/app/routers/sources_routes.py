@@ -179,12 +179,26 @@ async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(404, "Quelle unbekannt")
     _pruefe_frei(db, source_id)
 
-    result = await src.health_check(build_context(cfg))
+    # Wer hier drueckt, will jetzt eine Antwort - nicht die Sperrfrist von
+    # vorhin, die verhindert, dass eine tote Adresse alle zehn Minuten
+    # durchprobiert wird.
+    from .. import feedfinder
+    feedfinder.pause_zuruecksetzen()
+
+    ctx = build_context(cfg)
+    result = await src.health_check(ctx)
 
     cfg.verification = "verified" if result.ok else "broken"
     cfg.last_verified = utcnow()
     if not result.ok:
         cfg.last_error = result.detail
+    # Was der Test unterwegs gelernt hat, gilt auch fuer den echten Lauf:
+    # eine gefundene Feed-Adresse, ein Subreddit, den es nicht gibt. Sonst
+    # zeigt der Test etwas anderes als die Quelle danach tut.
+    if ctx.notizen:
+        cfg.options = {**(cfg.options or {}), **ctx.notizen}
+        log.info("%s: Einstellungen beim Test korrigiert (%s)",
+                 source_id, ", ".join(sorted(ctx.notizen)))
     db.commit()
 
     return {

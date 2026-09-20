@@ -718,12 +718,24 @@ def befehl_quelle_testen(args) -> int:
                     continue
                 ctx = build_context(cfg)
             ergebnis = await quelle.health_check(ctx)
+            # Was der Test gelernt hat, gilt auch fuer den echten Lauf -
+            # sonst zeigt "testen" etwas anderes, als die Quelle danach tut.
+            gelernt = {k: v for k, v in ctx.notizen.items()
+                       if not k.startswith("_")}
+            if ctx.notizen:
+                with SessionLocal() as db:
+                    cfg = db.get(SourceConfig, quelle.id)
+                    if cfg is not None:
+                        cfg.options = {**(cfg.options or {}), **ctx.notizen}
+                        db.commit()
             if ergebnis.ok:
                 print(f"  {gruen('OK')}   {quelle.id:<18} {ergebnis.items_found:>3} "
                       f"Einträge  {ergebnis.latency_ms:>5} ms")
             else:
                 schlecht += 1
                 print(f"  {rot('FEHL')} {quelle.id:<18} {ergebnis.detail[:70]}")
+            for schluessel, wert in gelernt.items():
+                print(f"       {gelb('korrigiert')} {schluessel} = {wert}")
         print()
         return 1 if schlecht else 0
 
