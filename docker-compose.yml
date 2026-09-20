@@ -2,7 +2,10 @@ name: sparbit
 
 services:
   backend:
-    build: ./backend
+    build:
+      # Wurzel als Kontext, damit cli.py mit ins Image geht.
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: sparbit-backend
     restart: unless-stopped
     env_file: [.env]
@@ -39,8 +42,10 @@ services:
     environment:
       TZ: ${TZ:-Europe/Berlin}
     ports:
-      # Steht ein Reverse-Proxy davor, gehoert hier 127.0.0.1 hin - dann ist
-      # der Port nur lokal offen und nicht aus dem Internet erreichbar.
+      # Steht ein Reverse-Proxy davor - der mitgelieferte Caddy oder ein
+      # schon vorhandener -, gehoert hier 127.0.0.1 hin: dann ist der Port
+      # nur lokal offen. Ohne Proxy bleibt er offen, sonst kaeme man gar
+      # nicht erst rein.  Umschalten mit SPARBIT_WEB_BIND in der .env.
       - "${SPARBIT_WEB_BIND:-0.0.0.0}:${SPARBIT_WEB_PORT:-8080}:80"
     depends_on:
       backend:
@@ -98,6 +103,36 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
+  # HTTPS-Vorschaltung. Laeuft nur mit "--profile https", also nur dann,
+  # wenn in der .env eine Domain steht. Caddy holt und erneuert das
+  # Zertifikat selbst - es gibt hier nichts zu konfigurieren und nichts,
+  # was in 90 Tagen ablaeuft und vergessen wird.
+  caddy:
+    image: caddy:2-alpine
+    container_name: sparbit-caddy
+    restart: unless-stopped
+    profiles: ["https"]
+    environment:
+      SPARBIT_DOMAIN: ${SPARBIT_DOMAIN:?Fuer HTTPS muss SPARBIT_DOMAIN in der .env stehen}
+      SPARBIT_ACME_MAIL: ${SPARBIT_ACME_MAIL:-}
+      TZ: ${TZ:-Europe/Berlin}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
 volumes:
   sparbit-data:
   claimer-data:
+  caddy-data:
+  caddy-config:

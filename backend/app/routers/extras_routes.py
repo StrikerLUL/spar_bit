@@ -21,6 +21,8 @@ from ..currency import DEFAULT_RATES, get_rates, set_rates, to_eur
 from ..db import get_db, get_setting, set_setting
 from ..models import (Channel, Deal, DealOffer, Match, PriceHistory, Rule,
                       SavedSearch, SourceConfig, utcnow)
+from ..pricefehler import (HEISS as PF_HEISS, SCHWELLE_HEISS,
+                           VERDACHT as PF_VERDACHT, bewerte_deal)
 
 log = logging.getLogger(__name__)
 
@@ -188,6 +190,9 @@ def deal_detail(deal_id: int, db: Session = Depends(get_db)) -> dict:
         "seen_count": deal.seen_count, "bookmarked": deal.bookmarked,
         "alarm_preis": deal.alarm_preis, "alarm_ausgeloest": deal.alarm_ausgeloest,
         "notiz": deal.notiz,
+        "fehler_score": deal.fehler_score or 0, "fehler_stufe": deal.fehler_stufe,
+        "fehler_gruende": deal.fehler_gruende or [],
+        "fehler_erwartet_eur": deal.fehler_erwartet_eur,
         "verlauf": punkte,
         "tiefstpreis": min(preise_eur) if preise_eur else None,
         "hoechstpreis": max(preise_eur) if preise_eur else None,
@@ -338,6 +343,11 @@ def delete_search(search_id: int, db: Session = Depends(get_db)) -> dict:
 class GeneralSettings(BaseModel):
     waehrungskurse: dict[str, float] = {}
     benachrichtigungen_pausiert: bool = False
+    # Der Preisfehler-Waechter meldet unabhaengig von Regeln und Ruhezeit.
+    # Abschaltbar, weil "weckt dich nachts" eine Entscheidung ist, die man
+    # selbst treffen sollte.
+    preisfehler_waechter: bool = True
+    preisfehler_schwelle: int = 70
 
 
 @router.get("/settings")
@@ -346,6 +356,9 @@ def get_settings(db: Session = Depends(get_db)) -> dict:
         "waehrungskurse": get_setting(db, "currency_rates") or DEFAULT_RATES,
         "aktive_kurse": get_rates(),
         "benachrichtigungen_pausiert": bool(get_setting(db, "notifications_paused")),
+        "preisfehler_waechter": bool(get_setting(db, "preisfehler_waechter", True)),
+        "preisfehler_schwelle": int(get_setting(db, "preisfehler_schwelle",
+                                                SCHWELLE_HEISS)),
     }
 
 
@@ -353,6 +366,9 @@ def get_settings(db: Session = Depends(get_db)) -> dict:
 def put_settings(body: GeneralSettings, db: Session = Depends(get_db)) -> dict:
     set_setting(db, "currency_rates", body.waehrungskurse)
     set_setting(db, "notifications_paused", body.benachrichtigungen_pausiert)
+    set_setting(db, "preisfehler_waechter", body.preisfehler_waechter)
+    set_setting(db, "preisfehler_schwelle",
+                max(30, min(100, int(body.preisfehler_schwelle))))
     db.commit()
     set_rates(body.waehrungskurse)
     return get_settings(db)
@@ -378,3 +394,84 @@ def snooze_source(source_id: str, stunden: float = Query(6, ge=0, le=168),
     cfg.snooze_until = (utcnow() + timedelta(hours=stunden)) if stunden else None
     db.commit()
     return {"id": source_id, "snooze_until": cfg.snooze_until}
+
+
+# --- Preisfehler -----------------------------------------------------------
+
+@router.get("/preisfehler")
+def preisfehler_liste(tage: int = Query(7, ge=1, le=90),
+                      nur_heiss: bool = False,
+                      limit: int = Query(60, le=200),
+                      db: Session = Depends(get_db)) -> dict:
+    """Die aktuellen Preisfehler-Funde, nach Punktzahl sortiert.
+
+    Nicht nach Datum: bei Preisfehlern ist die Ueberzeugungskraft
+    interessanter als das Alter. Ein Fund von gestern mit 95 Punkten gehoert
+    ueber einen von heute Morgen mit 48.
+    """
+    stufen = [PF_HEISS] if nur_heiss else [PF_HEISS, PF_VERDACHT]
+    seit = utcnow() - timedelta(days=tage)
+    rows = list(db.scalars(
+        select(Deal)
+        .where(Deal.fehler_stufe.in_(stufen), Deal.last_seen >= seit)
+        .order_by(desc(Deal.fehler_score), desc(Deal.first_seen))
+        .limit(limit)))
+
+    return {
+        "schwelle": int(get_setting(db, "preisfehler_schwelle", SCHWELLE_HEISS)),
+        "waechter_aktiv": bool(get_setting(db, "preisfehler_waechter", True)),
+        "items": [{
+            "id": d.id, "titel": d.titel, "url": d.url, "bild": d.bild,
+            "bild_lokal": d.bild_lokal, "preis": d.preis,
+            "preis_eur": d.preis_eur, "originalpreis": d.originalpreis,
+            "rabatt_prozent": d.rabatt_prozent, "waehrung": d.waehrung,
+            "ist_gratis": d.ist_gratis, "haendler": d.haendler,
+            "quelle": d.quelle, "temperatur": d.temperatur,
+            "first_seen": d.first_seen, "last_seen": d.last_seen,
+            "bookmarked": d.bookmarked, "tags": d.tags or [],
+            "also_from": d.also_from or [],
+            "anzahl_angebote": 1 + len(d.also_from or []),
+            "urteil": d.urteil, "urteil_text": d.urteil_text,
+            "fehler_score": d.fehler_score or 0,
+            "fehler_stufe": d.fehler_stufe,
+            "fehler_gruende": d.fehler_gruende or [],
+            "fehler_erwartet_eur": d.fehler_erwartet_eur,
+            "fehler_gemeldet_am": d.fehler_gemeldet_am,
+        } for d in rows],
+    }
+
+
+@router.post("/preisfehler/{deal_id}/pruefen")
+def preisfehler_neu_pruefen(deal_id: int, db: Session = Depends(get_db)) -> dict:
+    """Einen Deal von Hand neu bewerten.
+
+    Nuetzlich nach dem Nachtragen von Waehrungskursen oder wenn seit dem
+    letzten Lauf weitere Quellen denselben Artikel gemeldet haben.
+    """
+    deal = db.get(Deal, deal_id)
+    if deal is None:
+        raise HTTPException(404, "Deal nicht gefunden")
+    urteil = bewerte_deal(db, deal)
+    deal.fehler_score = urteil.punkte
+    deal.fehler_stufe = urteil.stufe
+    deal.fehler_gruende = urteil.gruende
+    deal.fehler_erwartet_eur = urteil.erwartet_eur
+    deal.fehler_am = utcnow()
+    db.commit()
+    return urteil.as_dict()
+
+
+@router.post("/preisfehler/{deal_id}/verwerfen")
+def preisfehler_verwerfen(deal_id: int, db: Session = Depends(get_db)) -> dict:
+    """Fehlalarm wegklicken.
+
+    Setzt die Meldesperre, statt die Punktzahl zu loeschen: die Begruendung
+    bleibt nachvollziehbar, aber es kommt keine zweite Nachricht.
+    """
+    deal = db.get(Deal, deal_id)
+    if deal is None:
+        raise HTTPException(404, "Deal nicht gefunden")
+    deal.fehler_stufe = "kein"
+    deal.fehler_gemeldet_am = utcnow()
+    db.commit()
+    return {"ok": True, "id": deal.id}

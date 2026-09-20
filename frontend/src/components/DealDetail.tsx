@@ -5,11 +5,13 @@ import * as React from "react";
 import { api, type Angebot, type DealDetail as Detail } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import {
-  bildQuelle, cn, formatDateTime, formatPrice, sourceLabel, timeAgo,
+  bildQuelle, cn, formatAmount, formatDateTime, formatPrice, sourceLabel,
+  timeAgo, zeigeStreichpreis,
 } from "@/lib/utils";
 import { Sparkline } from "@/components/charts";
 import { Badge, Button, Dialog, Input, Label, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/Toast";
+import { FehlerBegruendung } from "@/components/Preisfehler";
 
 export function DealDetailDialog({
   dealId,
@@ -85,20 +87,26 @@ export function DealDetailDialog({
                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
             )}
             <div className="flex flex-wrap items-baseline gap-2">
-              <span className={cn("tabular text-2xl font-semibold",
-                                  data.ist_gratis && "text-primary")}>
+              <span className={cn("tabular text-2xl font-semibold tracking-tight",
+                                  data.ist_gratis && "text-success")}>
                 {data.ist_gratis ? "gratis" : formatPrice(data.preis, data.waehrung)}
               </span>
-              {data.originalpreis != null && data.preis != null
-                && data.originalpreis > data.preis && (
+              {/* formatAmount statt formatPrice: ein Streichpreis von 0,00
+                  wäre sonst als "gratis" durchgestrichen zu lesen. */}
+              {zeigeStreichpreis(data) && (
                 <span className="tabular text-sm text-muted-foreground line-through">
-                  {formatPrice(data.originalpreis, data.waehrung)}
+                  {formatAmount(data.originalpreis, data.waehrung)}
                 </span>
               )}
-              {data.rabatt_prozent != null && (
-                <Badge variant="warning">−{Math.round(data.rabatt_prozent)}%</Badge>
+              {data.rabatt_prozent != null && !data.ist_gratis && (
+                <Badge variant="warning" className="tabular">
+                  −{Math.round(data.rabatt_prozent)}%
+                </Badge>
               )}
             </div>
+
+            <FehlerBegruendung stufe={data.fehler_stufe} score={data.fehler_score}
+                               gruende={data.fehler_gruende} />
             {/* Der grosse Preis ist der beste ueber alle Quellen - ohne
                 diesen Hinweis wirkt er wie der Preis der Kopfzeilen-Quelle. */}
             {data.angebote.length > 1 && (
@@ -112,8 +120,8 @@ export function DealDetailDialog({
             )}
             {data.waehrung !== "EUR" && data.preis_eur != null && (
               <p className="text-xs text-muted-foreground">
-                entspricht {formatPrice(data.preis_eur)} — Regeln rechnen mit
-                diesem Wert.
+                entspricht {formatAmount(data.preis_eur)} — Regeln, Urteil und
+                Preisfehler-Prüfung rechnen mit diesem Wert.
               </p>
             )}
             {data.beschreibung && (

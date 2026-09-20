@@ -2,77 +2,116 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  /* Dunkel ist der Normalfall. Ruhige, kuehle Graustufen, ein einziger
-     Akzent (Smaragd) - der markiert Gratis-Funde und aktive Zustaende. */
-  :root {
-    --background: 222 24% 5%;
-    --foreground: 210 20% 96%;
-    --card: 222 22% 7.5%;
-    --card-foreground: 210 20% 96%;
-    --popover: 222 24% 8%;
-    --popover-foreground: 210 20% 96%;
-    --primary: 158 72% 45%;
-    --primary-foreground: 158 90% 6%;
-    --secondary: 220 16% 14%;
-    --secondary-foreground: 210 20% 92%;
-    --muted: 220 16% 13%;
-    --muted-foreground: 217 12% 60%;
-    --accent: 220 16% 16%;
-    --accent-foreground: 210 20% 96%;
-    --destructive: 0 72% 55%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 158 72% 45%;
-    --success-foreground: 158 90% 6%;
-    --warning: 38 92% 55%;
-    --warning-foreground: 38 92% 8%;
-    --border: 220 14% 16%;
-    --input: 220 14% 18%;
-    --ring: 158 72% 45%;
-    --radius: 0.85rem;
+/* ---------------------------------------------------------------------------
+   SparBit sieht aus wie ein Messgerät, nicht wie eine Produktseite.
 
-    /* Diagramm-Palette: Slots 1-3 der validierten Kategorie-Palette,
-       gestuft fuer dunkle Flaechen. Reihenfolge nicht aendern - sie ist
-       die Absicherung gegen Farbfehlsichtigkeit. Geprueft gegen die
-       Kartenflaeche #0f1117: alle Pruefungen bestanden. */
-    --viz-1: #3987e5;
-    --viz-2: #d95926;
-    --viz-3: #199e70;
-    --viz-grid: hsl(220 14% 22%);
-    --viz-surface: hsl(222 22% 7.5%);
+   Das ist eine Entscheidung, keine Geschmacksfrage: Was hier steht, sind
+   Zahlen, auf die man reagiert - Preise, Abweichungen, Quellen-Zustände.
+   Verlaufsflächen, Milchglas und weiche Schatten machen Zahlen schlechter
+   lesbar und lenken von ihnen ab.
+
+   Daraus folgt:
+     * Flächen sind flach und undurchsichtig. Kein backdrop-blur, keine
+       Farbverläufe im Hintergrund. Schatten nur dort, wo wirklich etwas
+       über etwas anderem liegt (Dialog, Menü).
+     * Kanten sind 1 px und knapp. Radius 4 px statt 14 px - weniger Rundung
+       heisst dichter zu setzende Tabellen.
+     * Drei Farben mit fester Bedeutung, sonst neutrale Grautöne:
+         ocker     = bedienbar / aktiv
+         zinnober  = Preisfehler, der Grund für dieses Programm
+         moos      = gratis und Bestpreis
+       Neutrale Töne sind leicht warm (Hue 35). Das unterscheidet die
+       Oberfläche vom blaustichigen Dunkelgrau, das jede zweite Web-App
+       benutzt, und ist über Stunden angenehmer.
+     * Zahlen laufen immer tabellarisch, damit Spalten stehen und ein
+       wechselnder Preis nicht springt.
+--------------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    --background: 35 7% 8%;
+    --foreground: 40 12% 91%;
+    --card: 35 6% 11%;
+    --card-foreground: 40 12% 91%;
+    --popover: 35 7% 13%;
+    --popover-foreground: 40 12% 93%;
+
+    /* Ocker: bedienbar, ausgewählt, verlinkt. */
+    --primary: 36 82% 56%;
+    --primary-foreground: 35 40% 8%;
+
+    --secondary: 35 5% 16%;
+    --secondary-foreground: 40 10% 88%;
+    --muted: 35 5% 15%;
+    --muted-foreground: 38 7% 60%;
+    --accent: 35 5% 18%;
+    --accent-foreground: 40 12% 93%;
+
+    /* Zinnober: nur für Preisfehler und echte Fehlerzustände. */
+    --destructive: 8 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --signal: 8 78% 58%;
+    --signal-foreground: 0 0% 100%;
+
+    /* Moos: gratis, Bestpreis, gesunde Quelle. */
+    --success: 142 38% 46%;
+    --success-foreground: 140 50% 7%;
+    --warning: 36 82% 56%;
+    --warning-foreground: 35 40% 8%;
+
+    --border: 35 5% 19%;
+    --input: 35 5% 22%;
+    --ring: 36 82% 56%;
+    --radius: 0.25rem;
+
+    /* Diagramm-Palette: unverändert in der Reihenfolge, sie ist die
+       Absicherung gegen Farbfehlsichtigkeit. Nur Raster und Grundfläche
+       folgen dem neuen Hintergrund. */
+    --viz-1: #4d8fe0;
+    --viz-2: #d9762a;
+    --viz-3: #4aa06e;
+    --viz-grid: hsl(35 5% 20%);
+    --viz-surface: hsl(35 6% 11%);
   }
 
   .light {
-    --background: 210 30% 98%;
-    --foreground: 222 30% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 30% 10%;
+    /* Papier, nicht Reinweiss: weniger Blendung neben dunklen Tabellen. */
+    --background: 40 24% 97%;
+    --foreground: 35 14% 12%;
+    --card: 40 30% 99%;
+    --card-foreground: 35 14% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 30% 10%;
-    --primary: 158 68% 36%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 214 20% 94%;
-    --secondary-foreground: 222 30% 14%;
-    --muted: 214 20% 95%;
-    --muted-foreground: 218 12% 42%;
-    --accent: 214 20% 92%;
-    --accent-foreground: 222 30% 12%;
-    --destructive: 0 72% 48%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 158 68% 34%;
-    --success-foreground: 0 0% 100%;
-    --warning: 32 88% 42%;
-    --warning-foreground: 0 0% 100%;
-    --border: 214 18% 88%;
-    --input: 214 18% 86%;
-    --ring: 158 68% 36%;
+    --popover-foreground: 35 14% 12%;
 
-    /* Dieselben drei Farbtoene, fuer helle Flaechen gestuft. */
-    --viz-1: #2a78d6;
-    --viz-2: #eb6834;
-    --viz-3: #1baf7a;
-    --viz-grid: hsl(214 18% 90%);
-    --viz-surface: #ffffff;
+    --primary: 30 78% 38%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 38 18% 92%;
+    --secondary-foreground: 35 14% 16%;
+    --muted: 38 18% 93%;
+    --muted-foreground: 35 8% 42%;
+    --accent: 38 18% 89%;
+    --accent-foreground: 35 14% 14%;
+
+    --destructive: 6 66% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --signal: 6 70% 44%;
+    --signal-foreground: 0 0% 100%;
+
+    --success: 142 44% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 30 78% 36%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 38 14% 85%;
+    --input: 38 14% 82%;
+    --ring: 30 78% 38%;
+
+    --viz-1: #2a6ec0;
+    --viz-2: #c25a18;
+    --viz-3: #2c7f51;
+    --viz-grid: hsl(38 14% 88%);
+    --viz-surface: #fffefb;
   }
 
   * {
@@ -85,31 +124,34 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-    /* Sehr dezenter Verlauf, damit die Flaeche nicht tot wirkt. */
-    background-image:
-      radial-gradient(60rem 40rem at 15% -10%, hsl(158 72% 45% / 0.05), transparent 60%),
-      radial-gradient(50rem 35rem at 100% 0%, hsl(210 80% 50% / 0.04), transparent 55%);
-    background-attachment: fixed;
+    /* cv05/cv11: einstöckiges g und l mit Schwanz - hilft, 1/l/I in
+       Preisen und IDs auseinanderzuhalten. */
+    font-feature-settings: "cv05", "cv11", "ss01";
+  }
+
+  /* Überschriften laufen enger als der Fliesstext. Bei einer Oberfläche mit
+     vielen kurzen Titeln wirkt Standard-Laufweite auseinandergefallen. */
+  h1, h2, h3 {
+    letter-spacing: -0.015em;
   }
 
   ::selection {
-    @apply bg-primary/25;
+    @apply bg-primary/30;
   }
 
-  /* Schlanke Scrollbars, die sich ins dunkle Layout einfuegen. */
   * {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
-  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-border;
-    border: 2px solid transparent;
+    @apply bg-border;
+    border: 3px solid transparent;
     background-clip: content-box;
+    border-radius: 99px;
   }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/40; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/50; }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -120,17 +162,40 @@
 }
 
 @layer utilities {
-  .glass {
-    @apply border border-border/70 bg-card/70 backdrop-blur-xl;
-  }
   /* Zahlen in Tabellen und Kacheln sollen nicht springen. */
   .tabular {
     font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "cv05";
   }
+
+  /* Die kleinen Grossbuchstaben-Beschriftungen über Kennzahlen und
+     Abschnitten. Eigene Klasse, weil sie an zwei Dutzend Stellen
+     identisch aussehen muss. */
+  .label {
+    @apply text-[10px] font-semibold uppercase tracking-[0.09em] text-muted-foreground;
+  }
+
+  /* Die einzige Fläche, die etwas anderes als Karte oder Hintergrund ist:
+     eingelassene Felder für Kennzahlen und Code. */
+  .inset {
+    @apply border border-border bg-background;
+  }
+
   .scrollbar-none {
     scrollbar-width: none;
   }
   .scrollbar-none::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Warnstreifen für den Preisfehler-Kopf. Diagonale statt Farbfläche:
+     lesbar auch für Farbfehlsichtige und nicht mit "Fehler" im Sinne von
+     "kaputt" zu verwechseln. */
+  .streifen {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      hsl(var(--signal) / 0.14) 0 6px,
+      transparent 6px 12px
+    );
   }
 }

@@ -1,0 +1,30 @@
+# Was nicht ins Backend-Image gehoert.
+# Der Build-Kontext ist die Projektwurzel (wegen cli.py), also muss hier
+# stehen, was sonst unnoetig mitwandert - vor allem node_modules, das den
+# Kontext sonst um hunderte Megabyte aufblaeht.
+.git
+.github
+.venv
+venv
+data
+claimer-data
+backups
+*.db
+*.db-wal
+*.db-shm
+.env
+!.env.example
+
+frontend/node_modules
+frontend/dist
+browser-extension
+
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+.idea
+.vscode
+.DS_Store

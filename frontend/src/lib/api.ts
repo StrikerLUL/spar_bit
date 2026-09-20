@@ -86,6 +86,12 @@ export interface Deal {
   anzahl_angebote: number;
   urteil: string | null;
   urteil_text: string | null;
+  /** Preisfehler-Verdacht, siehe backend/app/pricefehler.py. */
+  fehler_score: number;
+  fehler_stufe: "heiss" | "verdacht" | "kein" | null;
+  fehler_gruende: string[];
+  fehler_erwartet_eur: number | null;
+  fehler_gemeldet_am?: string | null;
   /** Nur bei Sortierung "fuer_mich" gesetzt. */
   passt_zu_mir?: number;
   passt_weil?: string[];
@@ -235,6 +241,8 @@ export interface Rule {
   nur_gratis: boolean;
   min_temperatur: number | null;
   min_urteil: string | null;
+  /** Mindestpunktzahl beim Preisfehler-Verdacht (0/null = egal). */
+  min_fehler_score: number | null;
   sources: string[];
   kategorien: string[];
   haendler: string[];
@@ -299,6 +307,7 @@ export interface Stats {
   treffer_heute: number;
   deals_heute: number;
   gratis_diese_woche: number;
+  preisfehler_offen: number;
   gesparter_betrag: number;
   deals_gesamt: number;
   quellen_ampel: { gruen: number; gelb: number; rot: number; aus: number };
@@ -370,6 +379,25 @@ export interface AppSettings {
   waehrungskurse: Record<string, number>;
   aktive_kurse: Record<string, number>;
   benachrichtigungen_pausiert: boolean;
+  /** Meldet Preisfehler sofort, an Regeln und Ruhezeiten vorbei. */
+  preisfehler_waechter: boolean;
+  /** Ab wie vielen Punkten gemeldet wird (30-100). */
+  preisfehler_schwelle: number;
+}
+
+export interface PreisfehlerListe {
+  schwelle: number;
+  waechter_aktiv: boolean;
+  items: Deal[];
+}
+
+export interface Fehlerurteil {
+  punkte: number;
+  stufe: string;
+  label: string;
+  gruende: string[];
+  erwartet_eur: number | null;
+  ersparnis_eur: number | null;
 }
 
 export interface SystemInfo {
@@ -459,6 +487,13 @@ export const api = {
       post<{ id: number; bookmarked: boolean }>(`/deals/${id}/bookmark`),
   },
   stats: () => get<Stats>("/stats"),
+  preisfehler: {
+    list: (tage = 7, nurHeiss = false) =>
+      get<PreisfehlerListe>(`/preisfehler?tage=${tage}&nur_heiss=${nurHeiss}`),
+    pruefen: (id: number) => post<Fehlerurteil>(`/preisfehler/${id}/pruefen`),
+    verwerfen: (id: number) =>
+      post<{ ok: boolean; id: number }>(`/preisfehler/${id}/verwerfen`),
+  },
   matches: (limit = 40) =>
     get<Array<Deal & { regel: string; created_at: string }>>(`/matches?limit=${limit}`),
   sources: {

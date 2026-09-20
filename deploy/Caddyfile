@@ -1,0 +1,39 @@
+# HTTPS fuer SparBit.
+#
+# Caddy besorgt das Zertifikat bei Let's Encrypt und erneuert es selbst.
+# Dafuer muss nur zweierlei stimmen: der A-Record der Domain zeigt auf diesen
+# Server, und Port 80 und 443 sind erreichbar. Sonst gibt es hier nichts
+# einzustellen - genau das ist der Grund, warum Caddy und nicht nginx.
+
+{
+	email {$SPARBIT_ACME_MAIL}
+	# Von aussen soll nicht zu sehen sein, was hier laeuft.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$SPARBIT_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer-when-downgrade"
+		-Server
+	}
+
+	# Der Live-Ticker ist ein SSE-Stream. Wird er gepuffert, kommt er nie an -
+	# darum bekommt er eine eigene Route ohne Zwischenspeicher und mit
+	# grosszuegigem Zeitlimit.
+	@events path /api/events*
+	reverse_proxy @events frontend:80 {
+		flush_interval -1
+		transport http {
+			response_header_timeout 24h
+		}
+	}
+
+	reverse_proxy frontend:80
+}

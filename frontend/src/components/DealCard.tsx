@@ -1,9 +1,21 @@
 import { Bookmark, ExternalLink, Flame, LineChart, Store } from "lucide-react";
 import type { Deal } from "@/lib/api";
-import { bildQuelle, cn, formatPrice, sourceLabel, timeAgo } from "@/lib/utils";
+import {
+  bildQuelle, cn, eurHinweis, formatAmount, formatPrice, sourceLabel, timeAgo,
+  zeigeStreichpreis,
+} from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui";
 import { UrteilBadge } from "@/components/Urteil";
+import { FehlerBalken, FehlerBadge } from "@/components/Preisfehler";
 
+/** Eine Deal-Karte.
+ *
+ *  Aufgebaut um den Preis, nicht um das Bild: das Bild ist bei Feeds oft
+ *  falsch verknüpft oder fehlt ganz, der Preis ist der Grund, warum man
+ *  hinschaut. Darum steht er gross, tabellarisch und mit allem daneben,
+ *  was man braucht, um ihn einzuordnen — Streichpreis, EUR-Gegenwert bei
+ *  Fremdwährung, Preisurteil.
+ */
 export function DealCard({
   deal,
   onBookmark,
@@ -13,41 +25,53 @@ export function DealCard({
   onBookmark?: (id: number) => void;
   onOpen?: (id: number) => void;
 }) {
-  const discount = deal.rabatt_prozent;
+  const rabatt = deal.rabatt_prozent;
+  const streichpreis = zeigeStreichpreis(deal);
+  const eur = eurHinweis(deal.preis_eur, deal.waehrung);
+  const bild = bildQuelle(deal);
+
   return (
     <Card hover className="group flex flex-col overflow-hidden">
-      <div className="relative aspect-[16/9] overflow-hidden bg-muted/40">
-        {bildQuelle(deal) ? (
+      <FehlerBalken stufe={deal.fehler_stufe} />
+
+      <div className="relative aspect-[16/9] overflow-hidden border-b border-border bg-muted/50">
+        {bild ? (
           <img
-            src={bildQuelle(deal)!}
+            src={bild}
             alt=""
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+            className="h-full w-full object-cover"
             onError={(e) => {
               // Kaputte Bild-URLs sind bei Feeds normal - Platzhalter statt Bruch.
               (e.currentTarget as HTMLImageElement).style.display = "none";
             }}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground/30">
-            <Store className="h-10 w-10" />
+          <div className="flex h-full items-center justify-center text-muted-foreground/25">
+            <Store className="h-8 w-8" strokeWidth={1.25} />
           </div>
         )}
 
-        <div className="absolute left-2.5 top-2.5 flex flex-wrap gap-1.5">
+        {/* pr-10 haelt die Abzeichen vom Merken-Knopf frei: ohne das laeuft
+            eine vierstellige Temperatur darunter und wird abgeschnitten. */}
+        <div className="absolute left-2 top-2 flex flex-wrap gap-1 pr-10">
+          <FehlerBadge stufe={deal.fehler_stufe} score={deal.fehler_score}
+                       gruende={deal.fehler_gruende} />
           {deal.ist_gratis ? (
-            <Badge variant="success" className="shadow-lg">GRATIS</Badge>
-          ) : discount ? (
-            <Badge variant="warning" className="shadow-lg">−{Math.round(discount)}%</Badge>
+            <Badge variant="success">Gratis</Badge>
+          ) : rabatt ? (
+            <Badge variant="warning" className="tabular">
+              −{Math.round(rabatt)}%
+            </Badge>
           ) : null}
           {deal.temperatur != null && deal.temperatur >= 200 && (
-            <Badge variant="destructive" className="shadow-lg">
+            <Badge variant="outline"
+                   className="tabular border-border bg-card/90 text-foreground">
               <Flame className="h-3 w-3" />
               {Math.round(deal.temperatur)}°
             </Badge>
           )}
-          <UrteilBadge stufe={deal.urteil} text={deal.urteil_text}
-                       className="shadow-lg" />
+          <UrteilBadge stufe={deal.urteil} text={deal.urteil_text} />
         </div>
 
         {onBookmark && (
@@ -55,22 +79,22 @@ export function DealCard({
             onClick={() => onBookmark(deal.id)}
             aria-label={deal.bookmarked ? "Merkung entfernen" : "Merken"}
             className={cn(
-              "absolute right-2.5 top-2.5 rounded-full p-2 backdrop-blur-md transition-all",
-              "bg-black/40 hover:bg-black/60",
-              deal.bookmarked ? "text-primary" : "text-white/70 hover:text-white",
+              "absolute right-2 top-2 rounded-sm border border-border p-1.5",
+              "bg-card/90 transition-colors hover:bg-card",
+              deal.bookmarked ? "text-primary" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <Bookmark className={cn("h-4 w-4", deal.bookmarked && "fill-current")} />
+            <Bookmark className={cn("h-3.5 w-3.5", deal.bookmarked && "fill-current")} />
           </button>
         )}
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex flex-1 flex-col gap-3 p-3.5">
         {onOpen ? (
           <button
             type="button"
             onClick={() => onOpen(deal.id)}
-            className="line-clamp-2 text-left text-sm font-medium leading-snug transition-colors hover:text-primary"
+            className="line-clamp-2 text-left text-[13px] font-medium leading-snug transition-colors hover:text-primary"
             title="Details, Preisverlauf und Preisalarm"
           >
             {deal.titel}
@@ -80,41 +104,47 @@ export function DealCard({
             href={deal.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="line-clamp-2 text-sm font-medium leading-snug transition-colors hover:text-primary"
+            className="line-clamp-2 text-[13px] font-medium leading-snug transition-colors hover:text-primary"
             title={deal.titel}
           >
             {deal.titel}
           </a>
         )}
 
-        <div className="mt-auto space-y-3">
-          <div className="flex items-baseline gap-2">
+        <div className="mt-auto space-y-2.5">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span
               className={cn(
-                "tabular text-lg font-semibold",
-                deal.ist_gratis && "text-primary",
+                "tabular text-[19px] font-semibold leading-none tracking-tight",
+                deal.ist_gratis && "text-success",
               )}
             >
               {deal.ist_gratis ? "gratis" : formatPrice(deal.preis, deal.waehrung)}
             </span>
-            {deal.originalpreis != null &&
-              deal.preis != null &&
-              deal.originalpreis > deal.preis && (
-                <span className="tabular text-xs text-muted-foreground line-through">
-                  {formatPrice(deal.originalpreis, deal.waehrung)}
-                </span>
-              )}
+            {streichpreis && (
+              <span className="tabular text-xs text-muted-foreground line-through decoration-muted-foreground/60">
+                {formatAmount(deal.originalpreis, deal.waehrung)}
+              </span>
+            )}
+            {eur && (
+              <span className="tabular text-[11px] text-muted-foreground"
+                    title="Umgerechnet mit dem hinterlegten Kurs">
+                {eur}
+              </span>
+            )}
           </div>
 
           {deal.passt_weil && deal.passt_weil.length > 0 && (
-            <p className="text-[11px] leading-relaxed text-primary/80"
+            <p className="text-[11px] leading-relaxed text-primary/90"
                title="So kommt SparBit auf diesen Vorschlag">
               passt zu dir: {deal.passt_weil.join(", ")}
             </p>
           )}
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-            <Badge variant="outline">{sourceLabel(deal.quelle)}</Badge>
+            <span className="font-medium text-foreground/70">
+              {sourceLabel(deal.quelle)}
+            </span>
             {deal.also_from.length > 0 && (
               <button
                 type="button"
@@ -123,14 +153,19 @@ export function DealCard({
                   deal.also_from.map(sourceLabel).join(", ")}`}
                 className="text-primary transition-colors hover:underline"
               >
-                {deal.anzahl_angebote} Angebote
+                +{deal.also_from.length}
               </button>
             )}
-            {deal.haendler && <span className="truncate">{deal.haendler}</span>}
-            <span className="ml-auto shrink-0">{timeAgo(deal.first_seen)}</span>
+            {deal.haendler && (
+              <>
+                <span aria-hidden className="text-border">·</span>
+                <span className="truncate">{deal.haendler}</span>
+              </>
+            )}
+            <span className="ml-auto shrink-0 tabular">{timeAgo(deal.first_seen)}</span>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-1.5">
             <Button
               variant="outline"
               size="sm"

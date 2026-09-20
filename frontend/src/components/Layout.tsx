@@ -1,6 +1,6 @@
 import {
-  BarChart3, Bell, Bookmark, Boxes, Command, Eye, Gift, LayoutDashboard, LogOut,
-  Menu, Monitor, Moon, Radio, ScrollText, SlidersHorizontal, Sparkles, Sun, X,
+  AlertTriangle, BarChart3, Bell, Bookmark, Boxes, Command, Eye, Gauge, Gift,
+  LogOut, Menu, Monitor, Moon, Radio, ScrollText, SlidersHorizontal, Sun, Tag, X,
 } from "lucide-react";
 import * as React from "react";
 import { NavLink, useLocation } from "react-router-dom";
@@ -8,16 +8,42 @@ import type { Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Button, StatusDot } from "@/components/ui";
 
-const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/feed", label: "Feed", icon: Boxes },
-  { to: "/wunschliste", label: "Wunschliste", icon: Eye },
-  { to: "/statistiken", label: "Statistiken", icon: BarChart3 },
-  { to: "/quellen", label: "Quellen", icon: Radio },
-  { to: "/regeln", label: "Regeln", icon: SlidersHorizontal },
-  { to: "/benachrichtigungen", label: "Benachrichtigungen", icon: Bell },
-  { to: "/claimer", label: "Claimer", icon: Gift },
-  { to: "/system", label: "Logs & System", icon: ScrollText },
+interface NavPunkt {
+  to: string;
+  label: string;
+  icon: typeof Gauge;
+  end?: boolean;
+}
+
+// In Gruppen statt einer flachen Liste: neun gleichrangige Punkte zwingen
+// dazu, jedes Mal alle zu lesen. "Preisfehler" steht bewusst direkt unter
+// der Uebersicht - es ist der Punkt, fuer den es dieses Programm gibt.
+const NAV: Array<{ gruppe: string; punkte: NavPunkt[] }> = [
+  {
+    gruppe: "Finden",
+    punkte: [
+      { to: "/", label: "Übersicht", icon: Gauge, end: true },
+      { to: "/preisfehler", label: "Preisfehler", icon: AlertTriangle },
+      { to: "/feed", label: "Feed", icon: Boxes },
+      { to: "/wunschliste", label: "Wunschliste", icon: Eye },
+    ],
+  },
+  {
+    gruppe: "Einstellen",
+    punkte: [
+      { to: "/regeln", label: "Regeln", icon: SlidersHorizontal },
+      { to: "/benachrichtigungen", label: "Kanäle", icon: Bell },
+      { to: "/quellen", label: "Quellen", icon: Radio },
+    ],
+  },
+  {
+    gruppe: "Nachsehen",
+    punkte: [
+      { to: "/statistiken", label: "Statistiken", icon: BarChart3 },
+      { to: "/claimer", label: "Claimer", icon: Gift },
+      { to: "/system", label: "Logs & System", icon: ScrollText },
+    ],
+  },
 ];
 
 export function Layout({
@@ -44,30 +70,36 @@ export function Layout({
   React.useEffect(() => setMobileOpen(false), [location.pathname]);
 
   const navItems = (
-    <nav className="flex flex-col gap-0.5">
-      {NAV.map(({ to, label, icon: Icon, end }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={end}
-          className={({ isActive }) =>
-            cn(
-              "group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium",
-              "transition-colors duration-150",
-              isActive
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )
-          }
-        >
-          {({ isActive }) => (
-            <>
-              <Icon className={cn("h-4 w-4 shrink-0 transition-transform",
-                                  !isActive && "group-hover:scale-110")} />
-              <span className="truncate">{label}</span>
-            </>
-          )}
-        </NavLink>
+    <nav className="flex flex-col gap-5">
+      {NAV.map(({ gruppe, punkte }) => (
+        <div key={gruppe}>
+          <p className="label mb-1.5 px-2.5">{gruppe}</p>
+          <div className="flex flex-col gap-px">
+            {punkte.map(({ to, label, icon: Icon, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2.5 rounded-sm border-l-2 py-1.5 pl-2 pr-2.5",
+                    "text-[13px] transition-colors duration-100",
+                    // Aktiv wird mit einer Kante links markiert statt mit einer
+                    // Farbflaeche: die Flaeche konkurriert sonst mit allem
+                    // anderen Farbigen auf der Seite, und farbig ist hier nur
+                    // reserviert fuer Preise und Preisfehler.
+                    isActive
+                      ? "border-primary bg-accent font-medium text-foreground"
+                      : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )
+                }
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                <span className="truncate">{label}</span>
+              </NavLink>
+            ))}
+          </div>
+        </div>
       ))}
     </nav>
   );
@@ -75,13 +107,13 @@ export function Layout({
   return (
     <div className="min-h-dvh">
       {/* Desktop-Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-border bg-card/40 backdrop-blur-xl lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-border bg-card lg:flex">
         <Brand />
         <div className="px-3">
           <button
             type="button"
             onClick={onOpenPalette}
-            className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex w-full items-center gap-2 rounded-sm border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <Command className="h-3.5 w-3.5" />
             Schnellzugriff
@@ -90,19 +122,19 @@ export function Layout({
             </kbd>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 py-4">{navItems}</div>
+        <div className="flex-1 overflow-y-auto px-2.5 py-4">{navItems}</div>
         <Footer connected={connected} username={username} onLogout={onLogout}
                 theme={theme} setTheme={setTheme} />
       </aside>
 
       {/* Mobile-Kopfzeile */}
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-background/85 px-4 py-3 backdrop-blur-xl lg:hidden">
+      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-card px-4 py-2.5 lg:hidden">
         <Button variant="ghost" size="icon" onClick={() => setMobileOpen(true)}
           aria-label="Menü öffnen">
           <Menu className="h-5 w-5" />
         </Button>
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-primary" />
+          <Tag className="h-4 w-4 -rotate-90 text-primary" strokeWidth={2} />
           <span className="font-semibold tracking-tight">SparBit</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -116,9 +148,9 @@ export function Layout({
       {/* Mobile-Schublade */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in"
+          <div className="absolute inset-0 bg-black/65 animate-fade-in"
             onClick={() => setMobileOpen(false)} aria-hidden />
-          <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-border bg-card shadow-2xl animate-slide-up">
+          <aside className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col border-r border-border bg-card shadow-xl shadow-black/40">
             <div className="flex items-center justify-between pr-2">
               <Brand />
               <Button variant="ghost" size="icon" onClick={() => setMobileOpen(false)}
@@ -126,14 +158,14 @@ export function Layout({
                 <X className="h-5 w-5" />
               </Button>
             </div>
-            <div className="flex-1 overflow-y-auto px-3 py-4">{navItems}</div>
+            <div className="flex-1 overflow-y-auto px-2.5 py-4">{navItems}</div>
             <Footer connected={connected} username={username} onLogout={onLogout}
                     theme={theme} setTheme={setTheme} />
           </aside>
         </div>
       )}
 
-      <main className="lg:pl-60">
+      <main className="lg:pl-56">
         <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
           {children}
         </div>
@@ -142,14 +174,20 @@ export function Layout({
   );
 }
 
+/** Wortmarke.
+ *
+ *  Kein Funkel-Symbol mehr: das Sparkles-Icon steht inzwischen fuer "hier
+ *  war ein Generator am Werk" und sagt ueber dieses Programm nichts aus.
+ *  Ein Preisschild sagt, worum es geht.
+ */
 const Brand = () => (
-  <div className="flex h-16 items-center gap-2.5 px-5">
-    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
-      <Sparkles className="h-4 w-4 text-primary" />
-    </div>
-    <div className="leading-tight">
-      <p className="font-semibold tracking-tight">SparBit</p>
-      <p className="text-[11px] text-muted-foreground">Deal-Zentrale</p>
+  <div className="flex h-14 items-center gap-2.5 border-b border-border px-4">
+    <Tag className="h-4 w-4 shrink-0 -rotate-90 text-primary" strokeWidth={2} />
+    <div className="leading-none">
+      <p className="text-[15px] font-semibold tracking-tight">SparBit</p>
+      <p className="mt-1 text-[10px] uppercase tracking-[0.13em] text-muted-foreground">
+        Preiswächter
+      </p>
     </div>
   </div>
 );
@@ -179,7 +217,7 @@ const Footer = ({
       {connected ? "Live verbunden" : "Verbindung getrennt"}
     </div>
 
-    <div className="mb-2 flex gap-1 rounded-md bg-muted/40 p-1">
+    <div className="mb-2 flex gap-px rounded-sm border border-border p-px">
       {THEMES.map(({ value, icon: Icon, label }) => (
         <button
           key={value}
@@ -189,9 +227,9 @@ const Footer = ({
           aria-label={`Thema: ${label}`}
           aria-pressed={theme === value}
           className={cn(
-            "flex flex-1 items-center justify-center rounded py-1.5 transition-colors",
+            "flex flex-1 items-center justify-center rounded-[2px] py-1 transition-colors",
             theme === value
-              ? "bg-card text-foreground shadow-sm"
+              ? "bg-accent text-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
@@ -220,9 +258,9 @@ export function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4 sm:mb-8">
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
       <div className="min-w-0 space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
         {description && (
           <p className="max-w-2xl text-sm text-muted-foreground">{description}</p>
         )}

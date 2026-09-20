@@ -38,6 +38,12 @@ export default {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--warning-foreground))",
         },
+        // Eigene Rolle statt "destructive": ein Preisfehler ist kein
+        // Fehlerzustand der Anwendung, sondern ihr wertvollster Fund.
+        signal: {
+          DEFAULT: "hsl(var(--signal))",
+          foreground: "hsl(var(--signal-foreground))",
+        },
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
@@ -48,9 +54,9 @@ export default {
         },
       },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        lg: "calc(var(--radius) + 2px)",
+        md: "var(--radius)",
+        sm: "calc(var(--radius) - 1px)",
       },
       fontFamily: {
         sans: ["Inter var", "Inter", "ui-sans-serif", "system-ui", "-apple-system",
@@ -60,7 +66,7 @@ export default {
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
         "slide-up": {
-          from: { opacity: "0", transform: "translateY(8px)" },
+          from: { opacity: "0", transform: "translateY(4px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
         "pulse-dot": {
@@ -69,9 +75,11 @@ export default {
         },
       },
       animation: {
-        "fade-in": "fade-in 0.25s ease-out",
-        "slide-up": "slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
-        "pulse-dot": "pulse-dot 2s ease-in-out infinite",
+        // Kürzer als vorher: eine Oberfläche, die man den ganzen Tag
+        // bedient, soll nicht bei jedem Klick nachschwingen.
+        "fade-in": "fade-in 0.12s ease-out",
+        "slide-up": "slide-up 0.16s cubic-bezier(0.2, 0.9, 0.3, 1)",
+        "pulse-dot": "pulse-dot 2.4s ease-in-out infinite",
       },
     },
   },

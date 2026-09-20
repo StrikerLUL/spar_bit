@@ -26,6 +26,7 @@ class RuleBody(BaseModel):
     nur_gratis: bool = False
     min_temperatur: float | None = None
     min_urteil: str | None = None
+    min_fehler_score: int | None = None
     sources: list[str] = []
     kategorien: list[str] = []
     haendler: list[str] = []
@@ -39,6 +40,7 @@ def _rule_dict(r: Rule) -> dict:
         "blacklist": r.blacklist or [], "max_preis": r.max_preis,
         "min_rabatt_prozent": r.min_rabatt_prozent, "nur_gratis": r.nur_gratis,
         "min_temperatur": r.min_temperatur, "min_urteil": r.min_urteil,
+        "min_fehler_score": r.min_fehler_score,
         "sources": r.sources or [],
         "kategorien": r.kategorien or [], "haendler": r.haendler or [],
         "channels": r.channels or [], "created_at": r.created_at,
@@ -94,7 +96,7 @@ def preview_rule(body: RuleBody, sample: int = Query(500, le=2000),
         blacklist=body.blacklist, max_preis=body.max_preis,
         min_rabatt_prozent=body.min_rabatt_prozent, nur_gratis=body.nur_gratis,
         min_temperatur=body.min_temperatur, min_urteil=body.min_urteil,
-        sources=body.sources,
+        min_fehler_score=body.min_fehler_score, sources=body.sources,
         kategorien=body.kategorien, haendler=body.haendler,
     )
     return preview(spec, deals)

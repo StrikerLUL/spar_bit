@@ -280,3 +280,62 @@ def test_guenstigstes_angebot_ueber_waehrungen(db):
     alle = angebote(db, db.scalars(select(Deal)).one().id)
     guenstigstes = min(alle.values(), key=lambda a: a.preis_eur)
     assert guenstigstes.quelle == "cheapshark"
+
+
+# --- Preisanzeige bleibt in sich stimmig ----------------------------------
+#
+# Diese Faelle erzeugten sichtbar falsche Karten: ein Streichpreis in der
+# falschen Waehrung, ein Rabatt, der zu keinem der beiden Preise passte, oder
+# ein durchgestrichener Betrag unter dem aktuellen Preis.
+
+def test_waehrungswechsel_nimmt_den_streichpreis_mit(db):
+    """Uebernimmt eine guenstigere USD-Quelle den Deal, darf der alte
+    EUR-Streichpreis nicht mit Dollarzeichen stehen bleiben."""
+    ingest(db, "mydealz", [item(titel="Spiel X", url="https://a.de/x",
+                                preis=40.0, originalpreis=60.0, waehrung="EUR")])
+    ingest(db, "cheapshark", [item(titel="Spiel X", url="https://b.com/x",
+                                   preis=20.0, waehrung="USD")])
+
+    deal = db.scalar(select(Deal).where(Deal.titel == "Spiel X"))
+    assert deal.waehrung == "USD"
+    assert deal.preis == 20.0
+    # Entweder ein zur neuen Waehrung passender Streichpreis oder gar keiner -
+    # aber nie der alte EUR-Wert mit dem neuen Zeichen davor.
+    assert deal.originalpreis is None
+
+
+def test_rabatt_passt_immer_zu_den_angezeigten_preisen(db):
+    """Der Prozentwert wird aus Preis und Streichpreis gerechnet, nicht von
+    der Quelle uebernommen - sonst steht er neben zwei Zahlen, aus denen er
+    sich nicht ergibt."""
+    ingest(db, "mydealz", [item(titel="Monitor", url="https://a.de/m",
+                                preis=100.0, originalpreis=200.0,
+                                rabatt_prozent=80.0)])
+    deal = db.scalar(select(Deal).where(Deal.titel == "Monitor"))
+    assert deal.rabatt_prozent == 50.0
+
+
+def test_unsinniger_streichpreis_wird_nicht_uebernommen(db):
+    """Ein Originalpreis unter dem Preis ist ein Datenfehler der Quelle."""
+    ingest(db, "mydealz", [item(titel="Kabel", url="https://a.de/k",
+                                preis=19.99, originalpreis=9.99)])
+    deal = db.scalar(select(Deal).where(Deal.titel == "Kabel"))
+    assert deal.originalpreis is None
+
+
+def test_guenstigerer_preis_bringt_seinen_eigenen_streichpreis_mit(db):
+    ingest(db, "mydealz", [item(titel="Sessel", url="https://a.de/s",
+                                preis=300.0, originalpreis=400.0)])
+    ingest(db, "preisjaeger", [item(titel="Sessel", url="https://b.de/s",
+                                    preis=250.0, originalpreis=500.0)])
+    deal = db.scalar(select(Deal).where(Deal.titel == "Sessel"))
+    assert (deal.preis, deal.originalpreis) == (250.0, 500.0)
+    assert deal.rabatt_prozent == 50.0
+
+
+def test_gratis_wird_als_hundert_prozent_gefuehrt(db):
+    ingest(db, "epic", [item(titel="Freebie", url="https://a.de/f",
+                             preis=0.0, originalpreis=29.99, ist_gratis=True)])
+    deal = db.scalar(select(Deal).where(Deal.titel == "Freebie"))
+    assert deal.ist_gratis
+    assert deal.rabatt_prozent == 100.0

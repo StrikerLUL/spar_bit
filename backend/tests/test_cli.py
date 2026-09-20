@@ -23,8 +23,12 @@ def datendir(tmp_path_factory):
 
 def rufe(datendir, *args):
     umgebung = {**os.environ, "SPARBIT_DATA_DIR": str(datendir), "NO_COLOR": "1"}
+    # encoding explizit: die CLI schreibt UTF-8, waehrend Python auf Windows
+    # sonst mit der Konsolen-Codepage dekodiert - dann kommen hier Umlaute
+    # als Doppelzeichen an und jeder Textvergleich schlaegt fehl.
     return subprocess.run([sys.executable, str(CLI), *args], capture_output=True,
-                          text=True, env=umgebung, cwd=str(WURZEL), timeout=120)
+                          text=True, encoding="utf-8", errors="replace",
+                          env=umgebung, cwd=str(WURZEL), timeout=120)
 
 
 # --- Grundlagen ------------------------------------------------------------

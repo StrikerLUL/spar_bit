@@ -1,5 +1,5 @@
 import {
-  CheckCircle2, Lightbulb, Plus, SlidersHorizontal, Sparkles, Target, Trash2,
+  CheckCircle2, Lightbulb, Plus, SlidersHorizontal, Target, Trash2,
   XCircle, Zap,
 } from "lucide-react";
 import * as React from "react";
@@ -38,10 +38,17 @@ const VORLAGEN: Array<{ name: string; beschreibung: string; regel: Partial<RuleD
   },
   {
     name: "Preisfehler",
-    beschreibung: "Mindestens 80 % Rabatt und heiß diskutiert.",
+    beschreibung: "Belegte Preisfehler, sofort. Nutzt die Punktzahl aus dem "
+      + "Verlauf statt eines Rabatt-Schwellwerts.",
     regel: {
-      name: "Preisfehler", min_rabatt_prozent: 80, min_temperatur: 300,
-      priority: "SOFORT",
+      name: "Preisfehler", min_fehler_score: 70, priority: "SOFORT",
+    },
+  },
+  {
+    name: "Preisfehler-Verdacht",
+    beschreibung: "Auch die unsicheren Fälle — mehr Treffer, mehr Fehlalarme.",
+    regel: {
+      name: "Preisfehler-Verdacht", min_fehler_score: 45, priority: "NORMAL",
     },
   },
   {
@@ -72,6 +79,7 @@ const EMPTY_RULE: RuleDraft = {
   nur_gratis: false,
   min_temperatur: null,
   min_urteil: null,
+  min_fehler_score: null,
   sources: [],
   kategorien: [],
   haendler: [],
@@ -134,7 +142,7 @@ export function Rules() {
               })}
               className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
             >
-              <Sparkles className="mr-1 inline h-3 w-3" />
+              <Lightbulb className="mr-1 inline h-3 w-3" />
               {vorlage.name}
             </button>
           ))}
@@ -198,6 +206,11 @@ export function Rules() {
                 {rule.min_urteil && (
                   <Badge variant="default">≥ {urteilLabel(rule.min_urteil)}</Badge>
                 )}
+                {rule.min_fehler_score ? (
+                  <Badge variant="signal">
+                    Preisfehler ≥ {rule.min_fehler_score}
+                  </Badge>
+                ) : null}
                 {rule.keywords.slice(0, 3).map((keyword) => (
                   <Badge key={keyword}>{keyword}</Badge>
                 ))}
@@ -253,6 +266,7 @@ const toDraft = (rule: Rule): RuleDraft => ({
   nur_gratis: rule.nur_gratis,
   min_temperatur: rule.min_temperatur,
   min_urteil: rule.min_urteil,
+  min_fehler_score: rule.min_fehler_score,
   sources: rule.sources,
   kategorien: rule.kategorien,
   haendler: rule.haendler,
@@ -395,6 +409,27 @@ function RuleEditor({
               onChange={(v) => set("min_rabatt_prozent", v)} />
             <NumberField label="Min. Temp." suffix="°" value={draft.min_temperatur}
               onChange={(v) => set("min_temperatur", v)} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Preisfehler-Verdacht</Label>
+            <Select
+              value={draft.min_fehler_score ? String(draft.min_fehler_score) : ""}
+              onChange={(e) =>
+                set("min_fehler_score", e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">egal</option>
+              <option value="45">ab Verdacht (45 Punkte)</option>
+              <option value="70">nur belegte Fälle (70 Punkte)</option>
+              <option value="85">nur eindeutige Fälle (85 Punkte)</option>
+            </Select>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Preise, die kein Rabatt erklärt — verrutschte Kommastelle,
+              ausdrücklich als Preisfehler gemeldet, oder weit unter allem,
+              was andere Quellen verlangen. Belegte Fälle meldet der Wächter
+              ohnehin sofort; eine Regel braucht es nur, wenn du sie an einen
+              bestimmten Kanal schicken willst.
+            </p>
           </div>
 
           <div className="space-y-1.5">

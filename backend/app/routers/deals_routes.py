@@ -12,6 +12,7 @@ from ..models import Deal, Match, Rule, SourceConfig, utcnow
 from ..learning import trainiere
 from ..search import fts_verfuegbar, match_bedingung
 from ..verdict import mindestens
+from ..pricefehler import HEISS as PF_HEISS, VERDACHT as PF_VERDACHT
 
 router = APIRouter(prefix="/api", tags=["deals"],
                    dependencies=[Depends(current_user)])
@@ -32,6 +33,9 @@ def _deal_dict(d: Deal) -> dict:
         "beste_quelle": d.quelle,
         "anzahl_angebote": 1 + len(d.also_from or []),
         "urteil": d.urteil, "urteil_text": d.urteil_text,
+        "fehler_score": d.fehler_score or 0, "fehler_stufe": d.fehler_stufe,
+        "fehler_gruende": d.fehler_gruende or [],
+        "fehler_erwartet_eur": d.fehler_erwartet_eur,
     }
 
 
@@ -44,6 +48,7 @@ def list_deals(
     max_preis: float | None = None,
     bookmarked: bool = False,
     urteil: str | None = None,
+    preisfehler: str | None = None,
     sortierung: str = "neu",
     limit: int = Query(60, le=200),
     offset: int = 0,
@@ -77,6 +82,12 @@ def list_deals(
     if urteil:
         # "mindestens gut" heisst: gut, sehr gut oder Bestpreis.
         conditions.append(Deal.urteil.in_(mindestens(urteil)))
+    if preisfehler:
+        # "verdacht" schliesst "heiss" mit ein - wer Verdachtsfaelle sehen
+        # will, will die bestaetigten erst recht sehen.
+        stufen = ([PF_HEISS] if preisfehler == PF_HEISS
+                  else [PF_HEISS, PF_VERDACHT])
+        conditions.append(Deal.fehler_stufe.in_(stufen))
 
     if conditions:
         stmt = stmt.where(*conditions)
@@ -158,12 +169,25 @@ def stats(db: Session = Depends(get_db)) -> dict:
 
     # Gesparter Betrag: nur ueber Deals, die eine Regel getroffen haben -
     # sonst zaehlt man sich an Deals reich, die man nie wollte.
-    gespart = db.scalar(
-        select(func.coalesce(func.sum(Deal.originalpreis - Deal.preis), 0.0))
+    #
+    # Gerechnet wird in EUR und mit dem Faktor zwischen Preis und Streichpreis,
+    # nicht mit der Differenz der Rohwerte: sonst wuerde eine USD-Ersparnis als
+    # Euro mitgezaehlt und die Zahl waere quellenabhaengig falsch. Deals ohne
+    # EUR-Umrechnung bleiben draussen - lieber weniger zaehlen als falsch.
+    zeilen = db.execute(
+        select(Deal.preis, Deal.originalpreis, Deal.preis_eur, Deal.urteil)
         .select_from(Match).join(Deal, Deal.id == Match.deal_id)
         .where(Match.created_at >= week, Deal.originalpreis.isnot(None),
-               Deal.preis.isnot(None), Deal.originalpreis > Deal.preis)
-    ) or 0.0
+               Deal.preis.isnot(None), Deal.preis_eur.isnot(None),
+               Deal.originalpreis > Deal.preis)
+    ).all()
+    gespart = 0.0
+    for preis, original, preis_eur, urteil in zeilen:
+        # Eine als unglaubwuerdig erkannte UVP faellt raus - sie wuerde die
+        # Summe genau um den Betrag aufblasen, den es nie zu sparen gab.
+        if urteil == "uvp_fragwuerdig" or not preis:
+            continue
+        gespart += preis_eur * (original / preis - 1)
 
     cfgs = list(db.scalars(select(SourceConfig)))
     ampel = {"gruen": 0, "gelb": 0, "rot": 0, "aus": 0}
@@ -186,6 +210,10 @@ def stats(db: Session = Depends(get_db)) -> dict:
         "treffer_heute": treffer_heute,
         "deals_heute": deals_heute,
         "gratis_diese_woche": gratis_woche,
+        "preisfehler_offen": db.scalar(
+            select(func.count()).select_from(Deal)
+            .where(Deal.fehler_stufe == PF_HEISS,
+                   Deal.first_seen >= now - timedelta(days=3))) or 0,
         "gesparter_betrag": round(float(gespart), 2),
         "deals_gesamt": db.scalar(select(func.count()).select_from(Deal)) or 0,
         "quellen_ampel": ampel,

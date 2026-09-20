@@ -1,4 +1,10 @@
-/** UI-Primitive im shadcn-Stil: eigene Komponenten, keine Fremdabhaengigkeit. */
+/** UI-Primitive: eigene Komponenten, keine Fremdabhaengigkeit.
+ *
+ *  Flach gehalten. Karten haben eine Kante, keinen Schatten - ein Schatten
+ *  behauptet, dass etwas ueber etwas anderem schwebt, und das stimmt bei
+ *  einer Karte in einem Raster nicht. Schatten gibt es nur bei Dialog,
+ *  Menue und Toast, wo es tatsaechlich so ist.
+ */
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
@@ -11,9 +17,9 @@ export const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-lg border border-border bg-card text-card-foreground",
-      "shadow-sm transition-all duration-200",
-      hover && "hover:border-border/80 hover:shadow-lg hover:shadow-black/20",
+      "rounded-md border border-border bg-card text-card-foreground",
+      "transition-colors duration-100",
+      hover && "hover:border-muted-foreground/35",
       className,
     )}
     {...props}
@@ -43,17 +49,19 @@ export const CardFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDiv
 
 // --- Button --------------------------------------------------------------
 
-type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "destructive" | "link";
+type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "destructive"
+  | "signal" | "link";
 type ButtonSize = "sm" | "md" | "lg" | "icon";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   default:
-    "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm " +
+    "bg-primary text-primary-foreground hover:bg-primary/85 " +
     "focus-visible:ring-primary/50",
   secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
   outline: "border border-border bg-transparent hover:bg-accent hover:text-accent-foreground",
   ghost: "bg-transparent hover:bg-accent hover:text-accent-foreground",
-  destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+  destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/85",
+  signal: "bg-signal text-signal-foreground hover:bg-signal/85",
   link: "bg-transparent text-primary underline-offset-4 hover:underline",
 };
 
@@ -77,10 +85,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       disabled={disabled || loading}
       className={cn(
         "inline-flex select-none items-center justify-center whitespace-nowrap rounded-md",
-        "font-medium transition-all duration-150",
+        "font-medium transition-colors duration-100",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         "disabled:pointer-events-none disabled:opacity-50",
-        "active:scale-[0.98]",
         BUTTON_VARIANTS[variant],
         BUTTON_SIZES[size],
         size !== "icon" && "h-9",
@@ -105,15 +112,19 @@ export const Spinner = ({ className }: { className?: string }) => (
 
 // --- Badge ---------------------------------------------------------------
 
-type BadgeVariant = "default" | "secondary" | "outline" | "success" | "warning" | "destructive";
+type BadgeVariant = "default" | "secondary" | "outline" | "success" | "warning"
+  | "destructive" | "signal";
 
+// Rahmen in der Akzentfarbe statt nur getoenter Flaeche: auf einem Bild
+// hinter dem Abzeichen bleibt so die Form erkennbar.
 const BADGE_VARIANTS: Record<BadgeVariant, string> = {
-  default: "border-transparent bg-primary/15 text-primary",
+  default: "border-primary/35 bg-primary/12 text-primary",
   secondary: "border-transparent bg-secondary text-secondary-foreground",
   outline: "border-border text-muted-foreground",
-  success: "border-transparent bg-success/15 text-success",
-  warning: "border-transparent bg-warning/15 text-warning",
-  destructive: "border-transparent bg-destructive/15 text-destructive",
+  success: "border-success/40 bg-success/12 text-success",
+  warning: "border-warning/40 bg-warning/12 text-warning",
+  destructive: "border-destructive/40 bg-destructive/12 text-destructive",
+  signal: "border-transparent bg-signal text-signal-foreground",
 };
 
 export const Badge = ({
@@ -123,8 +134,8 @@ export const Badge = ({
 }: React.HTMLAttributes<HTMLSpanElement> & { variant?: BadgeVariant }) => (
   <span
     className={cn(
-      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5",
-      "text-[11px] font-medium leading-normal",
+      "inline-flex items-center gap-1 rounded-sm border px-1.5 py-px",
+      "text-[10.5px] font-semibold uppercase tracking-[0.04em] leading-[1.45]",
       BADGE_VARIANTS[variant],
       className,
     )}
@@ -139,8 +150,8 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
     <input
       ref={ref}
       className={cn(
-        "flex h-9 w-full rounded-md border border-input bg-background/60 px-3 py-1",
-        "text-sm shadow-sm transition-colors",
+        "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1",
+        "text-sm transition-colors",
         "placeholder:text-muted-foreground/70",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:border-ring/60",
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -159,8 +170,8 @@ export const Textarea = React.forwardRef<
   <textarea
     ref={ref}
     className={cn(
-      "flex min-h-20 w-full rounded-md border border-input bg-background/60 px-3 py-2",
-      "text-sm shadow-sm transition-colors placeholder:text-muted-foreground/70",
+      "flex min-h-20 w-full rounded-md border border-input bg-background px-3 py-2",
+      "text-sm transition-colors placeholder:text-muted-foreground/70",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:border-ring/60",
       "disabled:cursor-not-allowed disabled:opacity-50",
       className,
@@ -185,7 +196,7 @@ export const Select = React.forwardRef<
       ref={ref}
       className={cn(
         "flex h-9 w-full appearance-none rounded-md border border-input",
-        "bg-secondary px-3 py-1 pr-9 text-sm text-foreground shadow-sm transition-colors",
+        "bg-secondary px-3 py-1 pr-9 text-sm text-foreground transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         "disabled:cursor-not-allowed disabled:opacity-50",
         "[&>option]:bg-popover [&>option]:text-popover-foreground",
@@ -342,7 +353,7 @@ export const Dialog = ({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in"
+        className="absolute inset-0 bg-black/65 animate-fade-in"
         onClick={onClose}
         aria-hidden
       />
@@ -352,8 +363,8 @@ export const Dialog = ({
         aria-label={title}
         className={cn(
           "relative z-10 flex max-h-[92vh] w-full flex-col overflow-hidden",
-          "rounded-t-2xl border border-border bg-card shadow-2xl animate-slide-up",
-          "sm:rounded-lg",
+          "rounded-t-lg border border-border bg-card shadow-xl shadow-black/40",
+          "animate-slide-up sm:rounded-md",
           wide ? "sm:max-w-4xl" : "sm:max-w-lg",
         )}
       >
@@ -426,15 +437,13 @@ export const StatusDot = ({
     error: "bg-destructive",
     off: "bg-muted-foreground/40",
   };
+  // Quadrat statt Kreis, und kein auslaufender Ring: ein Radarblip im
+  // Augenwinkel zieht staendig Aufmerksamkeit auf eine Information, die
+  // sich minutenlang nicht aendert. Das Pulsieren bleibt, aber dezent.
   return (
-    <span className="relative flex h-2.5 w-2.5 shrink-0">
-      {pulse && status !== "off" && (
-        <span
-          className={cn("absolute inline-flex h-full w-full rounded-full opacity-60",
-            "animate-ping", colours[status])}
-        />
-      )}
-      <span className={cn("relative inline-flex h-2.5 w-2.5 rounded-full", colours[status])} />
-    </span>
+    <span
+      className={cn("inline-block h-2 w-2 shrink-0 rounded-[1px]", colours[status],
+                    pulse && status !== "off" && "animate-pulse-dot")}
+    />
   );
 };

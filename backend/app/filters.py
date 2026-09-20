@@ -26,6 +26,7 @@ class RuleSpec:
     nur_gratis: bool = False
     min_temperatur: float | None = None
     min_urteil: str | None = None
+    min_fehler_score: int | None = None
     sources: list[str] = field(default_factory=list)
     kategorien: list[str] = field(default_factory=list)
     haendler: list[str] = field(default_factory=list)
@@ -41,6 +42,7 @@ class RuleSpec:
             nur_gratis=bool(rule.nur_gratis),
             min_temperatur=rule.min_temperatur,
             min_urteil=getattr(rule, "min_urteil", None),
+            min_fehler_score=getattr(rule, "min_fehler_score", None),
             sources=list(rule.sources or []),
             kategorien=list(rule.kategorien or []),
             haendler=list(rule.haendler or []),
@@ -183,6 +185,17 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
         else:
             reasons.append(f"Urteil: {LABEL.get(urteil, urteil)}")
 
+    # --- Preisfehler ---
+    if rule.min_fehler_score:
+        from .pricefehler import LABEL as FEHLER_LABEL
+        score = int(getattr(deal, "fehler_score", 0) or 0)
+        if score < rule.min_fehler_score:
+            stufe = getattr(deal, "fehler_stufe", None)
+            failed.append(f"Preisfehler-Punkte {score} < {rule.min_fehler_score}"
+                          + (f" ({FEHLER_LABEL.get(stufe)})" if stufe else ""))
+        else:
+            reasons.append(f"Preisfehler-Punkte {score}")
+
     # --- Kategorie / Haendler ---
     if rule.kategorien:
         kat = (getattr(deal, "kategorie", "") or "").lower()
@@ -204,7 +217,7 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
     if not any([rule.keywords, rule.required_keywords, rule.nur_gratis,
                 rule.max_preis is not None, rule.min_rabatt_prozent is not None,
                 rule.min_temperatur is not None, rule.min_urteil, rule.sources,
-                rule.kategorien, rule.haendler]):
+                rule.min_fehler_score, rule.kategorien, rule.haendler]):
         return MatchResult(False, [], ["Regel hat keine Bedingungen"])
 
     return MatchResult(not failed, reasons, failed)
@@ -240,6 +253,8 @@ def _sample(deal: Any, res: MatchResult) -> dict:
         "rabatt_prozent": getattr(deal, "rabatt_prozent", None),
         "ist_gratis": bool(getattr(deal, "ist_gratis", False)),
         "quelle": getattr(deal, "quelle", ""),
+        "fehler_score": getattr(deal, "fehler_score", 0),
+        "fehler_stufe": getattr(deal, "fehler_stufe", None),
         "url": getattr(deal, "url", ""),
         "bild": getattr(deal, "bild", None),
         "gruende": res.reasons,
