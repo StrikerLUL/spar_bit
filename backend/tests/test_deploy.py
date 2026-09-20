@@ -76,3 +76,52 @@ def test_zielt_auf_localhost():
     text = VORLAGE.read_text()
     assert "127.0.0.1:8080" in text
     assert "0.0.0.0" not in text
+
+
+# --- docker-compose.yml ----------------------------------------------------
+
+COMPOSE = WURZEL / "docker-compose.yml"
+
+
+def test_keine_pflichtvariablen_in_compose():
+    """${VAR:?...} macht die ganze Datei unbrauchbar, nicht nur den Dienst.
+
+    Compose loest die Datei vollstaendig auf, bevor Profile ueberhaupt
+    betrachtet werden. Eine Pflichtvariable im caddy-Dienst liess damit auch
+    'docker compose up backend frontend' scheitern - bei jedem, der ohne
+    eigene Domain startet.
+    """
+    import re
+    treffer = re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*):\?", COMPOSE.read_text())
+    assert not treffer, (
+        f"Pflichtvariablen in docker-compose.yml: {treffer}. "
+        "Stattdessen ${VAR:-} nehmen und im Dienst selbst pruefen.")
+
+
+def test_caddy_meldet_die_fehlende_domain_selbst():
+    """Der Ersatz fuer die Pflichtvariable muss auch wirklich greifen."""
+    import yaml
+    caddy = yaml.safe_load(COMPOSE.read_text())["services"]["caddy"]
+    assert caddy["profiles"] == ["https"]
+    skript = caddy["command"][0]
+    # $$ ist die Compose-Schreibweise fuer ein literales $ - ohne das
+    # ersetzte Compose die Variable selbst und die Pruefung liefe ins Leere.
+    assert '[ -z "$$SPARBIT_DOMAIN" ]' in skript
+    assert "exit 1" in skript
+    assert "exec caddy run" in skript
+
+
+def test_compose_loest_ohne_domain_auf(tmp_path):
+    """Die Gegenprobe mit dem echten Compose - der Fall, der gescheitert ist."""
+    import shutil
+    import subprocess
+    if shutil.which("docker") is None:
+        pytest.skip("docker nicht verfuegbar")
+
+    umgebung = tmp_path / "env"
+    umgebung.write_text("SPARBIT_DOMAIN=\nSPARBIT_WEB_PORT=8080\n")
+    ergebnis = subprocess.run(
+        ["docker", "compose", "--env-file", str(umgebung), "config", "--services"],
+        capture_output=True, text=True, cwd=str(WURZEL), timeout=120)
+    assert ergebnis.returncode == 0, ergebnis.stderr
+    assert "frontend" in ergebnis.stdout

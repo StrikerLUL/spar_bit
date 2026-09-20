@@ -15,7 +15,7 @@ Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
 einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über neun
 Kanäle melden.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-363-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-366-22c55e)
 
 **Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS und Zertifikat:
 
@@ -839,7 +839,7 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 363 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 366 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen

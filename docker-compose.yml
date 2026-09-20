@@ -113,7 +113,12 @@ services:
     restart: unless-stopped
     profiles: ["https"]
     environment:
-      SPARBIT_DOMAIN: ${SPARBIT_DOMAIN:?Fuer HTTPS muss SPARBIT_DOMAIN in der .env stehen}
+      # Kein ":?" hier: Compose loest die ganze Datei auf, bevor Profile
+      # ueberhaupt betrachtet werden. Eine Pflichtvariable an dieser Stelle
+      # wuerde also auch "docker compose up backend frontend" scheitern
+      # lassen, wo es gar keinen Caddy gibt. Geprueft wird darum erst beim
+      # Start des Containers - siehe command unten.
+      SPARBIT_DOMAIN: ${SPARBIT_DOMAIN:-}
       SPARBIT_ACME_MAIL: ${SPARBIT_ACME_MAIL:-}
       TZ: ${TZ:-Europe/Berlin}
     ports:
@@ -124,6 +129,15 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$SPARBIT_DOMAIN" ]; then
+          echo "SPARBIT_DOMAIN fehlt in der .env." >&2
+          echo "Ohne Domain gibt es kein HTTPS - dann ohne '--profile https' starten." >&2
+          exit 1
+        fi
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     depends_on:
       frontend:
         condition: service_healthy

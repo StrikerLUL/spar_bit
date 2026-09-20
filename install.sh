@@ -157,6 +157,13 @@ setze() {
   fi
 }
 
+lies() {
+  # Den Wert zurueckliefern, der wirklich in der .env steht. setze() laesst
+  # vorhandene Werte stehen - eine Meldung, die stattdessen den erkannten
+  # Wert nennt, sagt dann etwas Falsches.
+  grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2-
+}
+
 setze_hart() {
   # Wie setze(), aber ersetzt auch einen schon vorhandenen Wert. Noetig fuer
   # Schluessel, die in der .env.example bereits belegt sind.
@@ -189,7 +196,14 @@ konfiguriere() {
   local tz
   tz="$(cat /etc/timezone 2>/dev/null || echo Europe/Berlin)"
   setze TZ "$tz"
-  ok "Zeitzone: $tz  (wichtig für Ruhezeiten)"
+  tz="$(lies TZ)"
+  ok "Zeitzone: $tz  (wichtig für Ruhezeiten und den Claimer-Zeitplan)"
+  local system_tz
+  system_tz="$(cat /etc/timezone 2>/dev/null || echo '?')"
+  if [ "$tz" != "$system_tz" ]; then
+    ok "Der Server selbst läuft auf $system_tz — SparBit rechnet in $tz."
+    printf '    Andere Zeitzone gewünscht? TZ in %s/.env ändern.\n' "$ZIEL"
+  fi
 }
 
 
