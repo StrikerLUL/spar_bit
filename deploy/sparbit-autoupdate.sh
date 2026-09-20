@@ -111,6 +111,35 @@ except Exception: print('0')" "$1" 2>/dev/null || printf '0'
 
 knopf="$(lies_flag jetzt)"
 automatik="$(lies_flag auto)"
+claimer_auftrag="$(lies_flag claimer)"
+
+# --- Claimer auf Zuruf -----------------------------------------------------
+#
+# Derselbe Weg wie beim Update: der Container darf den Host nicht anfassen,
+# also legt das UI einen Auftrag ab und hier wird er ausgefuehrt.
+
+if [ "$claimer_auftrag" = "1" ]; then
+  claimer_log="$ZUSTAND/claimer.log"
+  api POST /claimer-bericht '{"laeuft": true}' >/dev/null 2>&1 || true
+  meldung "Claimer wird gestartet"
+  : > "$claimer_log"
+  docker compose run --rm claimer >> "$claimer_log" 2>&1
+  claimer_rc=$?
+
+  ZEIT="$(jetzt_iso)" RC="$claimer_rc" LOG="$claimer_log" python3 - \
+      > "$ZUSTAND/claimer-bericht.json" <<'PYEND'
+import json, os
+try:
+    ausgabe = open(os.environ["LOG"], encoding="utf-8", errors="replace").read()
+except OSError:
+    ausgabe = ""
+print(json.dumps({"laeuft": False, "zuletzt": os.environ["ZEIT"],
+                  "ok": os.environ["RC"] == "0",
+                  "ausgabe": ausgabe[-20000:]}, ensure_ascii=False))
+PYEND
+  api POST /claimer-bericht "$(cat "$ZUSTAND/claimer-bericht.json")" >/dev/null 2>&1 || true
+  meldung "Claimer beendet (rc=$claimer_rc)"
+fi
 
 # --- Stand des Zweigs ------------------------------------------------------
 

@@ -153,3 +153,58 @@ def test_langes_protokoll_wird_gekuerzt(client):
                 json={"protokoll": "z" * 50000})
     status = client.get("/api/system/update").json()
     assert len(status["protokoll"]) == 20000
+
+
+# --- Claimer ueber denselben Draht -----------------------------------------
+
+def test_claimer_ohne_token_ist_aus(client_ohne_token):
+    antwort = client_ohne_token.get("/api/claimer/lauf").json()
+    assert antwort["eingerichtet"] is False
+    assert client_ohne_token.post("/api/claimer/lauf").status_code == 409
+
+
+def test_claimer_knopf_hinterlegt_einen_auftrag(client):
+    assert client.post("/api/claimer/lauf").json()["ok"] is True
+    assert client.get("/api/claimer/lauf").json()["angefordert"] is True
+
+
+def test_skript_holt_den_claimer_auftrag_einmal(client):
+    client.post("/api/claimer/lauf")
+    kopf = {"X-SparBit-Update": TOKEN}
+
+    assert client.get("/api/system/update/auftrag", headers=kopf).json()["claimer"] is True
+    # Zweiter Lauf darf den Container nicht nochmal starten.
+    assert client.get("/api/system/update/auftrag", headers=kopf).json()["claimer"] is False
+
+
+def test_update_und_claimer_stoeren_sich_nicht(client):
+    client.post("/api/system/update")
+    client.post("/api/claimer/lauf")
+    auftrag = client.get("/api/system/update/auftrag",
+                         headers={"X-SparBit-Update": TOKEN}).json()
+    assert auftrag["jetzt"] is True
+    assert auftrag["claimer"] is True
+
+
+def test_claimer_bericht_landet_im_status(client):
+    kopf = {"X-SparBit-Update": TOKEN}
+    client.post("/api/system/update/claimer-bericht", headers=kopf,
+                json={"laeuft": False, "zuletzt": "2026-09-20T13:00:00Z",
+                      "ok": True, "ausgabe": "Epic: 2 Spiele geholt"})
+    status = client.get("/api/claimer/lauf").json()
+    assert status["ok"] is True
+    assert "2 Spiele" in status["ausgabe"]
+
+
+def test_waehrend_eines_laufs_wird_nicht_nochmal_gestartet(client):
+    kopf = {"X-SparBit-Update": TOKEN}
+    client.post("/api/system/update/claimer-bericht", headers=kopf,
+                json={"laeuft": True})
+    assert "läuft bereits" in client.post("/api/claimer/lauf").json()["hinweis"]
+    assert client.get("/api/claimer/lauf").json()["angefordert"] is False
+
+
+def test_claimer_bericht_braucht_das_token(client):
+    antwort = client.post("/api/system/update/claimer-bericht",
+                          headers={"X-SparBit-Update": "falsch"}, json={})
+    assert antwort.status_code == 403

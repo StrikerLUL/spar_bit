@@ -15,7 +15,7 @@ Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
 einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über neun
 Kanäle melden.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-390-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-508-22c55e)
 
 **Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS, Zertifikat und
 Update-Knopf im UI:
@@ -462,14 +462,33 @@ Jede Meldung trägt **das Preisurteil mit** — ein Bestpreis kommt grün, ein
 Preisfehler rot mit seiner Begründung, eine SOFORT-Regel gelb. Discord erwähnt eine Rolle nur
 bei SOFORT, Gotify und ntfy heben dann die Priorität an; sonst bleibt es leise.
 
+**Ein Deal, eine Nachricht** — auch wenn drei Regeln ihn treffen. Die Meldung
+nennt alle, die Priorität ist die höchste davon.
+
+**Der stündliche Digest ist einer**: was wegen Ruhezeit oder Priorität liegen
+blieb, kommt als *eine* Sammelmeldung mit den besten Funden zuerst — nicht als
+zwanzig Einzelnachrichten.
+
+**SparBit meldet auch sich selbst.** Fällt eine Quelle aus oder stellt ein
+Kanal nicht mehr zu, erfährst du es — höchstens einmal je Problem und Tag,
+mit Entwarnung. Ein Wächter, der still ausfällt, ist schlimmer als keiner.
+
 * Ruhezeiten, die SOFORT-Regeln durchlassen
 * Global pausieren — im UI oder per `/pause` in Telegram
 
 ### Drumherum
 
+**Durchsicht** — auf der Regel-Seite steht, welche Regel viel Lärm und wenig
+Beachtung erzeugt, welche leerläuft (oft ein Tippfehler im Stichwort) und
+welche Quelle nur Füllmaterial liefert. Mit Vorschlag je Befund, aber ohne
+Automatik: du entscheidest.
+
 **Statistiken** — Verlauf, Ausbeute je Quelle inklusive *Signalanteil* (wie viel
 Prozent der Funde eine Regel getroffen haben) und häufigste Händler. Damit
 siehst du, welche Quelle nur Rauschen liefert.
+
+**Wunschliste in einem Rutsch** — mehrere Shop-Adressen einfügen, eine je
+Zeile; Namen und Preise holt SparBit selbst.
 
 **Bilder bleiben bei dir** — Deal-Bilder werden einmal geholt, verkleinert unter
 `./data/images` abgelegt und von SparBit ausgeliefert. Ohne das erführe jeder
@@ -883,7 +902,7 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 390 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 508 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -1054,8 +1073,6 @@ Ehrlich benannt statt verschwiegen:
   der Vergleich mit anderen Quellen — den gibt es nur, wenn mehrere Quellen
   denselben Artikel melden. Mit einer eingeschalteten Quelle bleibt der
   Detektor auf den eigenen Verlauf angewiesen.
-* **Der Claimer hat keinen Startknopf.** Die Claimer-Seite zeigt den Befehl zum
-  Abtippen, statt den Container selbst zu starten.
 * **Sechs Quellen fehlen bewusst** — itch.io, Indiegala, Fanatical, Humble,
   Unreal/FAB und Kleinanzeigen hätten HTML-Scraping erfordert. Gründe und
   Alternativen stehen in [ENDPOINTS.md](ENDPOINTS.md).

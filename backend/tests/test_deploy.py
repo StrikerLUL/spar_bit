@@ -226,3 +226,11 @@ def test_watchdog_laeuft_als_job():
     quelle = inspect.getsource(scheduler.start)
     assert 'id="watchdog"' in quelle
     assert "watchdog_job" in quelle
+
+
+def test_updater_startet_auch_den_claimer():
+    """Der Container darf keinen Docker-Socket haben - also macht es der Host."""
+    text = SKRIPT.read_text()
+    assert "lies_flag claimer" in text
+    assert "docker compose run --rm claimer" in text
+    assert "/claimer-bericht" in text

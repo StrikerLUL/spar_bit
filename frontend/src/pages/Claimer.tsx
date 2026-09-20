@@ -1,6 +1,8 @@
-import { CheckCircle2, Gift, RefreshCw, Terminal, XCircle } from "lucide-react";
+import {
+  CheckCircle2, Gift, Play, RefreshCw, Terminal, XCircle,
+} from "lucide-react";
 import * as React from "react";
-import { api, type ClaimerStatus } from "@/lib/api";
+import { api, type ClaimerLauf, type ClaimerStatus } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { cn, formatDateTime, timeAgo } from "@/lib/utils";
 import {
@@ -144,17 +146,7 @@ export function Claimer() {
                 value={data?.letzte_aenderung ? formatDateTime(data.letzte_aenderung) : "—"} />
               <Row label="Log-Verzeichnis" value={data?.log_dir ?? "—"} mono />
 
-              <div className="rounded-md bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
-                <p className="mb-1 font-medium text-foreground">Manueller Start</p>
-                <p>Der Claimer ist ein eigener Container. Sofort laufen lassen:</p>
-                <code className="mt-1.5 block break-all rounded bg-background/60 px-2 py-1 font-mono text-[11px] text-primary">
-                  docker compose run --rm claimer
-                </code>
-                <p className="mt-2">
-                  Erste Anmeldung siehe README — dafür gibt es den VNC-Zugang auf
-                  Port 5900.
-                </p>
-              </div>
+              <Starter />
             </CardContent>
           </Card>
         </div>
@@ -189,3 +181,104 @@ const Row = ({
     </span>
   </div>
 );
+
+
+/** Den Claimer-Container starten — ohne SSH.
+ *
+ *  Der Backend-Container bekommt bewusst keinen Docker-Socket: damit
+ *  könnte er den ganzen Host übernehmen, nur um einen Nebencontainer zu
+ *  starten. Der Auftrag geht denselben Weg wie ein Update, über das
+ *  Host-Skript. Ohne eingerichteten Helfer bleibt der Befehl zum Abtippen.
+ */
+function Starter() {
+  const toast = useToast();
+  const { data, reload } = useAsync<ClaimerLauf>(() => api.claimer.lauf(), []);
+  const [sende, setSende] = React.useState(false);
+
+  const laeuft = Boolean(data?.laeuft || data?.angefordert);
+
+  React.useEffect(() => {
+    if (!laeuft) return;
+    const timer = window.setInterval(reload, 5000);
+    return () => window.clearInterval(timer);
+  }, [laeuft, reload]);
+
+  if (!data) return <Skeleton className="h-24" />;
+
+  if (!data.eingerichtet) {
+    return (
+      <div className="rounded-md bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground">
+        <p className="mb-1 font-medium text-foreground">Manueller Start</p>
+        <p>{data.grund} Auf dem Server:</p>
+        <code className="mt-1.5 block break-all rounded bg-background/60 px-2 py-1
+                         font-mono text-[11px] text-primary">
+          docker compose run --rm claimer
+        </code>
+        <p className="mt-2">
+          Erste Anmeldung siehe README — dafür gibt es den VNC-Zugang auf
+          Port 5900.
+        </p>
+      </div>
+    );
+  }
+
+  const starten = async () => {
+    setSende(true);
+    try {
+      const antwort = await api.claimer.starten();
+      toast.push("success", "Claimer angestoßen", antwort.hinweis);
+      reload();
+    } catch (err) {
+      toast.push("error", "Ging nicht", (err as Error).message);
+    } finally {
+      setSende(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md bg-muted/40 p-3">
+      <p className="mb-2 text-xs font-medium">Jetzt laufen lassen</p>
+
+      {laeuft ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" />
+          {data.laeuft ? "Läuft gerade …" : "Angefordert — startet binnen einer Minute."}
+        </div>
+      ) : (
+        <Button size="sm" className="w-full" onClick={starten} loading={sende}>
+          <Play className="h-3.5 w-3.5" />
+          Claimer starten
+        </Button>
+      )}
+
+      {data.zuletzt && !laeuft && (
+        <div className="mt-3 border-t border-border pt-2.5">
+          <div className="flex items-center gap-1.5 text-xs">
+            {data.ok ? (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+            ) : (
+              <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+            )}
+            <span className={cn(!data.ok && "text-destructive")}>
+              {data.ok ? "Zuletzt gelaufen" : "Letzter Lauf fehlgeschlagen"}
+            </span>
+            <span className="ml-auto text-muted-foreground">
+              {timeAgo(data.zuletzt)}
+            </span>
+          </div>
+          {data.ausgabe && (
+            <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap
+                            break-words rounded bg-background/60 p-2 text-[10px]
+                            leading-snug text-muted-foreground">
+              {data.ausgabe.trim().split("\n").slice(-25).join("\n")}
+            </pre>
+          )}
+        </div>
+      )}
+
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+        Erste Anmeldung siehe README — dafür gibt es den VNC-Zugang auf Port 5900.
+      </p>
+    </div>
+  );
+}

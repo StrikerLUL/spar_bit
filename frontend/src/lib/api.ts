@@ -433,6 +433,17 @@ export interface PreisfehlerListe {
   items: Deal[];
 }
 
+export interface ClaimerLauf {
+  eingerichtet: boolean;
+  /** Nur gesetzt, wenn eingerichtet false ist. */
+  grund?: string;
+  angefordert?: boolean;
+  laeuft?: boolean;
+  zuletzt?: string | null;
+  ok?: boolean | null;
+  ausgabe?: string | null;
+}
+
 export interface SammelErgebnis {
   angelegt: WatchItem[];
   uebersprungen: Array<{ url: string; grund: string }>;
@@ -634,6 +645,8 @@ export const api = {
   },
   claimer: {
     status: () => get<ClaimerStatus>("/claimer/status"),
+    lauf: () => get<ClaimerLauf>("/claimer/lauf"),
+    starten: () => post<{ ok: boolean; hinweis: string }>("/claimer/lauf"),
     log: () => get<{ log: string }>("/claimer/log"),
     scan: () => post<{ neue_ereignisse: number }>("/claimer/scan"),
   },

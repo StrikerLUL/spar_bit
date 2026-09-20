@@ -31,6 +31,8 @@ log = logging.getLogger(__name__)
 JETZT = "update_angefordert"        # ISO-Zeit der Anforderung, sonst None
 AUTO = "update_automatisch"         # bool
 STATUS = "update_status"            # Bericht des Host-Skripts
+CLAIMER = "claimer_angefordert"     # ISO-Zeit, sonst None
+CLAIMER_STATUS = "claimer_lauf"     # Bericht des Host-Skripts
 
 
 def eingerichtet() -> bool:
@@ -97,8 +99,60 @@ def hole_auftrag(db: Session) -> dict:
     jetzt = bool(get_setting(db, JETZT))
     if jetzt:
         set_setting(db, JETZT, None)
+    claimer = bool(get_setting(db, CLAIMER))
+    if claimer:
+        set_setting(db, CLAIMER, None)
+    if jetzt or claimer:
         db.commit()
-    return {"jetzt": jetzt, "auto": bool(get_setting(db, AUTO, False))}
+    return {"jetzt": jetzt, "auto": bool(get_setting(db, AUTO, False)),
+            "claimer": claimer}
+
+
+# --- Claimer ---------------------------------------------------------------
+#
+# Derselbe Draht wie beim Update: das UI legt einen Auftrag ab, das
+# Host-Skript holt ihn und startet den Container. Der Backend-Container
+# bekommt bewusst keinen Docker-Socket - damit koennte er den ganzen Host
+# uebernehmen, nur um einen Nebencontainer zu starten.
+
+def claimer_status(db: Session) -> dict:
+    if not eingerichtet():
+        return {"eingerichtet": False,
+                "grund": "Ohne eingerichteten Host-Helfer lässt sich der "
+                         "Claimer von hier nicht starten."}
+    bericht = get_setting(db, CLAIMER_STATUS) or {}
+    return {
+        "eingerichtet": True,
+        "angefordert": bool(get_setting(db, CLAIMER)),
+        "laeuft": bool(bericht.get("laeuft")),
+        "zuletzt": bericht.get("zuletzt"),
+        "ok": bericht.get("ok"),
+        "ausgabe": bericht.get("ausgabe"),
+    }
+
+
+def claimer_anfordern(db: Session) -> dict:
+    if not eingerichtet():
+        raise RuntimeError("Der Host-Helfer ist auf diesem System nicht eingerichtet.")
+    bericht = get_setting(db, CLAIMER_STATUS) or {}
+    if bericht.get("laeuft"):
+        return {"ok": True, "hinweis": "Der Claimer läuft bereits."}
+    set_setting(db, CLAIMER, datetime.now(timezone.utc).isoformat())
+    db.commit()
+    log.info("Claimer-Lauf angefordert")
+    return {"ok": True, "hinweis": "Startet innerhalb einer Minute."}
+
+
+def nimm_claimer_bericht(db: Session, bericht: dict) -> dict:
+    alt = dict(get_setting(db, CLAIMER_STATUS) or {})
+    for schluessel in ("laeuft", "zuletzt", "ok", "ausgabe"):
+        if schluessel in bericht:
+            alt[schluessel] = bericht[schluessel]
+    if isinstance(alt.get("ausgabe"), str):
+        alt["ausgabe"] = alt["ausgabe"][-20000:]
+    set_setting(db, CLAIMER_STATUS, alt)
+    db.commit()
+    return {"ok": True}
 
 
 def nimm_bericht(db: Session, bericht: dict) -> dict:

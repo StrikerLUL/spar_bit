@@ -169,6 +169,11 @@ def update_bericht(bericht: dict, db: Session = Depends(get_db)) -> dict:
     return updater.nimm_bericht(db, bericht)
 
 
+@host_router.post("/claimer-bericht", dependencies=[Depends(_pruefe_token)])
+def claimer_bericht(bericht: dict, db: Session = Depends(get_db)) -> dict:
+    return updater.nimm_claimer_bericht(db, bericht)
+
+
 # --- SSE ------------------------------------------------------------------
 
 sse_router = APIRouter(prefix="/api", tags=["system"])
@@ -225,6 +230,24 @@ def claimer_status(db: Session = Depends(get_db)) -> dict:
 @claimer_router.get("/log")
 def claimer_log(lines: int = Query(300, le=2000)) -> dict:
     return {"log": claimer_mod.read_tail(lines)}
+
+
+@claimer_router.get("/lauf")
+def claimer_lauf_status(db: Session = Depends(get_db)) -> dict:
+    return updater.claimer_status(db)
+
+
+@claimer_router.post("/lauf")
+def claimer_lauf_starten(db: Session = Depends(get_db)) -> dict:
+    """Den Claimer-Container einmal laufen lassen.
+
+    Der Backend-Container bekommt bewusst keinen Docker-Socket; der
+    Auftrag geht denselben Weg wie ein Update - über das Host-Skript.
+    """
+    try:
+        return updater.claimer_anfordern(db)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @claimer_router.post("/scan")
