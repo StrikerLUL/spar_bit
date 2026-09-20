@@ -15,7 +15,7 @@ Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
 einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über neun
 Kanäle melden.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-508-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-598-22c55e)
 
 **Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS, Zertifikat und
 Update-Knopf im UI:
@@ -40,6 +40,8 @@ python run.py
 · [Die ersten 10 Minuten](#die-ersten-10-minuten)
 · [Was SparBit sonst kann](#was-sparbit-sonst-kann)
 · [Benachrichtigungen](#benachrichtigungen-einrichten)
+· [Stimmt „gratis" auch?](#stimmt-gratis-auch)
+· [18+-Bereich](#18-bereich)
 · [Kommandozeile](#kommandozeile) · [API-Keys](#api-keys-optional)
 · [Server betreiben](#server-betreiben) · [Entwicklung](#entwicklung)
 · [Sicherheit](#sicherheit) · [Problemlösung](#problemlösung)
@@ -440,6 +442,111 @@ stehen zu bleiben. Und ein Prozentwert wird aus den beiden angezeigten Zahlen
 gerechnet, nicht von der Quelle übernommen — sonst steht er neben zwei Preisen,
 aus denen er sich nicht ergibt.
 
+### Stimmt „gratis" auch?
+
+Der häufigste Ärger mit einem Deal-Melder ist nicht die verpasste
+Gelegenheit, sondern die falsche: es steht *kostenlos* da, man klickt, und
+die Seite will 14,99 €. Dagegen stehen zwei Vorkehrungen.
+
+**Erstens: worauf sich das Wort bezieht.** Nicht jedes „gratis" im Text meint
+die Ware. Früher genügte das bloße Vorkommen — und weil jede zweite
+Beschreibung irgendwo *kostenloser Versand* stehen hat, landete reihenweise
+Bezahlware im Gratis-Filter. SparBit schaut jetzt, was unmittelbar davor und
+danach steht:
+
+| Titel | gratis? | warum |
+|---|---|---|
+| `Sony XM5 für 229 € inkl. gratis Versand` | nein | gilt nur für den Versand |
+| `3 Monate Spotify gratis, danach 10,99 €` | nein | gilt nur für einen Testzeitraum |
+| `Nike Schuhe 49,99 € + gratis Socken dazu` | nein | ist eine Zugabe, nicht der Artikel |
+| `Buch 12,99 € — kostenlose Rücksendung` | nein | gilt nur für die Rücksendung |
+| `Spiel geschenkt, dazu kostenloser Versand` | **ja** | ein unbedingtes „geschenkt" schlägt ein bedingtes |
+| `Gratis-Skin im Wert von 9,99 €` | **ja** | „Wert" ist ein alter Preis, kein Kaufpreis |
+
+Auf der Karte steht der Grund dann als kleine Zeile unter dem Preis — sonst
+sieht es aus, als hätte SparBit das Wort übersehen.
+
+Zusätzlich gilt quellenübergreifend: meldet eine Quelle `gratis` und nennt im
+selben Atemzug einen Preis über null, gewinnt die Zahl. Beides kann nicht
+stimmen, und ein Flag kann aus einer Kategorie („Freebies") stammen, ein
+Preis nicht.
+
+**Zweitens: nachsehen.** Für jeden als geschenkt oder fast geschenkt
+gemeldeten Fund ruft SparBit **die Zielseite auf** und vergleicht mit dem,
+was der Händler dort maschinenlesbar auszeichnet — schema.org/JSON-LD,
+Microdata, OpenGraph. Also mit dem, was er selbst hinschreibt, nicht mit
+irgendeiner Zahl im Fließtext.
+
+| Befund | Abzeichen | Folge |
+|---|---|---|
+| Seite nennt 0,00 | `geprüft` | nichts, nur bestätigt |
+| Seite nennt einen Preis über null | `stimmt nicht` | Preis wird korrigiert, **keine Meldung** |
+| Seite führt den Artikel als vergriffen | `abgelaufen` | bleibt sichtbar, **keine Meldung** |
+| Nichts Ausgezeichnetes gefunden | — | **nichts** — die Quelle behält recht |
+
+Die letzte Zeile ist die wichtigste. Ein Wächter, der bei Unsicherheit
+widerspricht, wäre schlimmer als gar keiner — Cloudflare-Abweisungen,
+JavaScript-Shops und Community-Posts liefern keine Preisangabe, und daraus
+darf niemand etwas ableiten. Marker im `<script>`-Block zählen ebenfalls
+nicht: JS-Vorlagen enthalten reihenweise Bausteine wie „ausverkauft", die auf
+der Seite gar nicht vorkommen.
+
+Die Prüfung läuft **vor** den Regeln. Ein Fund, der sich als nicht gratis
+herausstellt, trifft eine „nur gratis"-Regel also erst gar nicht — genau das
+war der Ärger. Sie ist pro Quellenlauf gedeckelt (Vorgabe 12 Seitenaufrufe),
+damit daraus kein Crawler wird, und lässt sich unter *Logs & System →
+Gratis-Gegenprobe* abschalten oder enger stellen. In der Detailansicht eines
+Deals ruft **Nachsehen** sie von Hand auf.
+
+> Auch hier gilt der Verifizierungsstand des Projekts: die Auswertung ist
+> gegen Format-Fixtures geprüft (JSON-LD, Microdata, OpenGraph,
+> Cloudflare-Abweisung), nicht gegen echte Shop-Seiten — die Build-Umgebung
+> erreicht keinen einzigen Host. Wie sich die Seiten *deiner* Quellen
+> verhalten, zeigt erst der Betrieb; die Zahlen dazu stehen in derselben
+> Karte.
+
+### 18+-Bereich
+
+Ein getrennter Bereich für Angebote ab 18 — **standardmäßig aus**.
+Freischalten unter *Logs & System → 18+-Bereich*, mit Altersbestätigung.
+
+Solange er aus ist, gibt es ihn wirklich nicht: die drei zugehörigen Quellen
+werden nicht gelistet, nicht eingeschaltet und nicht gestartet — weder über
+die Oberfläche noch über die API noch über die CLI. Der Menüpunkt fehlt, und
+`/api/deals?bereich=erwachsen` antwortet 403.
+
+Ist er an, gilt eine einzige Regel: **diese Funde erscheinen nirgendwo
+sonst.** Nicht im Feed, nicht in der Übersicht, nicht in der Suche, nicht in
+den Statistiken, nicht im CSV-Export, nicht in der Empfehlung „für dich" und
+nicht beim Preisfehler-Wächter. Nur auf ihrer eigenen Seite.
+
+**Melden ist noch einmal getrennt.** Zwei Schalter, beide aus:
+
+1. **Je Regel** — ohne das Häkchen *18+-Funde einbeziehen* sieht eine Regel
+   diese Deals gar nicht. Sonst würde „alles unter 5 €" den ganzen Bereich
+   aufs Handy schicken.
+2. **Global** — *Auch über Telegram, Discord & Co. melden*. Aus heißt: nur
+   auf der Seite, auch für eine Regel mit Häkchen.
+
+**Eingestuft wird jeder Fund, egal woher er kommt.** Ein Erotik-Deal aus dem
+normalen mydealz-Feed landet automatisch hier und nicht im Feed. Die
+Einstufung ist zweistufig: ein eindeutiges Wort genügt („Vibrator",
+„Satisfyer", „FSK 18"), ein mehrdeutiges nicht („adult", „sexy", „Dessous") —
+davon braucht es zwei. Sonst wandert die halbe Modeabteilung hierher und ist
+nicht wiederzufinden. Einmal gesetzt bleibt die Marke: derselbe Artikel
+rutscht auch dann nicht zurück, wenn er später über eine harmlose Quelle
+noch einmal hereinkommt.
+
+Auf der Seite selbst lassen sich die Bilder verdecken (Vorgabe an) — der
+Schleier geht beim Darüberfahren weg, Titel und Preis bleiben immer lesbar.
+
+**Die Quellen** sind `mydealz_erotik` (Erotik-Gruppe), `reddit_erwachsen`
+(Subreddits) und `erotik_feed` (eigene Shop-Feeds). Keine davon ist geprüft,
+und die vorbelegten Subreddit-Namen sind geraten. Welche Feed-Adressen sich
+bei welcher Shop-Software lohnen — Shopify hat an jeder Kollektion ein
+`.atom`, WordPress ein `/feed` — und welche Anbieter als Kandidaten in Frage
+kommen, steht vollständig in **[ENDPOINTS.md](ENDPOINTS.md#18-bereich)**.
+
 ### Melden
 
 **Neun Kanäle als Plugins**, beliebig viele parallel, jeder einzeln
@@ -663,6 +770,8 @@ python cli.py deals lego --anzahl 10
 | `regeln` | `liste`, `hinzufuegen <name> [Optionen]`, `an`, `aus`, `loeschen`, `testen <id>` |
 | `wunschliste` | `liste`, `hinzufuegen <url> --ziel 199`, `entfernen <id>`, `pruefen [id]` |
 | `preisfehler` | `liste [--tage 7] [--nur-belegt]`, `pruefen`, `waechter --an/--aus --schwelle 70` |
+| `gratischeck` | `--an/--aus`, `--max-pro-lauf 12` |
+| `18plus` | `--an --ich-bin-volljaehrig`, `--aus`, `--melden an/aus` |
 | `deals` | `[suchbegriff] --gratis --urteil bestpreis --anzahl 20` |
 
 Ein paar Beispiele:
@@ -686,7 +795,25 @@ python cli.py regeln testen 2 --anzahl 500
 # Preisfehler ansehen und den Wächter empfindlicher stellen
 python cli.py preisfehler liste --nur-belegt
 python cli.py preisfehler waechter --an --schwelle 60
+
+# Gratis-Gegenprobe: Stand ansehen, enger stellen, abschalten
+python cli.py gratischeck
+python cli.py gratischeck --max-pro-lauf 6
+python cli.py gratischeck --aus
+
+# 18+-Bereich freischalten (ohne die Bestätigung passiert nichts)
+python cli.py 18plus                       # Stand, ohne etwas zu ändern
+python cli.py 18plus --an --ich-bin-volljaehrig
+python cli.py quellen testen mydealz_erotik
+python cli.py quellen an mydealz_erotik
+python cli.py 18plus --melden an           # auch über die Kanäle
+python cli.py 18plus --aus                 # Quellen stoppen, Funde ausblenden
 ```
+
+`18plus --an` ohne `--ich-bin-volljaehrig` bricht ab, und
+`quellen an mydealz_erotik` lehnt ab, solange der Bereich zu ist — die CLI
+ist ausdrücklich keine Hintertür am Schalter vorbei. Bei ausgeschaltetem
+Bereich taucht in `quellen liste` keine 18+-Quelle auf.
 
 `regeln testen` zeigt dieselbe Vorschau wie das UI: wie viele der letzten Deals
 die Regel getroffen hätte, mit Beispielen und den knapp verfehlten.
@@ -902,7 +1029,7 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 508 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 598 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -1076,6 +1203,16 @@ Ehrlich benannt statt verschwiegen:
 * **Sechs Quellen fehlen bewusst** — itch.io, Indiegala, Fanatical, Humble,
   Unreal/FAB und Kleinanzeigen hätten HTML-Scraping erfordert. Gründe und
   Alternativen stehen in [ENDPOINTS.md](ENDPOINTS.md).
+* **Die Gratis-Gegenprobe ist nur so gut wie die Zielseite.** Sie liest
+  ausschließlich ausgezeichnete Preisangaben (schema.org, Microdata,
+  OpenGraph). Shops, die ihren Preis erst per JavaScript nachladen, und
+  Community-Posts, die gar keinen nennen, ergeben `ungeprüft` — und dann
+  bleibt alles, wie die Quelle es gemeldet hat. Das ist so gewollt, heißt
+  aber: sie fängt nicht jeden Fall.
+* **Die 18+-Quellen sind ungeprüft wie alle anderen** — und die drei
+  vorbelegten Subreddit-Namen sind geraten. Erst testen, dann behalten;
+  Kandidaten und Feed-Konventionen stehen in
+  [ENDPOINTS.md](ENDPOINTS.md#18-bereich).
 
 ---
 

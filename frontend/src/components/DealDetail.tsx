@@ -1,5 +1,5 @@
 import {
-  Bell, BellOff, Bookmark, Check, ExternalLink, TrendingDown,
+  Bell, BellOff, Bookmark, Check, ExternalLink, SearchCheck, TrendingDown,
 } from "lucide-react";
 import * as React from "react";
 import { api, type Angebot, type DealDetail as Detail } from "@/lib/api";
@@ -12,6 +12,7 @@ import { Sparkline } from "@/components/charts";
 import { Badge, Button, Dialog, Input, Label, Skeleton } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { FehlerBegruendung } from "@/components/Preisfehler";
+import { PruefBadge } from "@/components/Gratischeck";
 
 export function DealDetailDialog({
   dealId,
@@ -51,6 +52,28 @@ export function DealDetailDialog({
     await api.deals.bookmark(dealId);
     reload();
     onChanged?.();
+  };
+
+  const [prueft, setPrueft] = React.useState(false);
+
+  /** Die Zielseite jetzt aufrufen - wenn man es selbst wissen will. */
+  const nachsehen = async () => {
+    setPrueft(true);
+    try {
+      const { befund, korrigiert } = await api.deals.pruefen(dealId);
+      toast.push(
+        befund.status === "widerlegt" || befund.status === "abgelaufen"
+          ? "error" : "success",
+        befund.label,
+        korrigiert ? `${befund.text} Preis korrigiert.` : befund.text,
+      );
+      reload();
+      onChanged?.();
+    } catch (err) {
+      toast.push("error", "Nachsehen fehlgeschlagen", (err as Error).message);
+    } finally {
+      setPrueft(false);
+    }
   };
 
   // Der Verlauf wird in Euro gezeichnet: sonst entsteht beim Wechsel der
@@ -134,11 +157,30 @@ export function DealDetailDialog({
                 <Badge key={t} variant="outline">{t}</Badge>
               ))}
             </div>
-            <Button variant={data.bookmarked ? "default" : "outline"} size="sm"
-                    onClick={merken}>
-              <Bookmark className={cn("h-3.5 w-3.5", data.bookmarked && "fill-current")} />
-              {data.bookmarked ? "Gemerkt" : "Merken"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant={data.bookmarked ? "default" : "outline"} size="sm"
+                      onClick={merken}>
+                <Bookmark className={cn("h-3.5 w-3.5", data.bookmarked && "fill-current")} />
+                {data.bookmarked ? "Gemerkt" : "Merken"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={nachsehen}
+                      loading={prueft}
+                      title="Die Zielseite jetzt aufrufen und den Preis gegenprüfen">
+                <SearchCheck className="h-3.5 w-3.5" />
+                Nachsehen
+              </Button>
+              <PruefBadge deal={data} />
+            </div>
+            {data.check_text && (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {data.check_text}
+                {data.check_am && (
+                  <span className="ml-1 text-muted-foreground/70">
+                    ({timeAgo(data.check_am)})
+                  </span>
+                )}
+              </p>
+            )}
           </div>
 
           <div className="space-y-5">

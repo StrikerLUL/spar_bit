@@ -199,3 +199,19 @@
     );
   }
 }
+
+/* 18+-Bereich: Bilder erst auf Zuwendung zeigen.
+ *
+ * Absichtlich nur das Bild und nicht die ganze Karte - Titel und Preis
+ * sind der Grund, warum man hinsieht, und unlesbar waeren sie nutzlos.
+ * Der Schleier verschwindet beim Darueberfahren und beim Tastaturfokus,
+ * damit die Seite auch ohne Maus bedienbar bleibt. */
+.sparbit-verdeckt img {
+  filter: blur(14px);
+  transform: scale(1.05);
+  transition: filter 160ms ease-out;
+}
+.sparbit-verdeckt > *:hover img,
+.sparbit-verdeckt > *:focus-within img {
+  filter: none;
+}

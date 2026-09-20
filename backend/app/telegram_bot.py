@@ -231,7 +231,8 @@ class TelegramBot:
 
     def _cmd_deals(self, nur_gratis: bool) -> str:
         with SessionLocal() as db:
-            stmt = select(Deal).order_by(desc(Deal.first_seen)).limit(5)
+            stmt = (select(Deal).where(Deal.erwachsen.is_(False))
+                    .order_by(desc(Deal.first_seen)).limit(5))
             if nur_gratis:
                 stmt = stmt.where(Deal.ist_gratis.is_(True))
             rows = list(db.scalars(stmt))

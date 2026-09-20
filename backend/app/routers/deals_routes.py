@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from ..auth import current_user
 from ..db import get_db
+from .. import erwachsen as erwachsen_mod
+from ..gratischeck import LABEL as CHECK_LABEL
 from ..models import Deal, Match, Rule, SourceConfig, utcnow
 from ..learning import trainiere
 from ..search import fts_verfuegbar, match_bedingung
@@ -36,6 +38,13 @@ def _deal_dict(d: Deal) -> dict:
         "fehler_score": d.fehler_score or 0, "fehler_stufe": d.fehler_stufe,
         "fehler_gruende": d.fehler_gruende or [],
         "fehler_erwartet_eur": d.fehler_erwartet_eur,
+        "erwachsen": bool(d.erwachsen),
+        # Gegenprobe auf der Zielseite - siehe app/gratischeck.py.
+        "check_status": d.check_status,
+        "check_label": CHECK_LABEL.get(d.check_status or "") or None,
+        "check_text": d.check_text, "check_preis_eur": d.check_preis_eur,
+        "check_am": d.check_am,
+        "gratis_hinweis": d.gratis_hinweis,
     }
 
 
@@ -49,13 +58,20 @@ def list_deals(
     bookmarked: bool = False,
     urteil: str | None = None,
     preisfehler: str | None = None,
+    bereich: str = "normal",
     sortierung: str = "neu",
     limit: int = Query(60, le=200),
     offset: int = 0,
     db: Session = Depends(get_db),
 ) -> dict:
     stmt = select(Deal)
-    conditions = []
+    # 18+ ist kein Filter, sondern eine getrennte Ablage: entweder man ist
+    # in diesem Bereich oder man ist es nicht. Ein "beides" gibt es nicht,
+    # damit ein vergessener Haken nie dazu fuehrt, dass so ein Fund
+    # zwischen den normalen Karten auftaucht.
+    conditions = [Deal.erwachsen.is_(bereich == "erwachsen")]
+    if bereich == "erwachsen" and not erwachsen_mod.ist_aktiv(db):
+        raise HTTPException(403, "Der 18+-Bereich ist nicht freigeschaltet.")
 
     if q:
         # Volltextindex bevorzugen; er kennt Phrasen und Ausschluss und
@@ -153,6 +169,26 @@ def toggle_bookmark(deal_id: int, db: Session = Depends(get_db)) -> dict:
     return {"id": deal.id, "bookmarked": deal.bookmarked}
 
 
+@router.post("/deals/{deal_id}/pruefen")
+async def deal_pruefen(deal_id: int, db: Session = Depends(get_db)) -> dict:
+    """Die Zielseite dieses Deals jetzt aufrufen und gegenpruefen."""
+    from ..gratischeck import pruefe, uebernehme
+    from ..scheduler import get_http
+
+    deal = db.get(Deal, deal_id)
+    if deal is None:
+        raise HTTPException(404, "Deal nicht gefunden")
+
+    befund = await pruefe(get_http(), deal.url,
+                          erwartet_gratis=bool(deal.ist_gratis),
+                          erwartet_eur=deal.preis_eur)
+    korrigiert = uebernehme(deal, befund)
+    db.commit()
+    db.refresh(deal)
+    return {"befund": befund.als_dict(), "korrigiert": korrigiert,
+            "deal": _deal_dict(deal)}
+
+
 @router.get("/stats")
 def stats(db: Session = Depends(get_db)) -> dict:
     now = utcnow()
@@ -162,10 +198,12 @@ def stats(db: Session = Depends(get_db)) -> dict:
     treffer_heute = db.scalar(
         select(func.count()).select_from(Match).where(Match.created_at >= today)) or 0
     deals_heute = db.scalar(
-        select(func.count()).select_from(Deal).where(Deal.first_seen >= today)) or 0
+        select(func.count()).select_from(Deal)
+        .where(Deal.first_seen >= today, Deal.erwachsen.is_(False))) or 0
     gratis_woche = db.scalar(
         select(func.count()).select_from(Deal)
-        .where(Deal.ist_gratis.is_(True), Deal.first_seen >= week)) or 0
+        .where(Deal.ist_gratis.is_(True), Deal.first_seen >= week,
+               Deal.erwachsen.is_(False))) or 0
 
     # Gesparter Betrag: nur ueber Deals, die eine Regel getroffen haben -
     # sonst zaehlt man sich an Deals reich, die man nie wollte.
@@ -202,7 +240,8 @@ def stats(db: Session = Depends(get_db)) -> dict:
             ampel["gruen"] += 1
 
     top_quellen = db.execute(
-        select(Deal.quelle, func.count(Deal.id)).where(Deal.first_seen >= week)
+        select(Deal.quelle, func.count(Deal.id))
+        .where(Deal.first_seen >= week, Deal.erwachsen.is_(False))
         .group_by(Deal.quelle).order_by(desc(func.count(Deal.id))).limit(8)
     ).all()
 
@@ -212,10 +251,12 @@ def stats(db: Session = Depends(get_db)) -> dict:
         "gratis_diese_woche": gratis_woche,
         "preisfehler_offen": db.scalar(
             select(func.count()).select_from(Deal)
-            .where(Deal.fehler_stufe == PF_HEISS,
+            .where(Deal.fehler_stufe == PF_HEISS, Deal.erwachsen.is_(False),
                    Deal.first_seen >= now - timedelta(days=3))) or 0,
         "gesparter_betrag": round(float(gespart), 2),
-        "deals_gesamt": db.scalar(select(func.count()).select_from(Deal)) or 0,
+        "deals_gesamt": db.scalar(
+            select(func.count()).select_from(Deal)
+            .where(Deal.erwachsen.is_(False))) or 0,
         "quellen_ampel": ampel,
         "aktive_regeln": db.scalar(
             select(func.count()).select_from(Rule).where(Rule.enabled.is_(True))) or 0,
@@ -227,6 +268,8 @@ def stats(db: Session = Depends(get_db)) -> dict:
 def list_matches(limit: int = Query(50, le=200), db: Session = Depends(get_db)) -> list[dict]:
     rows = db.execute(
         select(Match, Rule.name).join(Rule, Rule.id == Match.rule_id)
+        .join(Deal, Deal.id == Match.deal_id)
+        .where(Deal.erwachsen.is_(False))
         .order_by(desc(Match.created_at)).limit(limit)
     ).all()
     out = []

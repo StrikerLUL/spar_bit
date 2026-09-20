@@ -301,6 +301,102 @@ def befehl_preisfehler_waechter(args) -> int:
     return 0
 
 
+# --- 18plus ----------------------------------------------------------------
+
+def befehl_erwachsen(args) -> int:
+    """Den 18+-Bereich schalten - mit derselben Huerde wie im Web."""
+    from app.db import SessionLocal, set_setting
+    from app import erwachsen as erw
+    from app.models import Deal
+    from sqlalchemy import func, select
+
+    with SessionLocal() as db:
+        if args.an:
+            if not args.ich_bin_volljaehrig:
+                return fehler(
+                    "Zum Einschalten fehlt die Altersbestätigung. "
+                    "Nochmal mit --ich-bin-volljaehrig.")
+            erw.schalte(db, True, bestaetigt=True)
+        elif args.aus:
+            erw.schalte(db, False)
+        if args.melden is not None:
+            set_setting(db, erw.MELDEN, args.melden == "an")
+            db.commit()
+
+        zustand = erw.zustand(db)
+        funde = db.scalar(select(func.count()).select_from(Deal)
+                          .where(Deal.erwachsen.is_(True))) or 0
+
+    from app.sources import all_sources
+    quellen = [s for s in all_sources() if s.category.value == "erwachsen"]
+
+    print()
+    print(f"  18+-Bereich: {gruen('frei') if zustand['an'] else grau('aus')}")
+    if zustand["an"]:
+        print(f"  Zustellung:  "
+              f"{gruen('an') if zustand['melden'] else grau('aus - nur auf der Seite')}")
+        print(f"  Funde:       {funde}")
+        print()
+        print(fett("  Eigene Quellen"))
+        for q in quellen:
+            print(f"    {q.id:18} {q.display_name}")
+        print(grau("\n  Keine davon ist geprüft. Erst 'sparbit quellen testen <id>',"))
+        print(grau("  dann 'sparbit quellen an <id>'. Kandidaten stehen in ENDPOINTS.md."))
+    else:
+        print(grau("  Die Quellen laufen nicht, die Funde sind unsichtbar."))
+        print(grau("  Einschalten: sparbit 18plus --an --ich-bin-volljaehrig"))
+    print()
+    return 0
+
+
+# --- gratischeck -----------------------------------------------------------
+
+def befehl_gratischeck(args) -> int:
+    """Die Gegenprobe auf der Zielseite schalten und auswerten."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from app import gratischeck as gc
+    from app.db import SessionLocal, get_setting, set_setting
+    from app.models import Deal, utcnow
+
+    with SessionLocal() as db:
+        if args.an:
+            set_setting(db, gc.SETTING_AN, True)
+        elif args.aus:
+            set_setting(db, gc.SETTING_AN, False)
+        if args.max_pro_lauf is not None:
+            set_setting(db, gc.SETTING_MAX, max(0, min(60, args.max_pro_lauf)))
+        db.commit()
+
+        aktiv = bool(get_setting(db, gc.SETTING_AN, True))
+        deckel = int(get_setting(db, gc.SETTING_MAX, gc.MAX_PRO_LAUF))
+        zeilen = db.execute(
+            select(Deal.check_status, func.count(Deal.id))
+            .where(Deal.check_am >= utcnow() - timedelta(days=7))
+            .group_by(Deal.check_status)).all()
+
+    print()
+    print(f"  Gegenprobe:  {gruen('an') if aktiv else grau('aus')}")
+    print(f"  Höchstens:   {deckel} Seitenaufrufe je Lauf")
+    if zeilen:
+        print()
+        print(fett("  Letzte sieben Tage"))
+        for status, anzahl in sorted(zeilen, key=lambda z: -z[1]):
+            if not status:
+                continue
+            name = gc.LABEL.get(status, status)
+            farbe = (rot if status == gc.WIDERLEGT
+                     else gelb if status == gc.ABGELAUFEN
+                     else gruen if status == gc.BESTAETIGT else grau)
+            print(f"    {anzahl:>4}×  {farbe(name)}")
+    print(grau("\n  Ruft bei jedem Gratis-Fund die Zielseite auf. Findet sich dort"))
+    print(grau("  keine ausgezeichnete Preisangabe, bleibt alles wie gemeldet."))
+    print()
+    return 0
+
+
 # --- kanaele ---------------------------------------------------------------
 
 def befehl_kanal_typen(args) -> int:
@@ -466,12 +562,19 @@ def befehl_quellen_liste(args) -> int:
     from app.models import SourceConfig, utcnow
     from app.sources import all_sources
 
+    from app import erwachsen as erw
+
     with SessionLocal() as db:
         cfgs = {c.id: c for c in db.scalars(select(SourceConfig))}
+        # Genau wie im Web: solange der 18+-Bereich zu ist, gibt es diese
+        # Quellen hier nicht. Sonst waere die CLI die Hintertuer.
+        frei = erw.ist_aktiv(db)
         zeilen = []
         for quelle in all_sources():
             cfg = cfgs.get(quelle.id)
             if cfg is None:
+                continue
+            if quelle.category.value == "erwachsen" and not frei:
                 continue
             if not cfg.enabled:
                 zustand = grau("aus")
@@ -498,10 +601,15 @@ def _quelle_schalten(quellen_id: str, an: bool) -> int:
     from app.db import SessionLocal
     from app.models import SourceConfig
 
+    from app import erwachsen as erw
+
     with SessionLocal() as db:
         cfg = db.get(SourceConfig, quellen_id)
         if cfg is None:
             return unbekannte_quelle(quellen_id)
+        if erw.quelle_ist_18(quellen_id) and not erw.ist_aktiv(db):
+            return fehler("Der 18+-Bereich ist nicht freigeschaltet. "
+                          "Erst: sparbit 18plus --an --ich-bin-volljaehrig")
         cfg.enabled = an
         if an:
             cfg.consecutive_failures = 0
@@ -1068,6 +1176,24 @@ def baue_parser() -> argparse.ArgumentParser:
     fw.add_argument("--schwelle", type=int,
                     help="ab wie vielen Punkten gemeldet wird (30-100)")
     fw.set_defaults(fn=befehl_preisfehler_waechter)
+
+    e = bereiche.add_parser("18plus", help="18+-Bereich (standardmäßig aus)")
+    e.add_argument("--an", action="store_true", help="freischalten")
+    e.add_argument("--aus", action="store_true", help="wieder abschalten")
+    e.add_argument("--ich-bin-volljaehrig", action="store_true",
+                   dest="ich_bin_volljaehrig",
+                   help="Altersbestätigung, ohne die --an nicht greift")
+    e.add_argument("--melden", choices=["an", "aus"],
+                   help="18+-Funde auch über die Kanäle zustellen")
+    e.set_defaults(fn=befehl_erwachsen)
+
+    g = bereiche.add_parser("gratischeck",
+                            help="Gegenprobe auf der Zielseite")
+    g.add_argument("--an", action="store_true")
+    g.add_argument("--aus", action="store_true")
+    g.add_argument("--max-pro-lauf", type=int, dest="max_pro_lauf",
+                   help="Deckel für Seitenaufrufe je Quellenlauf (0-60)")
+    g.set_defaults(fn=befehl_gratischeck)
 
     d = bereiche.add_parser("deals", help="gesammelte Deals ansehen")
     d.add_argument("suche", nargs="?", help='z. B. lego oder "nintendo switch"')

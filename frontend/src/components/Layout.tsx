@@ -1,10 +1,11 @@
 import {
   AlertTriangle, BarChart3, Bell, Bookmark, Boxes, Command, Eye, Gauge, Gift,
-  LogOut, Menu, Monitor, Moon, Radio, ScrollText, SlidersHorizontal, Sun, Tag, X,
+  Lock, LogOut, Menu, Monitor, Moon, Radio, ScrollText, SlidersHorizontal, Sun,
+  Tag, X,
 } from "lucide-react";
 import * as React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { api, type ProblemStatus } from "@/lib/api";
+import { api, type ErwachsenStatus, type ProblemStatus } from "@/lib/api";
 import type { Theme } from "@/lib/theme";
 import { useAsync } from "@/lib/useEvents";
 import { cn } from "@/lib/utils";
@@ -68,12 +69,26 @@ export function Layout({
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const location = useLocation();
 
+  // Der 18+-Punkt erscheint nur, wenn der Bereich freigeschaltet ist. Beim
+  // Seitenwechsel neu geladen, damit das Umlegen des Schalters unter
+  // "Logs & System" ohne Neuladen der Seite ankommt.
+  const { data: erwachsen } = useAsync<ErwachsenStatus>(
+    () => api.system.erwachsen(), [location.pathname]);
+
   // Beim Seitenwechsel das mobile Menü schliessen.
   React.useEffect(() => setMobileOpen(false), [location.pathname]);
 
+  const gruppen = React.useMemo(() => {
+    if (!erwachsen?.an) return NAV;
+    return NAV.map((g) =>
+      g.gruppe === "Finden"
+        ? { ...g, punkte: [...g.punkte, { to: "/18plus", label: "18+", icon: Lock }] }
+        : g);
+  }, [erwachsen?.an]);
+
   const navItems = (
     <nav className="flex flex-col gap-5">
-      {NAV.map(({ gruppe, punkte }) => (
+      {gruppen.map(({ gruppe, punkte }) => (
         <div key={gruppe}>
           <p className="label mb-1.5 px-2.5">{gruppe}</p>
           <div className="flex flex-col gap-px">

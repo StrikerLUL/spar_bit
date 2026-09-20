@@ -7,6 +7,7 @@ import {
 import { Badge, Button, Card } from "@/components/ui";
 import { UrteilBadge } from "@/components/Urteil";
 import { FehlerBalken, FehlerBadge } from "@/components/Preisfehler";
+import { GratisHinweis, PruefBadge } from "@/components/Gratischeck";
 
 /** Eine Deal-Karte.
  *
@@ -64,6 +65,7 @@ export function DealCard({
               −{Math.round(rabatt)}%
             </Badge>
           ) : null}
+          <PruefBadge deal={deal} />
           {deal.temperatur != null && deal.temperatur >= 200 && (
             <Badge variant="outline"
                    className="tabular border-border bg-card/90 text-foreground">
@@ -133,6 +135,8 @@ export function DealCard({
               </span>
             )}
           </div>
+
+          <GratisHinweis deal={deal} />
 
           {deal.passt_weil && deal.passt_weil.length > 0 && (
             <p className="text-[11px] leading-relaxed text-primary/90"

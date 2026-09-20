@@ -151,3 +151,99 @@ pytest tests/ --live-fixtures tests/fixtures/live
 Weicht das echte Format von meinen Annahmen ab, schlagen die Tests fehl —
 genau so ist es gedacht. Dann weißt du präzise, welcher Parser nachgezogen
 werden muss.
+
+---
+
+# 18+-Bereich
+
+Standardmäßig aus. Freischalten unter *Logs & System → 18+-Bereich* (mit
+Altersbestätigung) oder per `sparbit 18plus --an --ich-bin-volljaehrig`.
+Solange er aus ist, existieren die folgenden Quellen nicht — sie sind weder
+sichtbar noch über die API oder die CLI einschaltbar.
+
+**Auch hier gilt der Verifizierungsstand des ganzen Projekts: nichts davon
+konnte live geprüft werden.** Die Build-Umgebung erreicht keinen einzigen
+Deal-Host; 44 von 44 Endpoints scheitern am Proxy. Alles unten sind darum
+*Kandidaten*, keine Zusagen. `Jetzt testen` hat das letzte Wort.
+
+## Was gebaut ist
+
+| Quelle | Typ | Vorbelegung | Anmerkung |
+|---|---|---|---|
+| `mydealz_erotik` | RSS | `/gruppe/erotik-rss` | Pepper-Konvention, ungeprüft |
+| `reddit_erwachsen` | RSS | `SexToyDeals`, `NSFWdeals`, `AdultDeals` | **Namen geraten** — was 404 gibt, löschen |
+| `erotik_feed` | RSS/Atom | leer | Die eigentliche Arbeitsquelle, siehe unten |
+
+Kriterium für die Aufnahme ist dasselbe wie überall im Projekt: **es muss
+einen Feed oder eine dokumentierte API geben.** Erotik-Shops sind fast
+durchweg reine HTML-Seiten mit aktivem Bot-Schutz — ein Scraper dafür wäre
+genau das, was du nicht wolltest.
+
+## Auch ohne eigene Quelle ist der Bereich nicht leer
+
+SparBit stuft **jeden** Fund ein, egal woher er kommt. Ein Erotik-Deal aus
+`mydealz /rss/alle` landet automatisch im 18+-Bereich und *nicht* im
+normalen Feed. Die Einstufung ist zweistufig (`backend/app/erwachsen.py`):
+ein eindeutiges Wort genügt („Vibrator", „Satisfyer", „FSK 18"), ein
+mehrdeutiges nicht („adult", „sexy", „Dessous") — davon braucht es zwei.
+Sonst wandert die halbe Modeabteilung dorthin und ist nicht wiederzufinden.
+
+## Feed-Adressen, die sich lohnen zu probieren
+
+Das ist der nützlichste Teil: viele Shops liefern einen Feed, ohne damit zu
+werben. Welche Adresse, hängt an der Shop-Software — die erkennst du im
+Seitenquelltext oder an typischen Pfaden.
+
+| Shop-System | Feed-Adresse | Woran man es erkennt |
+|---|---|---|
+| **Shopify** | `…/collections/all.atom`, `…/collections/sale.atom`, `…/collections/<name>.atom` | `cdn.shopify.com` im Quelltext |
+| **WooCommerce / WordPress** | `…/feed`, `…/shop/feed`, `…/product-category/<name>/feed` | `wp-content/` im Quelltext |
+| **Magento 2** | `…/rss/catalog/special/store_id/1/cid/<id>` (Sonderangebote), `…/rss/catalog/category/cid/<id>` | `static/version…/Magento_` |
+| **PrestaShop** | `…/modules/feeder/rss.php` | `/themes/` + `id_product=` |
+| **Shopware 6** | kein Standard-RSS; manche Shops bieten einen Google-Shopping-Export als XML an | `/widgets/` |
+
+Vorgehen: Adresse im Browser öffnen. Kommt XML → unter *Quellen → Eigene
+18+-Feeds* eintragen → *Jetzt testen*. Kommt HTML oder 404 → nächste
+probieren. **Nichts eintragen, was du nicht selbst gesehen hast.**
+
+Die Shopify-Variante ist am ergiebigsten: `.atom` ist dort fest eingebaut
+und lässt sich nicht abschalten, und auffällig viele Erotik-Shops laufen
+auf Shopify.
+
+## Kandidaten, die du selbst prüfen musst
+
+Diese Anbieter sind im DACH-Raum verbreitet und verkaufen legale
+Erwachsenenartikel. **Ich konnte keinen einzigen aufrufen** — die Liste
+sagt nur, wo sich das Ausprobieren der Adressen oben lohnt, nicht, dass es
+funktioniert.
+
+* **Shops:** EIS.de, Amorelie, Orion, Beate Uhse, Lovehoney, Satisfyer
+  (Herstellershop), Pabo, Christine le Duc, Dildoking, Erotikmarkt
+* **Deal-Communities:** mydealz-Gruppe *Erotik* (gebaut), Preisjäger.at
+  (gleiche Plattform — als absolute URL in `mydealz_erotik` eintragbar),
+  Dealabs *Érotique*
+* **Suchbegriff-Feeds statt Gruppen:** oft ergiebiger als die Gruppe. Unter
+  *mydealz — Erotik → Suchbegriff-Feeds* z. B. `satisfyer`, `gleitgel`,
+  `womanizer`, `dessous`, `kondome` eintragen.
+
+## Was bewusst NICHT gebaut ist
+
+| Quelle | Warum nicht | Was stattdessen |
+|---|---|---|
+| **itch.io (NSFW-Spiele)** | Browse-Seiten liefern HTML; `format=json` gibt HTML in JSON verpackt — weiterhin Scraping. | Ein Subreddit in `reddit_erwachsen` |
+| **Steam (Mature)** | Adult-Titel liegen hinter der Altersabfrage; `featuredcategories` liefert sie nicht. Es gibt keinen dokumentierten Endpoint dafür. | — |
+| **DLsite / Fanza / Nutaku** | Kein dokumentierter öffentlicher Feed. Japanische Seiten mit Regionssperre und Bot-Schutz. | Suchbegriff-Feeds auf mydealz |
+| **Pornhub / OnlyFans u. Ä. (Abo-Rabatte)** | Keine öffentliche API für Preise; Angebote laufen über personalisierte Aktionen. | — |
+| **Reddit-Subreddits allgemein** | Existieren vermutlich, ich konnte aber keinen einzigen Namen prüfen. Die drei vorbelegten sind geraten. | Prüfen, korrigieren, ergänzen |
+
+## Zustellung
+
+Zwei Schalter, beide standardmäßig aus:
+
+1. **Je Regel:** ohne das Häkchen *18+-Funde einbeziehen* sieht eine Regel
+   diese Deals gar nicht — auch dann nicht, wenn sonst alles passt.
+2. **Global:** *Logs & System → 18+-Bereich → Auch über Telegram, Discord &
+   Co. melden*. Aus heißt: nur auf der Seite.
+
+Der Preisfehler-Wächter ignoriert 18+-Funde vollständig. Er meldet an Regeln
+und Ruhezeiten vorbei in Sekunden — genau das soll dieser Bereich nicht tun.

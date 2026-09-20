@@ -165,10 +165,31 @@ class Deal(Base):
     alarm_preis: Mapped[float | None] = mapped_column(Float)
     alarm_ausgeloest: Mapped[datetime | None] = mapped_column(UTCDateTime)
     notiz: Mapped[str | None] = mapped_column(Text)
+
+    # 18+ - siehe app/erwachsen.py. Deals mit dieser Marke erscheinen
+    # ausschliesslich auf der eigenen Seite; jede andere Abfrage klammert
+    # sie aus. Die Marke faellt nie wieder weg: was einmal als 18+ erkannt
+    # wurde, rutscht auch dann nicht in den normalen Feed, wenn es spaeter
+    # aus einer harmlosen Quelle noch einmal hereinkommt.
+    erwachsen: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    erwachsen_grund: Mapped[str | None] = mapped_column(Text)
+
+    # Gegenprobe auf der Zielseite - siehe app/gratischeck.py.
+    check_status: Mapped[str | None] = mapped_column(String(16), index=True)
+    check_text: Mapped[str | None] = mapped_column(Text)
+    check_preis_eur: Mapped[float | None] = mapped_column(Float)
+    check_am: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Stand im Titel ein Gratis-Wort, das sich auf etwas anderes bezog?
+    # ("gilt nur für den Versand") - erklaert, warum hier kein Gratis-Schild
+    # haengt, obwohl "gratis" im Text steht.
+    gratis_hinweis: Mapped[str | None] = mapped_column(String(64))
+
     roh: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 Index("ix_deals_first_seen_desc", Deal.first_seen.desc())
+# Jede Feed-Abfrage filtert auf erwachsen=0 und sortiert nach Datum.
+Index("ix_deals_erwachsen_seen", Deal.erwachsen, Deal.first_seen.desc())
 Index("ix_deals_gratis_seen", Deal.ist_gratis, Deal.first_seen.desc())
 # Die Preisfehler-Seite fragt genau danach - und zwar oft.
 Index("ix_deals_fehler", Deal.fehler_stufe, Deal.first_seen.desc())
@@ -194,6 +215,10 @@ class Rule(Base):
     # Nur Deals mit mindestens so vielen Preisfehler-Punkten
     # (siehe app/pricefehler.py). 0 / None = egal.
     min_fehler_score: Mapped[int | None] = mapped_column(Integer)
+    # Darf diese Regel 18+-Funde sehen? Ohne dieses Haekchen niemals -
+    # sonst wuerde eine harmlose Regel wie "alles unter 5 Euro" den
+    # ganzen 18+-Bereich aufs Handy schicken.
+    erwachsen: Mapped[bool] = mapped_column(Boolean, default=False)
 
     sources: Mapped[list] = mapped_column(JSON, default=list)     # leer = alle
     kategorien: Mapped[list] = mapped_column(JSON, default=list)

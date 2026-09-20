@@ -12,6 +12,7 @@ import { ToastProvider } from "@/components/Toast";
 import { Spinner } from "@/components/ui";
 import { Claimer } from "@/pages/Claimer";
 import { Dashboard, type LiveItem } from "@/pages/Dashboard";
+import { Erwachsen } from "@/pages/Erwachsen";
 import { Feed } from "@/pages/Feed";
 import { Notifications } from "@/pages/Notifications";
 import { Preisfehler } from "@/pages/Preisfehler";
@@ -169,6 +170,9 @@ function Shell({
           <Route path="/feed" element={<Feed />} />
           <Route path="/preisfehler" element={<Preisfehler />} />
           <Route path="/wunschliste" element={<Watchlist />} />
+          {/* Die Seite prueft selbst, ob der Bereich freigeschaltet ist -
+              die Route existiert immer, der Inhalt nicht. */}
+          <Route path="/18plus" element={<Erwachsen />} />
           <Route path="/statistiken" element={<Statistics />} />
           <Route path="/quellen" element={<Sources />} />
           <Route path="/regeln" element={<Rules />} />

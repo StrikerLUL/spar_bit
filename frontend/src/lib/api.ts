@@ -57,6 +57,34 @@ export interface AuthStatus {
   username: string | null;
 }
 
+export interface GratisBefund {
+  status: "bestaetigt" | "widerlegt" | "abgelaufen" | "unklar" | "unerreichbar";
+  label: string;
+  text: string;
+  preis: number | null;
+  waehrung: string | null;
+  preis_eur: number | null;
+  herkunft: string | null;
+  belege: string[];
+}
+
+export interface ErwachsenStatus {
+  an: boolean;
+  bestaetigt_am: string | null;
+  melden: boolean;
+  unscharf: boolean;
+  quellen?: number;
+  quellen_namen?: string[];
+  deals?: number;
+}
+
+export interface GratisCheckStatus {
+  an: boolean;
+  max_pro_lauf: number;
+  woche: Record<string, number>;
+  label: Record<string, string>;
+}
+
 export interface Deal {
   id: number;
   titel: string;
@@ -92,6 +120,17 @@ export interface Deal {
   fehler_gruende: string[];
   fehler_erwartet_eur: number | null;
   fehler_gemeldet_am?: string | null;
+  /** 18+ — erscheint ausschließlich im eigenen Bereich. */
+  erwachsen?: boolean;
+  /** Gegenprobe auf der Zielseite, siehe backend/app/gratischeck.py. */
+  check_status?: "bestaetigt" | "widerlegt" | "abgelaufen" | "unklar"
+    | "unerreichbar" | null;
+  check_label?: string | null;
+  check_text?: string | null;
+  check_preis_eur?: number | null;
+  check_am?: string | null;
+  /** Warum hier kein Gratis-Schild hängt, obwohl "gratis" im Text steht. */
+  gratis_hinweis?: string | null;
   /** Stabile Schlüssel der Indizien, die zugeschlagen haben. */
   fehler_indizien?: string[];
   /** Rückmeldung des Benutzers: war das wirklich ein Preisfehler? */
@@ -193,6 +232,8 @@ export interface Source {
   requires_api_key: boolean;
   api_key_url: string | null;
   experimental: boolean;
+  /** 18+ — nur sichtbar, wenn der Bereich freigeschaltet ist. */
+  erwachsen?: boolean;
   default_interval: number;
   min_interval: number;
   options_schema: OptionSpec[];
@@ -250,6 +291,8 @@ export interface Rule {
   sources: string[];
   kategorien: string[];
   haendler: string[];
+  /** Ohne dieses Häkchen sieht die Regel 18+-Funde gar nicht. */
+  erwachsen: boolean;
   channels: number[];
   created_at: string;
   match_count: number;
@@ -585,6 +628,10 @@ export const api = {
     },
     bookmark: (id: number) =>
       post<{ id: number; bookmarked: boolean }>(`/deals/${id}/bookmark`),
+    /** Zielseite jetzt aufrufen und den gemeldeten Preis gegenprüfen. */
+    pruefen: (id: number) =>
+      post<{ befund: GratisBefund; korrigiert: boolean; deal: Deal }>(
+        `/deals/${id}/pruefen`),
   },
   stats: () => get<Stats>("/stats"),
   hygiene: () => get<Hygiene>("/hygiene"),
@@ -640,6 +687,14 @@ export const api = {
       put<{ ok: boolean; an: boolean }>("/system/probleme/melden", { an }),
     update: () => get<UpdateStatus>("/system/update"),
     updateJetzt: () => post<{ ok: boolean; hinweis: string }>("/system/update"),
+    erwachsen: () => get<ErwachsenStatus>("/system/erwachsen"),
+    erwachsenSchalten: (an: boolean, bestaetigt = false) =>
+      put<ErwachsenStatus>("/system/erwachsen", { an, bestaetigt }),
+    erwachsenOptionen: (body: { melden?: boolean; unscharf?: boolean }) =>
+      put<ErwachsenStatus>("/system/erwachsen/optionen", body),
+    gratischeck: () => get<GratisCheckStatus>("/system/gratischeck"),
+    gratischeckSetzen: (body: { an?: boolean; max_pro_lauf?: number }) =>
+      put<GratisCheckStatus>("/system/gratischeck", body),
     updateAuto: (auto: boolean) =>
       put<{ ok: boolean; auto: boolean }>("/system/update/auto", { auto }),
   },

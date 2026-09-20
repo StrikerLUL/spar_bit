@@ -19,6 +19,10 @@ class Category(str, enum.Enum):
     REDDIT = "reddit"
     GAMING = "gaming"
     EXPERIMENTAL = "experimental"
+    # 18+. Quellen dieser Kategorie sind unsichtbar und unstartbar, solange
+    # der Bereich unter "Logs & System" nicht freigeschaltet ist, und ihre
+    # Funde landen ausschliesslich auf der eigenen Seite.
+    ERWACHSEN = "erwachsen"
 
 
 class Verification(str, enum.Enum):

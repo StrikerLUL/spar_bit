@@ -30,6 +30,9 @@ class RuleSpec:
     sources: list[str] = field(default_factory=list)
     kategorien: list[str] = field(default_factory=list)
     haendler: list[str] = field(default_factory=list)
+    # Darf die Regel 18+-Funde sehen? Ohne dieses Haekchen nie - eine
+    # Regel wie "alles unter 5 Euro" wuerde den ganzen Bereich melden.
+    erwachsen: bool = False
 
     @classmethod
     def from_model(cls, rule: Any) -> "RuleSpec":
@@ -46,6 +49,7 @@ class RuleSpec:
             sources=list(rule.sources or []),
             kategorien=list(rule.kategorien or []),
             haendler=list(rule.haendler or []),
+            erwachsen=bool(getattr(rule, "erwachsen", False)),
         )
 
 
@@ -97,6 +101,13 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
     reasons: list[str] = []
     failed: list[str] = []
     hay = _haystack(deal)
+
+    # --- 18+: schlaegt alles, noch vor der Blacklist ---
+    # Nicht "eine Bedingung mehr", sondern eine Tuer. Eine Regel ohne das
+    # Haekchen sieht diese Deals gar nicht - unabhaengig davon, wie gut
+    # alles andere passt.
+    if getattr(deal, "erwachsen", False) and not rule.erwachsen:
+        return MatchResult(False, [], ["18+-Fund, Regel nicht dafür freigegeben"])
 
     # --- Blacklist: schlaegt alles ---
     for term in rule.blacklist:
@@ -252,6 +263,7 @@ def _sample(deal: Any, res: MatchResult) -> dict:
         "originalpreis": getattr(deal, "originalpreis", None),
         "rabatt_prozent": getattr(deal, "rabatt_prozent", None),
         "ist_gratis": bool(getattr(deal, "ist_gratis", False)),
+        "erwachsen": bool(getattr(deal, "erwachsen", False)),
         "quelle": getattr(deal, "quelle", ""),
         "fehler_score": getattr(deal, "fehler_score", 0),
         "fehler_stufe": getattr(deal, "fehler_stufe", None),

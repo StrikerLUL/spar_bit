@@ -386,7 +386,12 @@ async def kennt_sparbit(url: str = Query(..., max_length=2000),
 
     treffer = db.scalar(select(Deal).where(Deal.url_hash == url_hash(url)))
     if treffer is None and titel:
-        for kandidat in db.scalars(select(Deal).order_by(desc(Deal.first_seen))
+        # Die Titelsuche bleibt im normalen Bestand: eine Wunschliste ist
+        # kein Eingang fuer den 18+-Bereich. Der exakte URL-Treffer oben
+        # bleibt davon unberuehrt - den hat man selbst eingetragen.
+        for kandidat in db.scalars(select(Deal)
+                                   .where(Deal.erwachsen.is_(False))
+                                   .order_by(desc(Deal.first_seen))
                                    .limit(400)):
             if titles_match(titel, kandidat.titel):
                 treffer = kandidat

@@ -19,6 +19,7 @@ from ..images import aufraeumen as bilder_aufraeumen
 from ..images import bild_verzeichnis, statistik as bild_statistik
 from ..currency import DEFAULT_RATES, get_rates, set_rates, to_eur
 from ..db import get_db, get_setting, set_setting
+from ..gratischeck import LABEL as GRATIS_LABEL
 from ..models import (Channel, Deal, DealOffer, Match, PriceHistory, Rule,
                       SavedSearch, SourceConfig, utcnow)
 from ..pricefehler import (HEISS as PF_HEISS, SCHWELLE_HEISS,
@@ -193,6 +194,13 @@ def deal_detail(deal_id: int, db: Session = Depends(get_db)) -> dict:
         "fehler_score": deal.fehler_score or 0, "fehler_stufe": deal.fehler_stufe,
         "fehler_gruende": deal.fehler_gruende or [],
         "fehler_erwartet_eur": deal.fehler_erwartet_eur,
+        "erwachsen": bool(deal.erwachsen),
+        # Gegenprobe auf der Zielseite - siehe app/gratischeck.py.
+        "check_status": deal.check_status,
+        "check_label": GRATIS_LABEL.get(deal.check_status or "") or None,
+        "check_text": deal.check_text, "check_preis_eur": deal.check_preis_eur,
+        "check_am": deal.check_am,
+        "gratis_hinweis": deal.gratis_hinweis,
         "verlauf": punkte,
         "tiefstpreis": min(preise_eur) if preise_eur else None,
         "hoechstpreis": max(preise_eur) if preise_eur else None,
@@ -235,7 +243,9 @@ def set_alarm(deal_id: int, body: AlarmBody, db: Session = Depends(get_db)) -> d
 def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
                limit: int = Query(5000, le=50000),
                db: Session = Depends(get_db)) -> StreamingResponse:
-    stmt = select(Deal).order_by(desc(Deal.first_seen)).limit(limit)
+    # 18+ bleibt auch aus dem Export draussen - eine CSV wird weitergereicht.
+    stmt = (select(Deal).where(Deal.erwachsen.is_(False))
+            .order_by(desc(Deal.first_seen)).limit(limit))
     if nur_gratis:
         stmt = stmt.where(Deal.ist_gratis.is_(True))
     if nur_gemerkt:
@@ -413,7 +423,8 @@ def preisfehler_liste(tage: int = Query(7, ge=1, le=90),
     seit = utcnow() - timedelta(days=tage)
     rows = list(db.scalars(
         select(Deal)
-        .where(Deal.fehler_stufe.in_(stufen), Deal.last_seen >= seit)
+        .where(Deal.fehler_stufe.in_(stufen), Deal.last_seen >= seit,
+               Deal.erwachsen.is_(False))
         .order_by(desc(Deal.fehler_score), desc(Deal.first_seen))
         .limit(limit)))
 

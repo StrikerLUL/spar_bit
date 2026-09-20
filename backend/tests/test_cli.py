@@ -297,3 +297,71 @@ def test_ohne_venv_laeuft_die_cli_trotzdem(monkeypatch, tmp_path):
     monkeypatch.delenv("SPARBIT_CLI_REEXEC", raising=False)
     modul._in_die_venv()
     assert not gerufen
+
+
+# --- 18+ und Gratis-Gegenprobe --------------------------------------------
+
+def test_18plus_ist_aus_und_die_quellen_unsichtbar(tmp_path):
+    ordner = tmp_path / "achtzehn"
+    e = rufe(ordner, "18plus")
+    assert e.returncode == 0
+    assert "aus" in e.stdout
+    # Die Quellen tauchen nicht auf, solange der Bereich zu ist.
+    liste = rufe(ordner, "quellen", "liste")
+    assert "erotik" not in liste.stdout.lower()
+
+
+def test_einschalten_verlangt_die_bestaetigung(tmp_path):
+    ordner = tmp_path / "achtzehn2"
+    e = rufe(ordner, "18plus", "--an")
+    assert e.returncode == 1
+    assert "Altersbestätigung" in (e.stdout + e.stderr)
+    assert "aus" in rufe(ordner, "18plus").stdout
+
+
+def test_quelle_laesst_sich_ohne_freigabe_nicht_einschalten(tmp_path):
+    """Die CLI darf nicht die Hintertuer am Schalter vorbei sein."""
+    ordner = tmp_path / "achtzehn3"
+    e = rufe(ordner, "quellen", "an", "mydealz_erotik")
+    assert e.returncode == 1
+    assert "18+" in (e.stdout + e.stderr)
+
+
+def test_freischalten_und_wieder_zu(tmp_path):
+    ordner = tmp_path / "achtzehn4"
+    e = rufe(ordner, "18plus", "--an", "--ich-bin-volljaehrig")
+    assert e.returncode == 0 and "frei" in e.stdout
+    assert "mydealz_erotik" in e.stdout          # nennt die eigenen Quellen
+
+    assert "erotik" in rufe(ordner, "quellen", "liste").stdout.lower()
+    assert rufe(ordner, "quellen", "an", "mydealz_erotik").returncode == 0
+
+    aus = rufe(ordner, "18plus", "--aus")
+    assert aus.returncode == 0 and "aus" in aus.stdout
+    assert "erotik" not in rufe(ordner, "quellen", "liste").stdout.lower()
+
+
+def test_zustellung_ist_ein_eigener_schalter(tmp_path):
+    ordner = tmp_path / "achtzehn5"
+    rufe(ordner, "18plus", "--an", "--ich-bin-volljaehrig")
+    assert "aus - nur auf der Seite" in rufe(ordner, "18plus").stdout
+    e = rufe(ordner, "18plus", "--melden", "an")
+    assert "Zustellung:  an" in e.stdout
+
+
+def test_gratischeck_laesst_sich_schalten(tmp_path):
+    ordner = tmp_path / "check"
+    e = rufe(ordner, "gratischeck")
+    assert e.returncode == 0 and "an" in e.stdout
+
+    e = rufe(ordner, "gratischeck", "--aus")
+    assert "Gegenprobe:  aus" in e.stdout
+
+    e = rufe(ordner, "gratischeck", "--an", "--max-pro-lauf", "25")
+    assert "Gegenprobe:  an" in e.stdout and "25 Seitenaufrufe" in e.stdout
+
+
+def test_deckel_wird_begrenzt(tmp_path):
+    """Sonst macht ein Tippfehler aus der Gegenprobe einen Crawler."""
+    e = rufe(tmp_path / "check2", "gratischeck", "--max-pro-lauf", "9999")
+    assert "60 Seitenaufrufe" in e.stdout

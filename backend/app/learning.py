@@ -163,7 +163,10 @@ def trainiere(db: Session, tage: int = 120) -> Modell:
     if not beruehrt:
         return modell
 
-    for deal in db.scalars(select(Deal).where(Deal.id.in_(beruehrt))):
+    # 18+ bleibt aus dem Modell heraus: es sortiert den normalen Feed, und
+    # ein dort gemerkter Fund wuerde dessen Reihenfolge mitbestimmen.
+    for deal in db.scalars(select(Deal).where(Deal.id.in_(beruehrt),
+                                              Deal.erwachsen.is_(False))):
         if deal.id in verworfen:
             modell.lerne(deal, NEGATIV["verworfen"], mag_ich=False)
         else:
@@ -175,6 +178,7 @@ def trainiere(db: Session, tage: int = 120) -> Modell:
     if fehlend:
         ungesehen = db.scalars(
             select(Deal).where(Deal.first_seen >= seit,
+                               Deal.erwachsen.is_(False),
                                Deal.id.notin_(beruehrt or {0}))
             .order_by(Deal.first_seen.desc()).limit(fehlend * 3))
         for deal in list(ungesehen)[:fehlend]:
@@ -207,7 +211,8 @@ def vorschlaege(db: Session, tage: int = 120, limit: int = 4) -> list[Vorschlag]
     if len(set(gemocht)) < MIN_POSITIV:
         return []
 
-    deals = list(db.scalars(select(Deal).where(Deal.id.in_(set(gemocht)))))
+    deals = list(db.scalars(select(Deal).where(Deal.id.in_(set(gemocht)),
+                                                Deal.erwachsen.is_(False))))
     gesamt = len(deals)
     if not gesamt:
         return []

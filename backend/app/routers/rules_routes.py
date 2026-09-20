@@ -31,6 +31,8 @@ class RuleBody(BaseModel):
     kategorien: list[str] = []
     haendler: list[str] = []
     channels: list[int] = []
+    # Ohne dieses Haekchen sieht die Regel 18+-Funde gar nicht.
+    erwachsen: bool = False
 
 
 def _rule_dict(r: Rule) -> dict:
@@ -43,6 +45,7 @@ def _rule_dict(r: Rule) -> dict:
         "min_fehler_score": r.min_fehler_score,
         "sources": r.sources or [],
         "kategorien": r.kategorien or [], "haendler": r.haendler or [],
+        "erwachsen": bool(getattr(r, "erwachsen", False)),
         "channels": r.channels or [], "created_at": r.created_at,
         "match_count": r.match_count, "last_match": r.last_match,
     }
@@ -89,8 +92,13 @@ def preview_rule(body: RuleBody, sample: int = Query(500, le=2000),
                  db: Session = Depends(get_db)) -> dict:
     """Kernfunktion des Regel-Editors: wie viele der letzten N Deals haette
     diese Regel getroffen - inklusive Beispielen und knappen Verfehlern."""
+    # Die Vorschau zeigt denselben Ausschnitt, den die Regel spaeter sieht:
+    # ohne das 18+-Haekchen kommen diese Deals gar nicht erst in die Stichprobe.
+    stmt = select(Deal)
+    if not body.erwachsen:
+        stmt = stmt.where(Deal.erwachsen.is_(False))
     deals = list(db.scalars(
-        select(Deal).order_by(desc(Deal.first_seen)).limit(sample)))
+        stmt.order_by(desc(Deal.first_seen)).limit(sample)))
     spec = RuleSpec(
         keywords=body.keywords, required_keywords=body.required_keywords,
         blacklist=body.blacklist, max_preis=body.max_preis,
@@ -98,6 +106,7 @@ def preview_rule(body: RuleBody, sample: int = Query(500, le=2000),
         min_temperatur=body.min_temperatur, min_urteil=body.min_urteil,
         min_fehler_score=body.min_fehler_score, sources=body.sources,
         kategorien=body.kategorien, haendler=body.haendler,
+        erwachsen=body.erwachsen,
     )
     return preview(spec, deals)
 

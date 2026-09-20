@@ -7,6 +7,7 @@ from datetime import datetime, time, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import erwachsen as erwachsen_mod
 from . import money
 from .currency import to_eur
 from .db import get_setting
@@ -61,6 +62,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
     if not item.url or not item.titel:
         return None
 
+    item = _entwirre_gratis(item)
     uhash = url_hash(item.url)
 
     # 1) Exaktes URL-Duplikat -> nur "wieder gesehen" vermerken.
@@ -68,6 +70,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
     if existing:
         existing.last_seen = utcnow()
         existing.seen_count += 1
+        erwachsen_mod.markiere(existing, source_id=source_id)
         _merke_angebot(db, existing, item, source_id)
         _apply_price(db, existing, item, source_id)
         if source_id not in (existing.also_from or []) and source_id != existing.quelle:
@@ -82,6 +85,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
             # Gleicher Titel, andere URL -> derselbe Deal aus anderer Quelle.
             cand.last_seen = utcnow()
             cand.seen_count += 1
+            erwachsen_mod.markiere(cand, source_id=source_id)
             if source_id not in (cand.also_from or []) and source_id != cand.quelle:
                 cand.also_from = list(cand.also_from or []) + [source_id]
             _merke_angebot(db, cand, item, source_id)
@@ -118,8 +122,10 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         tags=item.tags or [],
         veroeffentlicht_am=item.veroeffentlicht_am,
         also_from=[],
+        gratis_hinweis=(item.roh or {}).get("gratis_hinweis"),
         roh=item.roh or {},
     )
+    erwachsen_mod.markiere(deal, source_id=source_id)
     db.add(deal)
     db.flush()
     _merke_angebot(db, deal, item, source_id)
@@ -127,6 +133,31 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         db.add(PriceHistory(deal_id=deal.id, preis=deal.preis,
                             waehrung=deal.waehrung, quelle=source_id))
     return deal
+
+
+def _entwirre_gratis(item: DealItem) -> DealItem:
+    """Letzte Instanz gegen falsche Gratis-Meldungen.
+
+    `priceparse` faengt den haeufigsten Fall schon im Text ab ("gratis
+    Versand"). Hier geht es um den Rest: eine Quelle, die `ist_gratis`
+    meldet und im selben Atemzug einen Preis ueber null nennt. Beides kann
+    nicht stimmen, und die Zahl ist die konkretere Angabe - ein Flag kann
+    aus einer Kategorie ("Freebies") stammen, ein Preis nicht.
+
+    Das greift quellenuebergreifend, auch bei API-Quellen, die ihren
+    Gratis-Status nicht aus Text ableiten.
+    """
+    if not item.ist_gratis or item.preis is None or item.preis <= 0.009:
+        return item
+    roh = dict(item.roh or {})
+    roh["gratis_hinweis"] = "Quelle meldete gratis trotz Preis"
+    roh["gratis_laut_quelle"] = True
+    return item.model_copy(update={
+        "ist_gratis": False,
+        "rabatt_prozent": None if (item.rabatt_prozent or 0) >= 99.5
+                          else item.rabatt_prozent,
+        "roh": roh,
+    })
 
 
 def _merke_angebot(db: Session, deal: Deal, item: DealItem, source_id: str) -> None:
@@ -362,6 +393,27 @@ def _regelnamen(regeln: list[Rule]) -> str:
     return ", ".join(namen[:3]) + f" +{len(namen) - 3}"
 
 
+def _ohne_erwachsene(db: Session, paare: list[tuple[Deal, list[Rule]]]
+                     ) -> list[tuple[Deal, list[Rule]]]:
+    """Zweite Sperre vor dem Versand.
+
+    Die erste sitzt in der Regel-Auswertung: eine Regel ohne 18+-Haekchen
+    trifft diese Deals gar nicht. Hier geht es um den globalen Schalter -
+    wer den Bereich ansehen, aber nicht aufs Handy bekommen will, stellt
+    ihn aus, und dann gilt das fuer jede Regel, auch fuer eine mit Haekchen.
+    """
+    if not any(d.erwachsen for d, _ in paare):
+        return paare
+    if erwachsen_mod.melden_erlaubt(db):
+        return paare
+    behalten = [(d, r) for d, r in paare if not d.erwachsen]
+    zurueck = len(paare) - len(behalten)
+    if zurueck:
+        log.info("18+-Zustellung ist aus - %d Fund(e) nur auf der Seite",
+                 zurueck)
+    return behalten
+
+
 def _zielkanaele(regeln: list[Rule]) -> list[int]:
     """Vereinigung der Kanaele aller beteiligten Regeln, Reihenfolge stabil."""
     raus: list[int] = []
@@ -391,7 +443,7 @@ async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
     channels = {c.id: c for c in db.scalars(select(Channel))}
     sent = 0
 
-    for deal, regeln in buendele(hits):
+    for deal, regeln in _ohne_erwachsene(db, buendele(hits)):
         sofort = _sofort(regeln)
         if quiet and not sofort:
             log.info("Ruhezeit: '%s' zurueckgehalten (%s)",
@@ -494,7 +546,7 @@ async def send_digest(db: Session, http) -> int:
     # Regeln in mehreren Kanaelen landen, soll aber je Kanal einmal
     # vorkommen.
     pro_kanal: dict[int, list[Notification]] = {}
-    for deal, regeln in buendele(hits):
+    for deal, regeln in _ohne_erwachsene(db, buendele(hits)):
         note = _note(deal, regel=_regelnamen(regeln),
                      prioritaet="SOFORT" if _sofort(regeln) else "NORMAL")
         for cid in _zielkanaele(regeln):

@@ -14,6 +14,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, desc, select
 
+from . import erwachsen as erwachsen_mod
+from . import gratischeck
 from .config import settings
 from .db import SessionLocal, get_setting, session_scope
 from .events import broker
@@ -82,6 +84,14 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
             cfg = db.get(SourceConfig, source_id)
             if cfg is None:
                 return {"source_id": source_id, "error": "keine Konfiguration"}
+            # Auch bei manuellem Start: ist der 18+-Bereich zu, laeuft keine
+            # 18+-Quelle. Der Schalter unter Logs & System ist die einzige
+            # Stelle, an der das aufgeht - nicht ein vergessener Job, nicht
+            # ein Knopf im Quellen-Dialog, nicht die CLI.
+            if erwachsen_mod.quelle_ist_18(source_id) \
+                    and not erwachsen_mod.ist_aktiv(db):
+                return {"source_id": source_id,
+                        "skipped": "18+-Bereich nicht freigeschaltet"}
             if not manual and not cfg.enabled:
                 return {"source_id": source_id, "skipped": "deaktiviert"}
             if not manual and cfg.circuit_open_until and cfg.circuit_open_until > utcnow():
@@ -181,7 +191,30 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
                 except Exception as exc:
                     log.error("Preisalarm fehlgeschlagen: %s", exc)
 
+                # Gegenprobe auf der Zielseite, BEVOR die Regeln laufen:
+                # ein Fund, der sich als nicht-gratis herausstellt, soll
+                # eine "nur gratis"-Regel gar nicht erst treffen. Genau
+                # dieser Fall war der Aerger - Meldung kommt, Seite will
+                # Geld.
+                gesperrt: set[int] = set()
+                if fresh and get_setting(db, gratischeck.SETTING_AN, True):
+                    try:
+                        bilanz = await gratischeck.pruefe_deals(
+                            db, get_http(), fresh,
+                            grenze=get_setting(db, gratischeck.SETTING_MAX,
+                                               gratischeck.MAX_PRO_LAUF))
+                        gesperrt = set(bilanz["gesperrt"])
+                        if bilanz["korrigiert"]:
+                            log.info("Gratis-Pruefung: %d von %d korrigiert",
+                                     bilanz["korrigiert"], bilanz["geprueft"])
+                    except Exception as exc:
+                        log.error("Gratis-Pruefung fehlgeschlagen: %s", exc)
+
                 hits = []
+                # Was die Zielseite als abgelaufen fuehrt, wird nicht
+                # gemeldet - der Deal bleibt sichtbar, aber er weckt
+                # niemanden mehr.
+                fresh = [d for d in fresh if d.id not in gesperrt]
                 if fresh:
                     hits = match_rules(db, fresh)
                     if hits:
@@ -230,7 +263,8 @@ def schedule_source(cfg: SourceConfig) -> None:
     job_id = _job_id(cfg.id)
     existing = scheduler.get_job(job_id)
 
-    if not cfg.enabled:
+    if not cfg.enabled or (erwachsen_mod.quelle_ist_18(cfg.id)
+                           and not _erwachsen_frei()):
         if existing:
             existing.remove()
             log.info("Job fuer '%s' entfernt", cfg.id)
@@ -256,6 +290,15 @@ def schedule_source(cfg: SourceConfig) -> None:
                           max_instances=1, coalesce=True, misfire_grace_time=300,
                           next_run_time=utcnow() + timedelta(seconds=5))
         log.info("Job fuer '%s' alle %ds", cfg.id, interval)
+
+
+def _erwachsen_frei() -> bool:
+    """Ist der 18+-Bereich freigeschaltet? Fehler heissen hier: nein."""
+    try:
+        with SessionLocal() as db:
+            return erwachsen_mod.ist_aktiv(db)
+    except Exception:                       # noqa: BLE001 - im Zweifel zu
+        return False
 
 
 def sync_jobs() -> None:
@@ -346,6 +389,9 @@ async def preisfehler_job() -> None:
                 select(Deal)
                 .where(Deal.first_seen >= utcnow() - _td(days=7),
                        Deal.ist_gratis.is_(False),
+                       # Der Waechter weckt das Handy in Sekunden - genau
+                       # das soll der 18+-Bereich nicht tun.
+                       Deal.erwachsen.is_(False),
                        Deal.preis_eur.isnot(None))
                 .order_by(desc(Deal.last_seen)).limit(400)))
             heiss = pricefehler.aktualisiere(db, kandidaten)
@@ -378,6 +424,36 @@ async def watchdog_job() -> None:
             await dispatch_watchdog(db, get_http())
     except Exception as exc:
         log.error("Selbstueberwachung fehlgeschlagen: %s", exc)
+
+
+async def gratischeck_job() -> None:
+    """Gratis-Funde der letzten Tage nachpruefen.
+
+    Der Lauf beim Einsammeln erwischt jeden Fund einmal. Was danach
+    passiert - Aktion beendet, Vorrat weg - sieht nur dieser Job. Er
+    arbeitet die aeltesten Befunde zuerst ab und ist pro Lauf gedeckelt,
+    damit daraus kein Crawler wird.
+    """
+    try:
+        from datetime import timedelta as _td
+        with SessionLocal() as db:
+            if not get_setting(db, gratischeck.SETTING_AN, True):
+                return
+            kandidaten = list(db.scalars(
+                select(Deal)
+                .where(Deal.first_seen >= utcnow() - _td(days=3),
+                       Deal.ist_gratis.is_(True))
+                .order_by(Deal.check_am.is_(None).desc(), Deal.check_am)
+                .limit(60)))
+            bilanz = await gratischeck.pruefe_deals(
+                db, get_http(), kandidaten,
+                grenze=get_setting(db, gratischeck.SETTING_MAX,
+                                   gratischeck.MAX_PRO_LAUF))
+            if bilanz["geprueft"]:
+                log.info("Gratis-Nachpruefung: %d geprueft, %d korrigiert",
+                         bilanz["geprueft"], bilanz["korrigiert"])
+    except Exception as exc:
+        log.error("Gratis-Nachpruefung fehlgeschlagen: %s", exc)
 
 
 async def digest_job() -> None:
@@ -427,6 +503,9 @@ def start() -> None:
                       id="preisfehler", max_instances=1, coalesce=True)
     scheduler.add_job(sync_jobs, IntervalTrigger(seconds=60), id="sync",
                       max_instances=1, coalesce=True)
+    scheduler.add_job(gratischeck_job, IntervalTrigger(minutes=30),
+                      id="gratischeck", max_instances=1, coalesce=True,
+                      next_run_time=utcnow() + timedelta(minutes=3))
     # Erst nach ein paar Minuten anfangen: direkt nach dem Start hat noch
     # keine Quelle laufen koennen, da waere jede Meldung verfrueht.
     scheduler.add_job(watchdog_job, IntervalTrigger(minutes=15), id="watchdog",

@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from ..auth import current_user
 from ..config import settings
+from .. import erwachsen as erwachsen_mod
+from .. import gratischeck
 from ..db import get_db, get_setting, set_setting
 from ..events import broker
 from ..logging_setup import recent_logs
@@ -118,6 +120,94 @@ def probleme_melden(body: WatchdogAn, db: Session = Depends(get_db)) -> dict:
     set_setting(db, "watchdog_an", body.an)
     db.commit()
     return {"ok": True, "an": body.an}
+
+
+# --- 18+-Bereich -----------------------------------------------------------
+
+class ErwachsenSchalter(BaseModel):
+    an: bool
+    # Ohne dieses Haekchen wird nicht eingeschaltet. Es ist die Stelle, an
+    # der man nicht aus Versehen hinklickt.
+    bestaetigt: bool = False
+
+
+class ErwachsenOptionen(BaseModel):
+    melden: bool | None = None
+    unscharf: bool | None = None
+
+
+@router.get("/erwachsen")
+def erwachsen_status(db: Session = Depends(get_db)) -> dict:
+    from ..sources import all_sources
+
+    quellen = [s for s in all_sources() if s.category.value == "erwachsen"]
+    zustand = erwachsen_mod.zustand(db)
+    zustand["quellen"] = len(quellen)
+    zustand["quellen_namen"] = [s.display_name for s in quellen]
+    zustand["deals"] = db.scalar(
+        select(func.count()).select_from(Deal)
+        .where(Deal.erwachsen.is_(True))) or 0
+    return zustand
+
+
+@router.put("/erwachsen")
+def erwachsen_schalten(body: ErwachsenSchalter,
+                       db: Session = Depends(get_db)) -> dict:
+    try:
+        zustand = erwachsen_mod.schalte(db, body.an, bestaetigt=body.bestaetigt)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    # Jobs sofort nachziehen: beim Ausschalten muessen die 18+-Quellen
+    # aufhoeren zu laufen, beim Einschalten duerfen sie anfangen.
+    from ..scheduler import sync_jobs
+    sync_jobs()
+    return zustand
+
+
+@router.put("/erwachsen/optionen")
+def erwachsen_optionen(body: ErwachsenOptionen,
+                       db: Session = Depends(get_db)) -> dict:
+    if body.melden is not None:
+        set_setting(db, erwachsen_mod.MELDEN, bool(body.melden))
+    if body.unscharf is not None:
+        set_setting(db, erwachsen_mod.UNSCHARF, bool(body.unscharf))
+    db.commit()
+    return erwachsen_mod.zustand(db)
+
+
+# --- Gratis-Gegenprobe -----------------------------------------------------
+
+class GratisCheck(BaseModel):
+    an: bool | None = None
+    max_pro_lauf: int | None = None
+
+
+@router.get("/gratischeck")
+def gratischeck_status(db: Session = Depends(get_db)) -> dict:
+    from datetime import timedelta
+
+    seit = datetime.now(timezone.utc) - timedelta(days=7)
+    zeilen = db.execute(
+        select(Deal.check_status, func.count(Deal.id))
+        .where(Deal.check_am >= seit).group_by(Deal.check_status)).all()
+    return {
+        "an": bool(get_setting(db, gratischeck.SETTING_AN, True)),
+        "max_pro_lauf": int(get_setting(db, gratischeck.SETTING_MAX,
+                                        gratischeck.MAX_PRO_LAUF)),
+        "woche": {status: anzahl for status, anzahl in zeilen if status},
+        "label": gratischeck.LABEL,
+    }
+
+
+@router.put("/gratischeck")
+def gratischeck_setzen(body: GratisCheck, db: Session = Depends(get_db)) -> dict:
+    if body.an is not None:
+        set_setting(db, gratischeck.SETTING_AN, bool(body.an))
+    if body.max_pro_lauf is not None:
+        set_setting(db, gratischeck.SETTING_MAX,
+                    max(0, min(60, int(body.max_pro_lauf))))
+    db.commit()
+    return gratischeck_status(db)
 
 
 # --- Updates ---------------------------------------------------------------

@@ -9,6 +9,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from ..auth import current_user
+from .. import erwachsen as erwachsen_mod
 from ..db import get_db
 from ..models import SourceConfig, SourceRun, User, utcnow
 from ..scheduler import build_context, run_source, schedule_source
@@ -36,6 +37,7 @@ def _serialize(src, cfg: SourceConfig, stats: dict) -> dict:
         "requires_api_key": src.requires_api_key,
         "api_key_url": src.api_key_url,
         "experimental": src.experimental,
+        "erwachsen": src.category.value == "erwachsen",
         "default_interval": src.default_interval,
         "min_interval": src.min_interval,
         "options_schema": [asdict(o) for o in src.options_schema],
@@ -72,8 +74,15 @@ def list_sources(db: Session = Depends(get_db)) -> list[dict]:
     ).all()
     avg_map = {r[0]: int(r[2] or 0) for r in runs}
 
+    # Solange der 18+-Bereich zu ist, gibt es diese Quellen hier nicht -
+    # weder sichtbar noch schaltbar. Ihre Config-Zeilen bleiben bestehen,
+    # damit Einstellungen ein Aus- und Wiedereinschalten ueberleben.
+    frei = erwachsen_mod.ist_aktiv(db)
+
     out = []
     for src in all_sources():
+        if src.category.value == "erwachsen" and not frei:
+            continue
         cfg = cfgs.get(src.id)
         if cfg is None:
             cfg = SourceConfig(id=src.id, enabled=False,
@@ -84,6 +93,18 @@ def list_sources(db: Session = Depends(get_db)) -> list[dict]:
             db.commit()
         out.append(_serialize(src, cfg, {"avg_duration_ms": avg_map.get(src.id, 0)}))
     return out
+
+
+def _pruefe_frei(db: Session, source_id: str) -> None:
+    """403 fuer 18+-Quellen, solange der Bereich nicht freigeschaltet ist.
+
+    Der Filter in der Liste allein reicht nicht: wer die ID kennt, koennte
+    sonst per PATCH an der Sperre vorbei einschalten.
+    """
+    if erwachsen_mod.quelle_ist_18(source_id) and not erwachsen_mod.ist_aktiv(db):
+        raise HTTPException(
+            403, "Der 18+-Bereich ist nicht freigeschaltet "
+                 "(Logs & System → 18+-Bereich).")
 
 
 @router.get("/{source_id}/runs")
@@ -105,6 +126,7 @@ def update_source(source_id: str, body: SourceUpdate,
     cfg = db.get(SourceConfig, source_id)
     if src is None or cfg is None:
         raise HTTPException(404, "Quelle unbekannt")
+    _pruefe_frei(db, source_id)
 
     if body.enabled is not None:
         cfg.enabled = body.enabled
@@ -132,6 +154,7 @@ async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
     cfg = db.get(SourceConfig, source_id)
     if src is None or cfg is None:
         raise HTTPException(404, "Quelle unbekannt")
+    _pruefe_frei(db, source_id)
 
     result = await src.health_check(build_context(cfg))
 
@@ -151,9 +174,10 @@ async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/{source_id}/run")
-async def run_now(source_id: str) -> dict:
+async def run_now(source_id: str, db: Session = Depends(get_db)) -> dict:
     if get_source(source_id) is None:
         raise HTTPException(404, "Quelle unbekannt")
+    _pruefe_frei(db, source_id)
     return await run_source(source_id, manual=True)
 
 

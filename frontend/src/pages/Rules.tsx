@@ -77,6 +77,7 @@ const EMPTY_RULE: RuleDraft = {
   max_preis: null,
   min_rabatt_prozent: null,
   nur_gratis: false,
+  erwachsen: false,
   min_temperatur: null,
   min_urteil: null,
   min_fehler_score: null,
@@ -201,6 +202,7 @@ export function Rules() {
 
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {rule.nur_gratis && <Badge variant="success">nur gratis</Badge>}
+                {rule.erwachsen && <Badge variant="outline">18+</Badge>}
                 {rule.max_preis != null && <Badge variant="outline">≤ {formatPrice(rule.max_preis)}</Badge>}
                 {rule.min_rabatt_prozent != null && (
                   <Badge variant="outline">≥ {rule.min_rabatt_prozent}% Rabatt</Badge>
@@ -269,6 +271,7 @@ const toDraft = (rule: Rule): RuleDraft => ({
   max_preis: rule.max_preis,
   min_rabatt_prozent: rule.min_rabatt_prozent,
   nur_gratis: rule.nur_gratis,
+  erwachsen: Boolean(rule.erwachsen),
   min_temperatur: rule.min_temperatur,
   min_urteil: rule.min_urteil,
   min_fehler_score: rule.min_fehler_score,
@@ -293,6 +296,9 @@ function RuleEditor({
 }) {
   const toast = useToast();
   const [draft, setDraft] = React.useState<RuleDraft>(initial);
+  // Das 18+-Haekchen gibt es nur, wenn der Bereich ueberhaupt offen ist.
+  const { data: erwachsenStatus } = useAsync(() => api.system.erwachsen(), []);
+  const erwachsenFrei = Boolean(erwachsenStatus?.an);
   const [preview, setPreview] = React.useState<RulePreview | null>(null);
   const [previewing, setPreviewing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -387,6 +393,25 @@ function RuleEditor({
               </label>
             </div>
           </div>
+
+          {/* Nur sichtbar, wenn der 18+-Bereich freigeschaltet ist - sonst
+              waere es eine Einstellung fuer etwas, das es nicht gibt. */}
+          {erwachsenFrei && (
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-md
+                              border border-border bg-muted/30 p-3 text-sm">
+              <Switch checked={draft.erwachsen}
+                onChange={(v) => set("erwachsen", v)} label="18+ einbeziehen" />
+              <span className="min-w-0">
+                18+-Funde einbeziehen
+                <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                  Ohne dieses Häkchen sieht die Regel diese Funde gar nicht —
+                  auch dann nicht, wenn sonst alles passt. Gemeldet wird
+                  trotzdem nur, wenn unter Logs &amp; System die Zustellung
+                  für 18+ eingeschaltet ist.
+                </span>
+              </span>
+            </label>
+          )}
 
           <ListField
             label="Keywords (ODER)"

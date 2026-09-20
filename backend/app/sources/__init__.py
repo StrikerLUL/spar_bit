@@ -5,8 +5,8 @@ Neue Quelle hinzufuegen:
   2. Modul hier importieren.
 Mehr nicht.
 """
-from . import (cheapshark, customfeed, epic, ggdeals, gog, itad,  # noqa: F401
-               pepper, reddit, steam, wordpress)
+from . import (cheapshark, customfeed, epic, erwachsen, ggdeals, gog,  # noqa: F401
+               itad, pepper, reddit, steam, wordpress)
 from .base import (Category, DealItem, FetchContext, HealthResult,  # noqa: F401
                    OptionSpec, Source, Verification, all_sources, get_source,
                    register)
