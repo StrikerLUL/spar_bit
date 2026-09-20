@@ -330,8 +330,54 @@ def in_quiet_hours(db: Session, now: datetime | None = None) -> bool:
     return cur >= start or cur < end     # ueber Mitternacht
 
 
+def buendele(hits: list[tuple[Rule, Deal]]) -> list[tuple[Deal, list[Rule]]]:
+    """Treffer nach Deal zusammenfassen.
+
+    Vorher ging je (Regel, Deal)-Paar eine Nachricht raus. Wer eine Regel
+    fuer "Lego" und eine fuer "Preisfehler" hat, bekam denselben Fund
+    zweimal aufs Handy - und je mehr Regeln, desto schlimmer. Die
+    Reihenfolge der Deals bleibt, damit Aelteres zuerst kommt.
+    """
+    raus: dict[int, tuple[Deal, list[Rule]]] = {}
+    for rule, deal in hits:
+        schluessel = deal.id if deal.id is not None else id(deal)
+        if schluessel in raus:
+            regeln = raus[schluessel][1]
+            if all(r.id != rule.id for r in regeln):
+                regeln.append(rule)
+        else:
+            raus[schluessel] = (deal, [rule])
+    return list(raus.values())
+
+
+def _sofort(regeln: list[Rule]) -> bool:
+    """SOFORT gewinnt: trifft eine dringende Regel, ist der Fund dringend."""
+    return any((r.priority or "NORMAL").upper() == "SOFORT" for r in regeln)
+
+
+def _regelnamen(regeln: list[Rule]) -> str:
+    namen = [r.name for r in regeln]
+    if len(namen) <= 3:
+        return ", ".join(namen)
+    return ", ".join(namen[:3]) + f" +{len(namen) - 3}"
+
+
+def _zielkanaele(regeln: list[Rule]) -> list[int]:
+    """Vereinigung der Kanaele aller beteiligten Regeln, Reihenfolge stabil."""
+    raus: list[int] = []
+    for regel in regeln:
+        for cid in regel.channels or []:
+            if cid not in raus:
+                raus.append(cid)
+    return raus
+
+
 async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
-    """Treffer an die Kanaele geben. SOFORT umgeht Ruhezeiten."""
+    """Treffer an die Kanaele geben - ein Deal, eine Nachricht.
+
+    SOFORT umgeht Ruhezeiten. Treffen mehrere Regeln denselben Deal, zaehlt
+    die dringendste Prioritaet und es gehen alle ihre Kanaele an.
+    """
     if not hits:
         return 0
 
@@ -345,20 +391,27 @@ async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
     channels = {c.id: c for c in db.scalars(select(Channel))}
     sent = 0
 
-    for rule, deal in hits:
-        sofort = (rule.priority or "NORMAL").upper() == "SOFORT"
+    for deal, regeln in buendele(hits):
+        sofort = _sofort(regeln)
         if quiet and not sofort:
-            log.info("Ruhezeit: '%s' zurueckgehalten (Regel %s)",
-                     deal.titel[:60], rule.name)
+            log.info("Ruhezeit: '%s' zurueckgehalten (%s)",
+                     deal.titel[:60], _regelnamen(regeln))
             continue
 
-        target_ids = rule.channels or []
+        target_ids = _zielkanaele(regeln)
         if not target_ids:
-            log.warning("Regel '%s' hat keinen Kanal konfiguriert", rule.name)
+            log.warning("Keine der Regeln %s hat einen Kanal konfiguriert",
+                        _regelnamen(regeln))
             continue
 
-        note = _note(deal, regel=rule.name,
+        note = _note(deal, regel=_regelnamen(regeln),
                      prioritaet="SOFORT" if sofort else "NORMAL")
+
+        # Fuer das Protokoll die Regel, die den Fund erklaert: die
+        # dringendste, sonst die erste.
+        protokoll_regel = next(
+            (r for r in regeln if (r.priority or "NORMAL").upper() == "SOFORT"),
+            regeln[0])
 
         for cid in target_ids:
             chan_row = channels.get(cid)
@@ -373,24 +426,27 @@ async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
                 chan_row.last_used = utcnow()
                 sent += 1
                 db.add(NotificationLog(
-                    channel_id=cid, channel_type=chan_row.type, rule_id=rule.id,
-                    rule_name=rule.name, deal_id=deal.id,
-                    deal_titel=deal.titel[:500], ok=True))
+                    channel_id=cid, channel_type=chan_row.type,
+                    rule_id=protokoll_regel.id, rule_name=_regelnamen(regeln),
+                    deal_id=deal.id, deal_titel=deal.titel[:500], ok=True))
             except Exception as exc:
                 chan_row.error_count += 1
                 log.error("Kanal %s (%s) fehlgeschlagen: %s",
                           chan_row.name, chan_row.type, exc,
                           extra={"channel": chan_row.type})
                 db.add(NotificationLog(
-                    channel_id=cid, channel_type=chan_row.type, rule_id=rule.id,
-                    rule_name=rule.name, deal_id=deal.id,
-                    deal_titel=deal.titel[:500], ok=False,
+                    channel_id=cid, channel_type=chan_row.type,
+                    rule_id=protokoll_regel.id, rule_name=_regelnamen(regeln),
+                    deal_id=deal.id, deal_titel=deal.titel[:500], ok=False,
                     error=f"{type(exc).__name__}: {exc}"[:500]))
 
-        match = db.scalar(select(Match).where(Match.rule_id == rule.id,
-                                              Match.deal_id == deal.id))
-        if match:
-            match.notified_at = utcnow()
+        # Alle beteiligten Regeln gelten als zugestellt - sonst kaeme der
+        # Deal im naechsten Digest nochmal.
+        for regel in regeln:
+            match = db.scalar(select(Match).where(Match.rule_id == regel.id,
+                                                  Match.deal_id == deal.id))
+            if match:
+                match.notified_at = utcnow()
 
     db.commit()
     return sent
