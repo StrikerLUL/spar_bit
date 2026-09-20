@@ -94,12 +94,16 @@ class Telegram(Channel):
             if len(note.beschreibung) > 280:
                 snippet += "…"
             lines += ["", f"<i>{_esc(snippet)}</i>"]
-        lines += ["", f'<a href="{html.escape(note.url, quote=True)}">➡️ Zum Deal</a>']
+        if note.url:
+            lines += ["",
+                      f'<a href="{html.escape(note.url, quote=True)}">➡️ Zum Deal</a>']
         return "\n".join(lines)
 
     @staticmethod
     def _buttons(note: Notification) -> list[list[dict]]:
-        row1 = [{"text": "🔗 Zum Deal", "url": note.url}]
+        # Telegram lehnt einen Knopf ohne URL ab - ein Hinweis ueber SparBit
+        # selbst hat keinen Deal, zu dem er fuehren koennte.
+        row1 = [{"text": "🔗 Zum Deal", "url": note.url}] if note.url else []
         row2 = []
         if note.deal_id:
             row2.append({"text": "⭐ Gemerkt",
@@ -107,7 +111,7 @@ class Telegram(Channel):
         if note.quelle:
             row2.append({"text": "🔇 Quelle stumm",
                          "callback_data": f"mute:{note.quelle}"})
-        return [row1] + ([row2] if row2 else [])
+        return [r for r in (row1, row2) if r]
 
 
 register(Telegram())

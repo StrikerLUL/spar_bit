@@ -491,6 +491,71 @@ async def dispatch_alarms(db: Session, deals: list[Deal], http) -> int:
 FEHLER_SPERRE_STUNDEN = 12
 
 
+async def dispatch_watchdog(db: Session, http) -> int:
+    """Befunde der Selbstueberwachung melden.
+
+    Eigener Weg, weil es hier keinen Deal und keine Regel gibt - und weil
+    diese Meldung auch dann rausmuss, wenn gerade keine Regel greift. Die
+    Ruhezeit wird respektiert: ein kaputter Kanal um drei Uhr nachts ist
+    kein Grund, jemanden zu wecken; die Pruefung laeuft ohnehin alle
+    15 Minuten wieder.
+    """
+    from . import watchdog
+
+    if get_setting(db, "notifications_paused"):
+        return 0
+    if in_quiet_hours(db):
+        return 0
+    if not get_setting(db, "watchdog_an", True):
+        return 0
+
+    lage = watchdog.faellig(db, watchdog.pruefe(db))
+    if not lage.probleme and not lage.entwarnungen:
+        return 0
+
+    kanaele = [c for c in db.scalars(select(Channel)) if c.enabled]
+    if not kanaele:
+        # Ohne Kanal laesst sich nichts melden - aber ins Log gehoert es.
+        for befund in lage.probleme:
+            log.warning("Selbstueberwachung: %s", befund.text)
+        watchdog.merke(db, lage)
+        return 0
+
+    meldungen: list[Notification] = []
+    for befund in lage.probleme:
+        meldungen.append(Notification(
+            titel=befund.text,
+            url="", quelle="system", regel="Selbstüberwachung",
+            beschreibung=befund.rat or None,
+            prioritaet="NORMAL", ist_hinweis=True))
+    for schluessel in lage.entwarnungen:
+        meldungen.append(Notification(
+            titel=watchdog.text_fuer_entwarnung(schluessel),
+            url="", quelle="system", regel="Selbstüberwachung",
+            prioritaet="NORMAL", ist_hinweis=True, ist_entwarnung=True))
+
+    gesendet = 0
+    for note in meldungen:
+        for kanal in kanaele:
+            impl = get_channel(kanal.type)
+            if impl is None:
+                continue
+            try:
+                await impl.send(kanal.config or {}, note, http)
+                kanal.last_used = utcnow()
+                gesendet += 1
+            except Exception as exc:
+                # Nicht in den Fehlerzaehler: sonst meldet ein kaputter
+                # Kanal sich selbst kaputt und treibt den Zaehler hoch.
+                log.error("Selbstueberwachung über %s fehlgeschlagen: %s",
+                          kanal.type, exc)
+
+    watchdog.merke(db, lage)
+    log.info("Selbstueberwachung: %d Probleme, %d Entwarnungen gemeldet",
+             len(lage.probleme), len(lage.entwarnungen))
+    return gesendet
+
+
 def waechter_aktiv(db: Session) -> bool:
     return bool(get_setting(db, "preisfehler_waechter", True))
 

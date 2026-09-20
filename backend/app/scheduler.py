@@ -23,6 +23,7 @@ from .images import hole_fuer_deals
 from .verdict import aktualisiere as urteile_aktualisieren
 from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
 from .pipeline import (check_price_alarms, dispatch, dispatch_alarms,
+                       dispatch_watchdog,
                        dispatch_preisfehler, ingest, match_rules, send_digest)
 from . import pricefehler
 from .sources import all_sources, get_source
@@ -370,6 +371,15 @@ def urteile_job() -> None:
         log.error("Urteile fehlgeschlagen: %s", exc)
 
 
+async def watchdog_job() -> None:
+    """Sich selbst pruefen: laufen alle eingeschalteten Quellen und Kanaele?"""
+    try:
+        with SessionLocal() as db:
+            await dispatch_watchdog(db, get_http())
+    except Exception as exc:
+        log.error("Selbstueberwachung fehlgeschlagen: %s", exc)
+
+
 async def digest_job() -> None:
     try:
         with SessionLocal() as db:
@@ -417,6 +427,11 @@ def start() -> None:
                       id="preisfehler", max_instances=1, coalesce=True)
     scheduler.add_job(sync_jobs, IntervalTrigger(seconds=60), id="sync",
                       max_instances=1, coalesce=True)
+    # Erst nach ein paar Minuten anfangen: direkt nach dem Start hat noch
+    # keine Quelle laufen koennen, da waere jede Meldung verfrueht.
+    scheduler.add_job(watchdog_job, IntervalTrigger(minutes=15), id="watchdog",
+                      max_instances=1, coalesce=True,
+                      next_run_time=utcnow() + timedelta(minutes=5))
     try:
         from .claimer import scan_job
         scheduler.add_job(scan_job, IntervalTrigger(minutes=10), id="claimer_scan",

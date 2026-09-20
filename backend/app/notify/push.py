@@ -44,7 +44,9 @@ class Gotify(Channel):
             prio = max(prio, 8)
 
         text = "\n".join([*(f"{name}: {wert}" for name, wert in note.zeilen()),
-                          "", note.url])
+                          *(["", note.url] if note.url else [])])
+        if not text.strip():
+            text = note.titel
 
         resp = await http.post(
             f"{server}/message",
@@ -56,7 +58,8 @@ class Gotify(Channel):
                 # Klickbarer Link und Markdown - beides versteht Gotify ueber extras.
                 "extras": {
                     "client::display": {"contentType": "text/markdown"},
-                    "client::notification": {"click": {"url": note.url}},
+                    **({"client::notification": {"click": {"url": note.url}}}
+                       if note.url else {}),
                 },
             },
             timeout=20.0)
@@ -93,11 +96,12 @@ class Pushover(Channel):
             "token": token,
             "user": user,
             "title": note.kopfzeile[:250],
-            "message": "\n".join(f"{name}: {wert}" for name, wert in note.zeilen()),
-            "url": note.url,
-            "url_title": "Zum Deal",
+            "message": ("\n".join(f"{name}: {wert}" for name, wert in note.zeilen())
+                        or note.titel),
             # 1 = hoch (Ton auch im Stillmodus-Zeitplan), 0 = normal.
             "priority": 1 if note.prioritaet == "SOFORT" else 0,
+            # Pushover lehnt url_title ohne url ab.
+            **({"url": note.url, "url_title": "Zum Deal"} if note.url else {}),
         }
         if config.get("geraet"):
             daten["device"] = str(config["geraet"])[:100]

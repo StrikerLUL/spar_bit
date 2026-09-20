@@ -1,11 +1,11 @@
 import {
-  ArrowUpCircle, CheckCircle2, Copy, Download, HardDrive, Image, Keyboard,
-  Puzzle, RefreshCw, ScrollText, Trash2, Upload, XCircle,
+  AlertTriangle, ArrowUpCircle, CheckCircle2, Copy, Download, HardDrive, Image,
+  Keyboard, Puzzle, RefreshCw, ScrollText, ShieldCheck, Trash2, Upload, XCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
-  api, type ApiTokenInfo, type BilderStatus, type LogLine, type SystemInfo,
-  type UpdateStatus,
+  api, type ApiTokenInfo, type BilderStatus, type LogLine, type ProblemStatus,
+  type SystemInfo, type UpdateStatus,
 } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { useToast } from "@/components/Toast";
@@ -112,6 +112,7 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
         </Card>
 
         <div className="space-y-4">
+          <ProblemCard />
           <UpdateCard />
 
           <Card>
@@ -212,6 +213,83 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
     </>
   );
 }
+
+/** Was gerade nicht läuft — und ob SparBit darüber Bescheid geben soll.
+ *
+ *  Dieselbe Prüfung, die auch der Melder benutzt. Sie ist absichtlich
+ *  nebenwirkungsfrei, damit das Hinsehen hier nicht die Drosselung des
+ *  Melders verbraucht.
+ */
+function ProblemCard() {
+  const toast = useToast();
+  const { data, reload } = useAsync<ProblemStatus>(
+    () => api.system.probleme(), []);
+
+  if (!data) return <Skeleton className="h-32" />;
+
+  const schalte = async (an: boolean) => {
+    try {
+      await api.system.problemeMelden(an);
+      toast.push("success", an ? "Meldungen an" : "Meldungen aus",
+        an ? "Ausfälle kommen künftig über deine Kanäle."
+           : "Ausfälle stehen nur noch hier.");
+      reload();
+    } catch (err) {
+      toast.push("error", "Ging nicht", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="flex items-center gap-2">
+          {data.probleme.length ? (
+            <AlertTriangle className="h-4 w-4 text-warning" />
+          ) : (
+            <ShieldCheck className="h-4 w-4 text-success" />
+          )}
+          Selbstüberwachung
+        </CardTitle>
+        {data.probleme.length > 0 && (
+          <Badge variant="destructive">{data.probleme.length}</Badge>
+        )}
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {data.probleme.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Alle eingeschalteten Quellen liefern, alle Kanäle stellen zu.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {data.probleme.map((p) => (
+              <li key={`${p.art}:${p.betrifft}`}
+                className="rounded-md bg-warning/10 px-3 py-2">
+                <p className="text-sm leading-snug">{p.text}</p>
+                {p.rat && (
+                  <p className="mt-0.5 break-words text-xs text-muted-foreground">
+                    {p.rat}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex items-start justify-between gap-3 border-t border-border pt-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Ausfälle melden</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Über deine Kanäle, höchstens einmal je Problem und Tag.
+            </p>
+          </div>
+          <Switch checked={data.an} onChange={schalte} label="Ausfälle melden" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 
 /** Stand des Codes, Knopf zum Aktualisieren, Schalter fuer die Automatik.
  *

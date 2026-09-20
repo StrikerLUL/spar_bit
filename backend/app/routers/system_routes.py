@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import current_user
 from ..config import settings
-from ..db import get_db
+from ..db import get_db, get_setting, set_setting
 from ..events import broker
 from ..logging_setup import recent_logs
 from .. import updater
@@ -89,6 +89,35 @@ def backup(db: Session = Depends(get_db)) -> JSONResponse:
         content=json.loads(json.dumps(data, default=str)),
         headers={"Content-Disposition": f'attachment; filename="sparbit-backup-{stamp}.json"'},
     )
+
+
+# --- Selbstueberwachung ----------------------------------------------------
+
+class WatchdogAn(BaseModel):
+    an: bool
+
+
+@router.get("/probleme")
+def probleme(db: Session = Depends(get_db)) -> dict:
+    """Was gerade nicht laeuft - dieselbe Pruefung wie der Melder."""
+    from .. import watchdog
+
+    befunde = watchdog.pruefe(db)
+    return {
+        "an": bool(get_setting(db, "watchdog_an", True)),
+        "probleme": [
+            {"art": b.art, "betrifft": b.betrifft, "text": b.text,
+             "rat": b.rat, "seit": b.seit}
+            for b in befunde
+        ],
+    }
+
+
+@router.put("/probleme/melden")
+def probleme_melden(body: WatchdogAn, db: Session = Depends(get_db)) -> dict:
+    set_setting(db, "watchdog_an", body.an)
+    db.commit()
+    return {"ok": True, "an": body.an}
 
 
 # --- Updates ---------------------------------------------------------------

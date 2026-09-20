@@ -82,3 +82,59 @@ def test_sync_ist_als_job_registriert():
     quelle = inspect.getsource(sched.start)
     assert 'id="sync"' in quelle
     assert "sync_jobs" in quelle
+
+
+# --- Zeitstempel aus der Datenbank -----------------------------------------
+
+@pytest.fixture
+def db(tmp_path, monkeypatch):
+    from conftest import lade_app_neu
+    monkeypatch.setenv("SPARBIT_DATA_DIR", str(tmp_path))
+    lade_app_neu()
+    from app.db import SessionLocal, init_db
+    init_db()
+    return SessionLocal
+
+
+def test_zeitstempel_behalten_ihre_zeitzone(db):
+    """SQLite gibt sonst naive Zeitstempel zurück.
+
+    Der Schutzschalter verglich circuit_open_until mit utcnow() und starb
+    daran, sobald er einmal zugemacht hatte - die Quelle lief nie wieder
+    an. Dasselbe traf die Stummschaltung und die Sperrfrist des
+    Preisfehler-Wächters.
+    """
+    from datetime import timedelta
+    from app.models import SourceConfig, utcnow
+
+    with db() as sitzung:
+        sitzung.add(SourceConfig(id="probe", enabled=True,
+                                 circuit_open_until=utcnow() + timedelta(minutes=30),
+                                 snooze_until=utcnow() + timedelta(hours=6),
+                                 last_success=utcnow()))
+        sitzung.commit()
+
+    with db() as sitzung:
+        cfg = sitzung.get(SourceConfig, "probe")
+        for feld in ("circuit_open_until", "snooze_until", "last_success"):
+            wert = getattr(cfg, feld)
+            assert wert.tzinfo is not None, f"{feld} kam ohne Zeitzone zurück"
+        # Der Vergleich, an dem es gescheitert ist:
+        assert cfg.circuit_open_until > utcnow()
+        assert cfg.last_success <= utcnow()
+
+
+@pytest.mark.asyncio
+async def test_offener_schutzschalter_ueberspringt_statt_zu_werfen(db, quelle_id):
+    from datetime import timedelta
+    from app.models import SourceConfig, utcnow
+    from app import scheduler as sched_neu
+
+    with db() as sitzung:
+        sitzung.add(SourceConfig(id=quelle_id, enabled=True,
+                                 consecutive_failures=5,
+                                 circuit_open_until=utcnow() + timedelta(minutes=30)))
+        sitzung.commit()
+
+    ergebnis = await sched_neu.run_source(quelle_id)
+    assert ergebnis.get("skipped") == "Circuit Breaker offen"

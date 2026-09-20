@@ -266,3 +266,111 @@ async def test_post_setzt_ein_zeitlimit():
     http = FakeHttp()
     await http.post("https://beispiel.test/hook", json={})
     assert http.aufrufe[0]["timeout"] > 0
+
+
+# --- Hinweise der Selbstueberwachung ---------------------------------------
+
+def hinweis(**kw):
+    """Meldung ueber SparBit selbst: kein Deal, kein Preis, kein Link."""
+    grund = dict(titel="Quelle „mydealz“ liefert seit 30 Stunden nichts mehr.",
+                 url="", quelle="system", regel="Selbstüberwachung",
+                 beschreibung="Endpoint prüfen: Quellen → Jetzt testen.",
+                 ist_hinweis=True)
+    return Notification(**{**grund, **kw})
+
+
+def test_hinweis_hat_keine_preiszeile():
+    assert hinweis().zeilen() == [("Hinweis", "Endpoint prüfen: Quellen → Jetzt testen.")]
+
+
+def test_hinweis_und_entwarnung_unterscheiden_sich():
+    warnung = hinweis()
+    entwarnung = hinweis(titel="Quelle „mydealz“ läuft wieder.",
+                         beschreibung=None, ist_entwarnung=True)
+    assert warnung.farbe != entwarnung.farbe
+    assert "meldet sich" in warnung.kopfzeile
+    assert "meldet sich" not in entwarnung.kopfzeile
+
+
+# Was jeder Kanal antworten muss, damit er den Versand als gelungen ansieht.
+GLUECKLICH = {
+    "pushover": FakeAntwort(daten={"status": 1}),
+    "telegram": FakeAntwort(daten={"ok": True, "result": {}}),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typ,config", [
+    ("discord", {"url": "https://discord.com/api/webhooks/1/x"}),
+    ("slack", {"url": "https://hooks.slack.com/services/A/B/C"}),
+    ("matrix", {"homeserver": "https://m.example.org", "token": "t",
+                "raum": "!r:example.org"}),
+    ("gotify", {"server": "https://gotify.example.org", "token": "t"}),
+    ("pushover", {"token": "t", "user": "u"}),
+    ("telegram", {"bot_token": "1:abc", "chat_id": "42"}),
+    ("ntfy", {"topic": "meins"}),
+    ("webhook", {"url": "https://n8n.local/hook"}),
+])
+async def test_jeder_kanal_vertraegt_einen_hinweis(typ, config):
+    """Ohne Deal-URL bauen mehrere Dienste sonst ungültige Anfragen."""
+    aufruf = await sende(typ, config, hinweis(), antwort=GLUECKLICH.get(typ))
+    alles = (json.dumps(aufruf.get("json") or {}, ensure_ascii=False)
+             + str(aufruf.get("data") or "") + str(aufruf.get("headers") or "")
+             + str(aufruf.get("content") or ""))
+    assert "mydealz" in alles
+
+
+@pytest.mark.asyncio
+async def test_discord_laesst_die_leere_embed_url_weg():
+    """Discord weist ein Embed mit leerem url-Feld zurueck."""
+    aufruf = await sende("discord", {"url": "https://discord.com/api/webhooks/1/x"},
+                         hinweis())
+    assert "url" not in aufruf["json"]["embeds"][0]
+
+
+@pytest.mark.asyncio
+async def test_telegram_baut_keinen_knopf_ohne_ziel():
+    """Ein Inline-Knopf ohne url laesst Telegram die Nachricht ablehnen."""
+    aufruf = await sende("telegram", {"bot_token": "1:abc", "chat_id": "42"},
+                         hinweis(), antwort=GLUECKLICH["telegram"])
+    knoepfe = aufruf["json"].get("reply_markup", {}).get("inline_keyboard", [])
+    for reihe in knoepfe:
+        for knopf in reihe:
+            assert knopf.get("url") != ""
+
+
+@pytest.mark.asyncio
+async def test_ntfy_setzt_keine_aktion_ohne_ziel():
+    """ntfy verwirft die Nachricht, wenn Actions kein Ziel hat."""
+    aufruf = await sende("ntfy", {"topic": "meins"}, hinweis())
+    assert "Actions" not in aufruf["headers"]
+    assert aufruf["headers"]["Tags"] == "warning"
+
+
+@pytest.mark.asyncio
+async def test_pushover_setzt_keinen_url_titel_ohne_url(monkeypatch):
+    """url_title ohne url quittiert Pushover mit einem Fehler."""
+    aufruf = await sende("pushover", {"token": "t", "user": "u"}, hinweis(),
+                         antwort=GLUECKLICH["pushover"])
+    assert "url_title" not in aufruf["data"]
+    assert "url" not in aufruf["data"]
+
+
+def test_smtp_baut_auch_ohne_deal_eine_mail(monkeypatch):
+    gesendet = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **kw): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self, *a, **kw): pass
+        def login(self, *a): pass
+        def send_message(self, msg): gesendet["msg"] = msg
+
+    import asyncio
+    import smtplib
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    asyncio.run(get_channel("smtp").send(
+        {"host": "smtp.x.de", "username": "u", "password": "p",
+         "from_addr": "a@x.de", "to_addr": "b@x.de"}, hinweis(), FakeHttp()))
+    assert "mydealz" in str(gesendet["msg"])

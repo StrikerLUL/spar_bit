@@ -296,6 +296,19 @@ export interface ChannelType {
   options_schema: OptionSpec[];
 }
 
+export interface Problem {
+  art: "quelle_gesperrt" | "quelle_still" | "kanal_fehler";
+  betrifft: string;
+  text: string;
+  rat: string;
+  seit: string | null;
+}
+
+export interface ProblemStatus {
+  an: boolean;
+  probleme: Problem[];
+}
+
 export interface UpdateStatus {
   eingerichtet: boolean;
   /** Nur gesetzt, wenn eingerichtet false ist. */
@@ -555,6 +568,9 @@ export const api = {
     logs: (level = "ALL", limit = 300) =>
       get<LogLine[]>(`/system/logs?level=${level}&limit=${limit}`),
     backupUrl: "/api/system/backup",
+    probleme: () => get<ProblemStatus>("/system/probleme"),
+    problemeMelden: (an: boolean) =>
+      put<{ ok: boolean; an: boolean }>("/system/probleme/melden", { an }),
     update: () => get<UpdateStatus>("/system/update"),
     updateJetzt: () => post<{ ok: boolean; hinweis: string }>("/system/update"),
     updateAuto: (auto: boolean) =>

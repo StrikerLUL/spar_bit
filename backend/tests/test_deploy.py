@@ -217,3 +217,12 @@ def test_manuelles_update_nutzt_dieselbe_sperre():
     text = (WURZEL / "sparbit").read_text()
     assert "mkdir .update/sperre" in text
     assert "trap 'rmdir .update/sperre" in text
+
+
+def test_watchdog_laeuft_als_job():
+    """Ohne den Job prüft sich SparBit nie selbst."""
+    import inspect
+    from app import scheduler
+    quelle = inspect.getsource(scheduler.start)
+    assert 'id="watchdog"' in quelle
+    assert "watchdog_job" in quelle

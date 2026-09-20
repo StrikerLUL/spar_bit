@@ -43,11 +43,13 @@ class Discord(Channel):
 
         embed: dict[str, Any] = {
             "title": note.kopfzeile[:250],
-            "url": note.url,
             "color": note.farbe,
             "fields": [{"name": name, "value": wert[:1000], "inline": name != "Preisurteil"}
                        for name, wert in note.zeilen()],
         }
+        # Eine leere URL lehnt Discord ab - Hinweise haben keinen Deal-Link.
+        if note.url:
+            embed["url"] = note.url
         if note.beschreibung:
             embed["description"] = note.beschreibung[:400]
         if note.bild and config.get("bilder", True):
@@ -87,11 +89,17 @@ class Slack(Channel):
         if not url:
             raise ValueError("Webhook-URL fehlt.")
 
+        # Ein Hinweis ueber SparBit selbst hat weder Link noch Preis.
+        if note.url:
+            titelzeile = f"*<{note.url}|{_slack_esc(note.kopfzeile)}>*"
+        else:
+            titelzeile = f"*{_slack_esc(note.kopfzeile)}*"
+        unterzeile = ("" if note.ist_hinweis
+                      else "\n" + _slack_esc(note.preis_text()))
+
         kopf: dict[str, Any] = {
             "type": "section",
-            "text": {"type": "mrkdwn",
-                     "text": f"*<{note.url}|{_slack_esc(note.kopfzeile)}>*\n"
-                             f"{_slack_esc(note.preis_text())}"},
+            "text": {"type": "mrkdwn", "text": titelzeile + unterzeile},
         }
         if note.bild and config.get("bilder", True):
             kopf["accessory"] = {"type": "image", "image_url": note.bild,
@@ -145,11 +153,15 @@ class Matrix(Channel):
 
         klartext = "\n".join([note.kopfzeile,
                               *(f"{name}: {wert}" for name, wert in note.zeilen()),
-                              note.url])
+                              *([note.url] if note.url else [])])
         zeilen = "<br>".join(f"<b>{html.escape(name)}:</b> {html.escape(wert)}"
                              for name, wert in note.zeilen())
-        formatiert = (f'<a href="{html.escape(note.url, quote=True)}">'
-                      f'<b>{html.escape(note.kopfzeile)}</b></a><br>{zeilen}')
+        # Ohne Deal-Link (Hinweis ueber SparBit selbst) kein leeres <a>.
+        kopf_html = f"<b>{html.escape(note.kopfzeile)}</b>"
+        if note.url:
+            kopf_html = (f'<a href="{html.escape(note.url, quote=True)}">'
+                         f'{kopf_html}</a>')
+        formatiert = kopf_html + (f"<br>{zeilen}" if zeilen else "")
         if note.bild and config.get("bilder", True):
             formatiert += (f'<br><a href="{html.escape(note.bild, quote=True)}">'
                            f'Bild</a>')

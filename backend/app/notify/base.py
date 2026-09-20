@@ -37,6 +37,10 @@ class Notification:
     # Meldung, weil er das Einzige ist, worauf man sofort reagieren muss.
     fehler_stufe: str | None = None
     fehler_text: str | None = None
+    # Meldung ueber SparBit selbst (Selbstueberwachung), nicht ueber einen
+    # Deal. Ohne Preis, ohne Haendler, ohne Link.
+    ist_hinweis: bool = False
+    ist_entwarnung: bool = False
 
     @property
     def ist_preisfehler(self) -> bool:
@@ -45,6 +49,9 @@ class Notification:
     @property
     def kopfzeile(self) -> str:
         """Eine Zeile, die sagt worum es geht - fuer Kanaele ohne Formatierung."""
+        if self.ist_hinweis:
+            return ("SparBit: " if self.ist_entwarnung
+                    else "SparBit meldet sich: ") + self.titel
         if self.ist_preisfehler:
             return f"PREISFEHLER: {self.titel}"
         if self.ist_gratis:
@@ -56,6 +63,8 @@ class Notification:
     @property
     def farbe(self) -> int:
         """Akzentfarbe als 24-Bit-Zahl, fuer Discord und Slack."""
+        if self.ist_hinweis:
+            return 0x22C55E if self.ist_entwarnung else 0xF59E0B
         if self.ist_preisfehler:
             return 0xD64545          # rot - hier zaehlt jede Minute
         if self.ist_gratis or self.urteil == "bestpreis":
@@ -68,6 +77,9 @@ class Notification:
 
     def zeilen(self) -> list[tuple[str, str]]:
         """Die Eckdaten als Feld/Wert-Paare - jeder Kanal formatiert sie selbst."""
+        if self.ist_hinweis:
+            # Kein Preis, kein Haendler - hier gibt es keinen Deal.
+            return [("Hinweis", self.beschreibung)] if self.beschreibung else []
         raus = []
         if self.fehler_text:
             raus.append(("Preisfehler", self.fehler_text))

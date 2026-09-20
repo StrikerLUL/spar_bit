@@ -3,8 +3,10 @@ import {
   LogOut, Menu, Monitor, Moon, Radio, ScrollText, SlidersHorizontal, Sun, Tag, X,
 } from "lucide-react";
 import * as React from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { api, type ProblemStatus } from "@/lib/api";
 import type { Theme } from "@/lib/theme";
+import { useAsync } from "@/lib/useEvents";
 import { cn } from "@/lib/utils";
 import { Button, StatusDot } from "@/components/ui";
 
@@ -167,6 +169,7 @@ export function Layout({
 
       <main className="lg:pl-56">
         <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+          <ProblemBanner />
           {children}
         </div>
       </main>
@@ -271,3 +274,60 @@ export function PageHeader({
 }
 
 export { Bookmark };
+
+
+/** Warnt oben auf jeder Seite, wenn SparBit selbst nicht rund läuft.
+ *
+ *  Der gefährlichste Ausfall eines Wächters ist der stille: eine gesperrte
+ *  Quelle sieht von außen aus wie "heute keine Deals". Darum steht das
+ *  nicht nur in den Einstellungen, sondern überall im Weg.
+ */
+function ProblemBanner() {
+  const { data, reload } = useAsync<ProblemStatus>(
+    () => api.system.probleme(), []);
+  const [zu, setZu] = React.useState(false);
+
+  // Alle zwei Minuten nachsehen: ein Ausfall soll auffallen, ohne dass man
+  // die Seite neu lädt - aber auch ohne dauernd zu fragen.
+  React.useEffect(() => {
+    const timer = window.setInterval(reload, 120_000);
+    return () => window.clearInterval(timer);
+  }, [reload]);
+
+  const probleme = data?.probleme ?? [];
+  if (!probleme.length || zu) return null;
+
+  return (
+    <div className="mb-6 rounded-lg border border-warning/40 bg-warning/10 p-4">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">
+            {probleme.length === 1
+              ? "SparBit läuft nicht rund"
+              : `${probleme.length} Dinge laufen nicht rund`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {probleme.slice(0, 4).map((p) => (
+              <li key={`${p.art}:${p.betrifft}`} className="text-xs leading-relaxed">
+                <span className="text-foreground/90">{p.text}</span>
+                {p.rat && (
+                  <span className="ml-1 text-muted-foreground">{p.rat}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <Link to="/system"
+            className="mt-2 inline-block text-xs font-medium text-primary hover:underline">
+            Unter Logs &amp; System ansehen
+          </Link>
+        </div>
+        <button type="button" onClick={() => setZu(true)}
+          aria-label="Hinweis schließen"
+          className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -155,21 +155,32 @@ class NtfyChannel(Channel):
         if note.prioritaet == "SOFORT" and prio in ("min", "low", "default"):
             prio = "high"
 
+        if note.ist_hinweis:
+            praefix, marke = "SparBit: ", "warning"
+        elif note.ist_gratis:
+            praefix, marke = "GRATIS: ", "gift"
+        else:
+            praefix, marke = "Deal: ", "fire"
+
         headers = {
-            "Title": self._ascii(("GRATIS: " if note.ist_gratis else "Deal: ")
-                                 + note.titel)[:180],
+            "Title": self._ascii(praefix + note.titel)[:180],
             "Priority": prio,
-            "Tags": "gift" if note.ist_gratis else "fire",
-            "Actions": f"view, Zum Deal, {note.url}",
+            "Tags": marke,
             "Markdown": "yes",
         }
+        # Ein Actions-Kopf ohne Ziel laesst ntfy die Nachricht verwerfen.
+        if note.url:
+            headers["Actions"] = f"view, Zum Deal, {note.url}"
         if config.get("token"):
             headers["Authorization"] = f"Bearer {config['token']}"
         if note.bild:
             headers["Attach"] = note.bild
 
-        body = (f"**{note.preis_text()}**\n\n"
-                f"{note.haendler or ''} · {note.quelle}\n\n{note.url}")
+        if note.ist_hinweis:
+            body = note.beschreibung or note.titel
+        else:
+            body = (f"**{note.preis_text()}**\n\n"
+                    f"{note.haendler or ''} · {note.quelle}\n\n{note.url}")
 
         resp = await http.post(f"{server}/{topic}", content=body.encode("utf-8"),
                                        headers=headers, timeout=20.0)

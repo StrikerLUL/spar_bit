@@ -3,12 +3,41 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import (JSON, Boolean, DateTime, Float, ForeignKey, Index,
-                        Integer, String, Text, UniqueConstraint)
+                        Integer, String, Text, TypeDecorator, UniqueConstraint)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """Zeitstempel, die auch nach dem Laden noch eine Zeitzone haben.
+
+    SQLite kennt keinen Datentyp fuer Datum; SQLAlchemy legt den Text ab und
+    gibt beim Lesen ein naives datetime zurueck - auch bei
+    DateTime(timezone=True). Jeder Vergleich mit utcnow() wirft dann
+    "can't compare offset-naive and offset-aware datetimes".
+
+    Das war kein theoretisches Problem: der Schutzschalter verglich
+    circuit_open_until mit utcnow() und starb daran, sobald er einmal
+    zugemacht hatte - die Quelle lief nie wieder an, und im Log stand ein
+    TypeError statt "gesperrt". Dasselbe traf die Stummschaltung per
+    Telegram und die Sperrfrist des Preisfehler-Waechters.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect):
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    def process_result_value(self, value: datetime | None, dialect):
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class Base(DeclarativeBase):
@@ -26,8 +55,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_login: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class SourceConfig(Base):
@@ -42,17 +71,17 @@ class SourceConfig(Base):
 
     # Health / Circuit Breaker
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
-    circuit_open_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    circuit_open_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # Manuell stummgeschaltet (z.B. per Telegram-Knopf), laeuft von selbst ab.
-    snooze_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    snooze_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_run: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_success: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_error: Mapped[str | None] = mapped_column(Text)
     total_runs: Mapped[int] = mapped_column(Integer, default=0)
     total_errors: Mapped[int] = mapped_column(Integer, default=0)
     total_items: Mapped[int] = mapped_column(Integer, default=0)
     verification: Mapped[str] = mapped_column(String(16), default="unverified")
-    last_verified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_verified: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     # HTTP-Cache
     etag: Mapped[str | None] = mapped_column(String(255))
@@ -63,7 +92,7 @@ class SourceRun(Base):
     __tablename__ = "source_runs"
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[str] = mapped_column(String(64), index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     items: Mapped[int] = mapped_column(Integer, default=0)
@@ -97,10 +126,10 @@ class Deal(Base):
     temperatur: Mapped[float | None] = mapped_column(Float)
     tags: Mapped[list] = mapped_column(JSON, default=list)
 
-    veroeffentlicht_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    veroeffentlicht_am: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    first_seen: Mapped[datetime] = mapped_column(UTCDateTime,
                                                  default=utcnow, index=True)
-    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     seen_count: Mapped[int] = mapped_column(Integer, default=1)
     # Wenn dieser Deal ein Duplikat ist: Verweis auf das Original.
     duplicate_of: Mapped[int | None] = mapped_column(ForeignKey("deals.id"), index=True)
@@ -111,7 +140,7 @@ class Deal(Base):
     # Preisurteil aus der eigenen Historie - siehe app/verdict.py.
     urteil: Mapped[str | None] = mapped_column(String(24), index=True)
     urteil_text: Mapped[str | None] = mapped_column(Text)
-    urteil_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    urteil_am: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # Preisfehler-Verdacht - siehe app/pricefehler.py. Getrennt vom Urteil,
     # weil es eine andere Frage beantwortet: nicht "ist der Preis gut", sondern
     # "hat sich hier jemand vertippt".
@@ -119,15 +148,15 @@ class Deal(Base):
     fehler_stufe: Mapped[str | None] = mapped_column(String(16), index=True)
     fehler_gruende: Mapped[list] = mapped_column(JSON, default=list)
     fehler_erwartet_eur: Mapped[float | None] = mapped_column(Float)
-    fehler_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fehler_am: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # Wann zuletzt wegen dieses Preisfehlers gemeldet wurde - verhindert,
     # dass derselbe Fund bei jedem Quellenlauf erneut das Handy weckt.
     fehler_gemeldet_am: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True))
+        UTCDateTime)
 
     # Preisalarm: melden, sobald der Preis unter diese Schwelle faellt.
     alarm_preis: Mapped[float | None] = mapped_column(Float)
-    alarm_ausgeloest: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    alarm_ausgeloest: Mapped[datetime | None] = mapped_column(UTCDateTime)
     notiz: Mapped[str | None] = mapped_column(Text)
     roh: Mapped[dict] = mapped_column(JSON, default=dict)
 
@@ -164,9 +193,9 @@ class Rule(Base):
     haendler: Mapped[list] = mapped_column(JSON, default=list)
 
     channels: Mapped[list] = mapped_column(JSON, default=list)    # Channel-IDs
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     match_count: Mapped[int] = mapped_column(Integer, default=0)
-    last_match: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_match: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class Match(Base):
@@ -177,9 +206,9 @@ class Match(Base):
                                          index=True)
     deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"),
                                          index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime,
                                                  default=utcnow, index=True)
-    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     deal: Mapped["Deal"] = relationship(lazy="joined")
 
 
@@ -190,8 +219,8 @@ class Channel(Base):
     name: Mapped[str] = mapped_column(String(128))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_used: Mapped[datetime | None] = mapped_column(UTCDateTime)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -206,7 +235,7 @@ class NotificationLog(Base):
     deal_titel: Mapped[str | None] = mapped_column(Text)
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime,
                                                  default=utcnow, index=True)
 
 
@@ -218,7 +247,7 @@ class ClaimEvent(Base):
     titel: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32))       # claimed|already|failed
     detail: Mapped[str | None] = mapped_column(Text)
-    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    seen_at: Mapped[datetime] = mapped_column(UTCDateTime,
                                               default=utcnow, index=True)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
 
@@ -226,7 +255,7 @@ class ClaimEvent(Base):
 class LogEntry(Base):
     __tablename__ = "log_entries"
     id: Mapped[int] = mapped_column(primary_key=True)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow,
                                          index=True)
     level: Mapped[str] = mapped_column(String(16), index=True)
     logger: Mapped[str] = mapped_column(String(64))
@@ -243,7 +272,7 @@ class PriceHistory(Base):
     preis: Mapped[float] = mapped_column(Float)
     waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
     quelle: Mapped[str | None] = mapped_column(String(64))
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow,
                                          index=True)
 
 
@@ -253,7 +282,7 @@ class SavedSearch(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
     filter: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class DealOffer(Base):
@@ -278,9 +307,9 @@ class DealOffer(Base):
     rabatt_prozent: Mapped[float | None] = mapped_column(Float)
     haendler: Mapped[str | None] = mapped_column(String(128))
     ist_gratis: Mapped[bool] = mapped_column(Boolean, default=False)
-    zuerst_gesehen: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    zuerst_gesehen: Mapped[datetime] = mapped_column(UTCDateTime,
                                                      default=utcnow)
-    zuletzt_gesehen: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    zuletzt_gesehen: Mapped[datetime] = mapped_column(UTCDateTime,
                                                       default=utcnow)
 
 
@@ -294,7 +323,7 @@ class LoginAttempt(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     ip: Mapped[str] = mapped_column(String(64), index=True)
     benutzername: Mapped[str | None] = mapped_column(String(64))
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow,
                                          index=True)
 
 
@@ -313,7 +342,7 @@ class CachedImage(Base):
     bytes: Mapped[int] = mapped_column(Integer, default=0)
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     fehler: Mapped[str | None] = mapped_column(Text)
-    geholt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    geholt_am: Mapped[datetime] = mapped_column(UTCDateTime,
                                                 default=utcnow, index=True)
 
 
@@ -337,12 +366,12 @@ class WatchItem(Base):
     bild: Mapped[str | None] = mapped_column(Text)
     haendler: Mapped[str | None] = mapped_column(String(128))
 
-    letzter_lauf: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    letzter_erfolg: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    letzter_lauf: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    letzter_erfolg: Mapped[datetime | None] = mapped_column(UTCDateTime)
     letzter_fehler: Mapped[str | None] = mapped_column(Text)
     fehler_in_folge: Mapped[int] = mapped_column(Integer, default=0)
     zuletzt_gemeldet: Mapped[float | None] = mapped_column(Float)
-    erstellt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    erstellt_am: Mapped[datetime] = mapped_column(UTCDateTime,
                                                   default=utcnow)
 
 
@@ -354,7 +383,7 @@ class WatchPrice(Base):
                                                      ondelete="CASCADE"), index=True)
     preis: Mapped[float] = mapped_column(Float)
     waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow,
                                          index=True)
 
 
@@ -369,7 +398,7 @@ class Interaction(Base):
                                          index=True)
     # angesehen | geoeffnet | geklickt | gemerkt | alarm | verworfen
     art: Mapped[str] = mapped_column(String(16), index=True)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow,
                                          index=True)
 
 
@@ -385,6 +414,6 @@ class ApiToken(Base):
     name: Mapped[str] = mapped_column(String(128))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     praefix: Mapped[str] = mapped_column(String(12))
-    erstellt_am: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+    erstellt_am: Mapped[datetime] = mapped_column(UTCDateTime,
                                                   default=utcnow)
-    zuletzt_genutzt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    zuletzt_genutzt: Mapped[datetime | None] = mapped_column(UTCDateTime)
