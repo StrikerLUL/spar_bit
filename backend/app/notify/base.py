@@ -115,6 +115,52 @@ class Notification:
         return base
 
 
+@dataclass
+class Sammelmeldung:
+    """Mehrere Funde in einer Nachricht.
+
+    Der stuendliche Digest schickte vorher schlicht alles einzeln - zwanzig
+    Nachrichten auf einmal sind aber keine Zusammenfassung, sondern ein
+    Grund, den Kanal stummzuschalten.
+    """
+
+    meldungen: list[Notification]
+    zeitraum: str = ""            # "seit 07:00", "über Nacht" …
+
+    @property
+    def anzahl(self) -> int:
+        return len(self.meldungen)
+
+    @property
+    def beste(self) -> list[Notification]:
+        """Was oben stehen soll: Preisfehler, dann Gratis, dann Bestpreis."""
+        def rang(n: Notification) -> tuple:
+            return (0 if n.ist_preisfehler else
+                    1 if n.ist_gratis else
+                    2 if n.urteil == "bestpreis" else
+                    3 if n.prioritaet == "SOFORT" else 4,
+                    -(n.rabatt_prozent or 0))
+        return sorted(self.meldungen, key=rang)
+
+    @property
+    def titel(self) -> str:
+        wort = "Fund" if self.anzahl == 1 else "Funde"
+        zusatz = f" {self.zeitraum}" if self.zeitraum else ""
+        return f"{self.anzahl} {wort}{zusatz}"
+
+    def kurzzeilen(self, hoechstens: int = 10) -> list[str]:
+        """Eine Zeile je Fund - fuer Kanaele ohne Struktur."""
+        raus = []
+        for note in self.beste[:hoechstens]:
+            marke = ("‼ " if note.ist_preisfehler else
+                     "★ " if note.ist_gratis or note.urteil == "bestpreis" else "")
+            raus.append(f"{marke}{note.titel} — {note.preis_text()}")
+        rest = self.anzahl - min(self.anzahl, hoechstens)
+        if rest:
+            raus.append(f"… und {rest} weitere")
+        return raus
+
+
 class Channel(ABC):
     type: str
     display_name: str
@@ -126,6 +172,27 @@ class Channel(ABC):
     async def send(self, config: dict[str, Any], note: Notification,
                    http: Any) -> None:
         """Sendet. Wirft bei Fehler - der Aufrufer loggt."""
+
+    async def send_sammel(self, config: dict[str, Any],
+                          sammel: Sammelmeldung, http: Any) -> None:
+        """Mehrere Funde in einer Nachricht.
+
+        Der Rueckfall taugt fuer jeden Kanal: eine Meldung, deren Titel die
+        Anzahl nennt und deren Text die Funde auflistet. Kanaele mit
+        Struktur (Discord, Telegram, Slack) ueberschreiben das.
+        """
+        if sammel.anzahl == 1:
+            await self.send(config, sammel.meldungen[0], http)
+            return
+        await self.send(config, Notification(
+            titel=sammel.titel,
+            url=sammel.beste[0].url,
+            quelle="sparbit",
+            regel="Zusammenfassung",
+            beschreibung="\n".join(sammel.kurzzeilen()),
+            prioritaet="NORMAL",
+            ist_hinweis=True,
+        ), http)
 
     async def send_test(self, config: dict[str, Any], http: Any) -> None:
         await self.send(config, Notification(

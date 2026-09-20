@@ -374,3 +374,107 @@ def test_smtp_baut_auch_ohne_deal_eine_mail(monkeypatch):
         {"host": "smtp.x.de", "username": "u", "password": "p",
          "from_addr": "a@x.de", "to_addr": "b@x.de"}, hinweis(), FakeHttp()))
     assert "mydealz" in str(gesendet["msg"])
+
+
+# --- Sammelmeldungen -------------------------------------------------------
+
+def sammel(anzahl=5, zeitraum="seit 07:00"):
+    """Eine Sammelmeldung mit genau `anzahl` Funden."""
+    from app.notify.base import Sammelmeldung
+
+    besonders = [
+        Notification(titel="Fernseher für 89 statt 899", url="https://s.test/tv",
+                     quelle="mydealz", preis=89.0, fehler_stufe="heiss"),
+        Notification(titel="Gratis-Spiel bei Epic", url="https://s.test/epic",
+                     quelle="epic", preis=0.0, ist_gratis=True),
+    ][:anzahl]
+    fuellung = [Notification(titel=f"Deal {i}", url=f"https://s.test/{i}",
+                             quelle="mydealz", preis=9.99 + i)
+                for i in range(max(0, anzahl - len(besonders)))]
+    return Sammelmeldung(meldungen=besonders + fuellung, zeitraum=zeitraum)
+
+
+async def sende_sammel(typ, config, inhalt=None, antwort=None):
+    http = FakeHttp(antwort)
+    await get_channel(typ).send_sammel(config, inhalt or sammel(), http)
+    return http.aufrufe
+
+
+@pytest.mark.asyncio
+async def test_discord_baut_ein_embed_mit_einem_feld_je_fund():
+    aufrufe = await sende_sammel(
+        "discord", {"url": "https://discord.com/api/webhooks/1/x"})
+    embed = aufrufe[0]["json"]["embeds"][0]
+    assert "5 Funde seit 07:00" == embed["title"]
+    assert len(embed["fields"]) == 5
+    # Der Preisfehler steht oben.
+    assert embed["fields"][0]["name"].startswith("‼")
+
+
+@pytest.mark.asyncio
+async def test_discord_kuerzt_lange_listen_und_sagt_es():
+    aufrufe = await sende_sammel(
+        "discord", {"url": "https://discord.com/api/webhooks/1/x"},
+        sammel(anzahl=30))
+    embed = aufrufe[0]["json"]["embeds"][0]
+    assert len(embed["fields"]) == 20
+    assert "10 weitere" in embed["footer"]["text"]
+
+
+@pytest.mark.asyncio
+async def test_telegram_schickt_genau_eine_nachricht():
+    aufrufe = await sende_sammel("telegram", {"bot_token": "1:abc", "chat_id": "42"},
+                                 antwort=FakeAntwort(daten={"ok": True}))
+    assert len(aufrufe) == 1
+    text = aufrufe[0]["json"]["text"]
+    assert "5 Funde" in text
+    assert "Gratis-Spiel bei Epic" in text
+    # Linkvorschau aus: sonst haengt Telegram ein zufaelliges Bild an.
+    assert aufrufe[0]["json"]["link_preview_options"]["is_disabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_telegram_bleibt_unter_der_laengengrenze():
+    aufrufe = await sende_sammel(
+        "telegram", {"bot_token": "1:abc", "chat_id": "42"},
+        sammel(anzahl=60), antwort=FakeAntwort(daten={"ok": True}))
+    assert len(aufrufe[0]["json"]["text"]) <= 4000
+
+
+@pytest.mark.asyncio
+async def test_slack_baut_kopf_und_liste():
+    aufrufe = await sende_sammel("slack",
+                                 {"url": "https://hooks.slack.com/services/A/B/C"})
+    bloecke = aufrufe[0]["json"]["blocks"]
+    assert bloecke[0]["type"] == "header"
+    assert "5 Funde" in bloecke[0]["text"]["text"]
+    assert "Gratis-Spiel bei Epic" in bloecke[1]["text"]["text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typ,config", [
+    ("gotify", {"server": "https://gotify.example.org", "token": "t"}),
+    ("ntfy", {"topic": "meins"}),
+    ("webhook", {"url": "https://n8n.local/hook"}),
+    ("matrix", {"homeserver": "https://m.example.org", "token": "t",
+                "raum": "!r:example.org"}),
+    ("pushover", {"token": "t", "user": "u"}),
+])
+async def test_kanaele_ohne_eigene_fassung_nutzen_den_rueckfall(typ, config):
+    """Auch ohne send_sammel darf es nur eine Nachricht werden."""
+    aufrufe = await sende_sammel(typ, config, antwort=GLUECKLICH.get(typ))
+    assert len(aufrufe) == 1
+    alles = (json.dumps(aufrufe[0].get("json") or {}, ensure_ascii=False)
+             + str(aufrufe[0].get("data") or "") + str(aufrufe[0].get("headers") or "")
+             + str(aufrufe[0].get("content") or ""))
+    assert "5 Funde" in alles
+
+
+@pytest.mark.asyncio
+async def test_ein_einzelner_fund_geht_als_normale_meldung_raus():
+    """Eine „Zusammenfassung“ mit einem Eintrag wäre albern."""
+    aufrufe = await sende_sammel(
+        "discord", {"url": "https://discord.com/api/webhooks/1/x"}, sammel(anzahl=1))
+    embed = aufrufe[0]["json"]["embeds"][0]
+    assert "Funde" not in embed["title"]
+    assert embed["title"].startswith("PREISFEHLER")

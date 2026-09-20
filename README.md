@@ -1044,8 +1044,6 @@ Ehrlich benannt statt verschwiegen:
 
 * **Kein Endpoint ist vorab verifiziert.** Siehe [ENDPOINTS.md](ENDPOINTS.md) —
   der erste Schritt ist `python -m tools.verify_endpoints`.
-* **Der stündliche Digest ist keiner.** NORMAL-Regeln verschicken aufgestaute
-  Treffer weiterhin als Einzelnachrichten statt als eine Sammelmeldung.
 * **Die Preisfehler-Erkennung ist nicht gegen echte Funde geeicht.** Die
   Gewichte sind begründet, aber am Schreibtisch gewählt und gegen
   konstruierte Fälle getestet — nicht an einem Jahr echter mydealz-Daten

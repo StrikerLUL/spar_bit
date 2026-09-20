@@ -5,7 +5,7 @@ import html
 from typing import Any
 
 from ..sources.base import OptionSpec
-from .base import Channel, Notification, register
+from .base import Channel, Notification, Sammelmeldung, register
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
@@ -98,6 +98,44 @@ class Telegram(Channel):
             lines += ["",
                       f'<a href="{html.escape(note.url, quote=True)}">➡️ Zum Deal</a>']
         return "\n".join(lines)
+
+    async def send_sammel(self, config: dict[str, Any],
+                          sammel: Sammelmeldung, http: Any) -> None:
+        """Eine Nachricht mit allen Funden statt zwanzig einzelnen."""
+        if sammel.anzahl == 1:
+            await self.send(config, sammel.meldungen[0], http)
+            return
+
+        token = (config.get("bot_token") or "").strip()
+        chat_id = str(config.get("chat_id") or "").strip()
+        if not token or not chat_id:
+            raise ValueError("bot_token und chat_id muessen gesetzt sein.")
+
+        zeilen = [f"<b>{_esc(sammel.titel)}</b>", ""]
+        for note in sammel.beste[:20]:
+            marke = ("‼️" if note.ist_preisfehler else
+                     "🎁" if note.ist_gratis else
+                     "🏆" if note.urteil == "bestpreis" else "•")
+            name = _esc(note.titel[:90])
+            if note.url:
+                name = f'<a href="{html.escape(note.url, quote=True)}">{name}</a>'
+            zeilen.append(f"{marke} {name}\n   {_esc(note.preis_text())}")
+        rest = sammel.anzahl - min(sammel.anzahl, 20)
+        if rest:
+            zeilen.append(f"\n<i>… und {rest} weitere</i>")
+
+        # Telegram nimmt 4096 Zeichen; lieber kuerzen als scheitern.
+        text = "\n".join(zeilen)[:4000]
+
+        resp = await http.post(
+            API.format(token=token, method="sendMessage"),
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                  "link_preview_options": {"is_disabled": True},
+                  "disable_notification": bool(config.get("stumm"))},
+            timeout=20.0)
+        data = self._json(resp)
+        if not data.get("ok"):
+            raise RuntimeError(f"Telegram API: {data.get('description') or resp.text[:200]}")
 
     @staticmethod
     def _buttons(note: Notification) -> list[list[dict]]:

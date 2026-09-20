@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ..sources.base import OptionSpec
-from .base import Channel, Notification, register
+from .base import Channel, Notification, Sammelmeldung, register
 
 
 class Discord(Channel):
@@ -71,6 +71,46 @@ class Discord(Channel):
         if resp.status_code >= 300:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
+    async def send_sammel(self, config: dict[str, Any],
+                          sammel: Sammelmeldung, http: Any) -> None:
+        """Ein Embed mit einem Feld je Fund - Discord erlaubt 25."""
+        if sammel.anzahl == 1:
+            await self.send(config, sammel.meldungen[0], http)
+            return
+
+        url = (config.get("url") or "").strip()
+        if not url or "discord" not in url:
+            raise ValueError("Discord-Webhook-URL fehlt oder passt nicht.")
+
+        beste = sammel.beste
+        felder = []
+        for note in beste[:20]:
+            marke = ("‼ " if note.ist_preisfehler else
+                     "★ " if note.ist_gratis or note.urteil == "bestpreis" else "")
+            wert = note.preis_text()
+            if note.url:
+                wert += f" · [ansehen]({note.url})"
+            felder.append({"name": f"{marke}{note.titel}"[:250],
+                           "value": wert[:1000], "inline": False})
+        rest = sammel.anzahl - len(felder)
+
+        embed: dict[str, Any] = {
+            "title": sammel.titel,
+            "color": beste[0].farbe,
+            "fields": felder,
+        }
+        if rest > 0:
+            embed["footer"] = {"text": f"… und {rest} weitere"}
+        if beste[0].bild and config.get("bilder", True):
+            embed["thumbnail"] = {"url": beste[0].bild}
+
+        resp = await http.post(url, json={
+            "username": config.get("username") or "SparBit",
+            "embeds": [embed],
+        }, timeout=20.0)
+        if resp.status_code >= 300:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
 
 class Slack(Channel):
     type = "slack"
@@ -116,6 +156,39 @@ class Slack(Channel):
                    "blocks": bloecke}
 
         resp = await http.post(url, json=payload, timeout=20.0)
+        if resp.status_code >= 300 or resp.text.strip() not in ("ok", ""):
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+    async def send_sammel(self, config: dict[str, Any],
+                          sammel: Sammelmeldung, http: Any) -> None:
+        if sammel.anzahl == 1:
+            await self.send(config, sammel.meldungen[0], http)
+            return
+
+        url = (config.get("url") or "").strip()
+        if not url:
+            raise ValueError("Webhook-URL fehlt.")
+
+        zeilen = []
+        for note in sammel.beste[:20]:
+            marke = ("‼ " if note.ist_preisfehler else
+                     "★ " if note.ist_gratis or note.urteil == "bestpreis" else "• ")
+            name = _slack_esc(note.titel)
+            if note.url:
+                name = f"<{note.url}|{name}>"
+            zeilen.append(f"{marke}{name} — {_slack_esc(note.preis_text())}")
+        rest = sammel.anzahl - min(sammel.anzahl, 20)
+        if rest:
+            zeilen.append(f"_… und {rest} weitere_")
+
+        bloecke = [
+            {"type": "header",
+             "text": {"type": "plain_text", "text": sammel.titel, "emoji": False}},
+            {"type": "section",
+             "text": {"type": "mrkdwn", "text": "\n".join(zeilen)[:2900]}},
+        ]
+        resp = await http.post(url, json={"text": sammel.titel,
+                                          "blocks": bloecke}, timeout=20.0)
         if resp.status_code >= 300 or resp.text.strip() not in ("ok", ""):
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 

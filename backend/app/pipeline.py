@@ -15,7 +15,7 @@ from .events import broker
 from .filters import RuleSpec, evaluate
 from .models import (Channel, Deal, DealOffer, Match, NotificationLog,
                      PriceHistory, Rule, SourceConfig, utcnow)
-from .notify import Notification, get_channel
+from .notify import Notification, Sammelmeldung, get_channel
 from .sources.base import DealItem
 
 log = logging.getLogger(__name__)
@@ -452,22 +452,95 @@ async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
     return sent
 
 
+def _zeitraum(seit: datetime | None) -> str:
+    """„seit 07:12“ bzw. „über Nacht“ - was der Digest im Titel nennt."""
+    if seit is None:
+        return ""
+    stunden = (utcnow() - seit).total_seconds() / 3600
+    if stunden >= 6:
+        return "über Nacht" if stunden >= 10 else "in den letzten Stunden"
+    return f"seit {seit.astimezone(timezone.utc).strftime('%H:%M')} UTC"
+
+
 async def send_digest(db: Session, http) -> int:
-    """Stuendlicher Digest fuer NORMAL-Regeln, deren Treffer wegen Ruhezeit
-    oder Prioritaet liegen geblieben sind."""
+    """Eine Sammelnachricht fuer alles, was liegen geblieben ist.
+
+    Bis hierher wurden aufgestaute Treffer einfach an dispatch()
+    weitergereicht - also zwanzig Einzelnachrichten um sieben Uhr statt
+    einer Zusammenfassung. Jetzt geht je Kanal genau eine Meldung raus,
+    mit den interessantesten Funden zuerst.
+    """
+    if get_setting(db, "notifications_paused"):
+        return 0
+    if in_quiet_hours(db):
+        return 0
+
     pending = list(db.scalars(
         select(Match).where(Match.notified_at.is_(None))
         .order_by(Match.created_at.asc()).limit(200)
     ))
     if not pending:
         return 0
-    if in_quiet_hours(db):
-        return 0
 
     rules = {r.id: r for r in db.scalars(select(Rule))}
     hits = [(rules[m.rule_id], m.deal) for m in pending
             if m.rule_id in rules and m.deal is not None]
-    return await dispatch(db, hits, http)
+    if not hits:
+        return 0
+
+    channels = {c.id: c for c in db.scalars(select(Channel))}
+
+    # Je Kanal sammeln, was dort hingehoert: ein Deal kann ueber mehrere
+    # Regeln in mehreren Kanaelen landen, soll aber je Kanal einmal
+    # vorkommen.
+    pro_kanal: dict[int, list[Notification]] = {}
+    for deal, regeln in buendele(hits):
+        note = _note(deal, regel=_regelnamen(regeln),
+                     prioritaet="SOFORT" if _sofort(regeln) else "NORMAL")
+        for cid in _zielkanaele(regeln):
+            pro_kanal.setdefault(cid, []).append(note)
+
+    aeltester = min((m.created_at for m in pending if m.created_at), default=None)
+    zeitraum = _zeitraum(aeltester)
+    gesendet = 0
+
+    for cid, meldungen in pro_kanal.items():
+        chan_row = channels.get(cid)
+        if not chan_row or not chan_row.enabled:
+            continue
+        impl = get_channel(chan_row.type)
+        if impl is None:
+            log.error("Unbekannter Kanaltyp '%s'", chan_row.type)
+            continue
+
+        sammel = Sammelmeldung(meldungen=meldungen, zeitraum=zeitraum)
+        try:
+            await impl.send_sammel(chan_row.config or {}, sammel, http)
+            chan_row.last_used = utcnow()
+            gesendet += 1
+            db.add(NotificationLog(
+                channel_id=cid, channel_type=chan_row.type,
+                rule_name="Zusammenfassung",
+                deal_titel=f"{sammel.anzahl} Funde"[:500], ok=True))
+        except Exception as exc:
+            chan_row.error_count += 1
+            log.error("Digest über %s fehlgeschlagen: %s", chan_row.type, exc)
+            db.add(NotificationLog(
+                channel_id=cid, channel_type=chan_row.type,
+                rule_name="Zusammenfassung",
+                deal_titel=f"{sammel.anzahl} Funde"[:500], ok=False,
+                error=f"{type(exc).__name__}: {exc}"[:500]))
+
+    # Nur als zugestellt markieren, wenn wenigstens ein Kanal es genommen
+    # hat - sonst waeren die Treffer weg, ohne je angekommen zu sein.
+    if gesendet:
+        for match in pending:
+            match.notified_at = utcnow()
+
+    db.commit()
+    if gesendet:
+        log.info("Digest: %d Funde an %d Kanäle", len(hits), gesendet)
+    return gesendet
 
 
 def check_price_alarms(db: Session) -> list[Deal]:
