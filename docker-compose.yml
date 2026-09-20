@@ -39,7 +39,9 @@ services:
     environment:
       TZ: ${TZ:-Europe/Berlin}
     ports:
-      - "${SPARBIT_WEB_PORT:-8080}:80"
+      # Steht ein Reverse-Proxy davor, gehoert hier 127.0.0.1 hin - dann ist
+      # der Port nur lokal offen und nicht aus dem Internet erreichbar.
+      - "${SPARBIT_WEB_BIND:-0.0.0.0}:${SPARBIT_WEB_PORT:-8080}:80"
     depends_on:
       backend:
         condition: service_healthy

@@ -88,3 +88,38 @@ def test_bild_lokal_wird_in_beiden_ansichten_geliefert(client):
 
     detail = client.get(f"/api/deals/{deal_id}/detail").json()
     assert detail["bild_lokal"] == "abc123.jpg"
+
+
+def test_https_setzt_das_secure_flag(client):
+    """Ueber HTTPS bekommt das Session-Cookie Secure, ueber HTTP nicht.
+
+    Hinter einem Reverse-Proxy haengt daran alles: der Proxy terminiert das
+    HTTPS und muss X-Forwarded-Proto durchreichen, sonst sieht der Server
+    nur http und das Flag fehlt. (Den Header selbst wertet uvicorn aus -
+    fuer Proxys auf demselben Rechner ist das die Voreinstellung.)
+    """
+    client.post("/api/auth/setup",
+                json={"username": "cillian", "password": "einGutesPasswort1"})
+    zugang = {"username": "cillian", "password": "einGutesPasswort1"}
+
+    ueber_http = client.post("/api/auth/login", json=zugang)
+    assert "secure" not in ueber_http.headers["set-cookie"].lower()
+
+    client.base_url = "https://testserver"
+    ueber_https = client.post("/api/auth/login", json=zugang)
+    assert "secure" in ueber_https.headers["set-cookie"].lower()
+
+
+def test_nginx_reicht_forwarded_proto_durch():
+    """Der Gegenpart im Container-nginx.
+
+    'proxy_set_header X-Forwarded-Proto $scheme' wuerde den Wert des
+    aeusseren Proxys ueberschreiben - drinnen ist $scheme immer http, das
+    Secure-Flag bliebe also aus.
+    """
+    import pathlib
+    conf = (pathlib.Path(__file__).resolve().parents[2]
+            / "frontend" / "nginx.conf").read_text()
+    assert "map $http_x_forwarded_proto" in conf
+    assert "X-Forwarded-Proto $scheme;" not in conf
+    assert conf.count("X-Forwarded-Proto $sparbit_proto;") == 2

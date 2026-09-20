@@ -9,7 +9,7 @@ Desktop-Meldung. Alles einstellbar **im Browser und auf der Kommandozeile**.
 **Läuft auf deinem eigenen Rechner.** Kein Server, kein Docker, keine
 Konfigurationsdateien. Ein Befehl genügt.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-322-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-324-22c55e)
 
 ```bash
 git clone https://github.com/StrikerLUL/spar_bit.git
@@ -457,6 +457,10 @@ Danach <http://server-ip:8080>. Ohne Claimer:
 docker compose up -d --build backend frontend
 ```
 
+Läuft auf dem Server schon ein Webserver oder Reverse-Proxy, gehört SparBit
+nicht auf einen eigenen offenen Port, sondern auf eine Subdomain hinter dem
+vorhandenen Proxy — [siehe unten](#auf-einer-subdomain-neben-anderen-seiten).
+
 ### Auto-Claimer einrichten
 
 Zugangsdaten in die `.env` (`EG_EMAIL`, `PG_EMAIL`, … siehe `.env.example`).
@@ -477,22 +481,141 @@ Falls das Image Probleme macht, ist
 [claabs/epicgames-freegames-node](https://github.com/claabs/epicgames-freegames-node)
 der Fallback (nur Epic). Das Log-Parsing kommt mit beiden Formaten zurecht.
 
-### Hinter Caddy oder Traefik
+### Auf einer Subdomain, neben anderen Seiten
 
-Beim `frontend` die Portfreigabe auf `127.0.0.1:8080:80` ändern und den Proxy
-davorhängen.
+Läuft auf dem Server schon etwas auf Port 80/443, bekommt SparBit **keinen
+eigenen Port nach außen**, sondern einen Eintrag im vorhandenen Reverse-Proxy.
+
+**1. Port nur lokal öffnen** — in der `.env`:
+
+```bash
+SPARBIT_WEB_BIND=127.0.0.1      # nicht mehr aus dem Internet erreichbar
+SPARBIT_WEB_PORT=8080           # frei wählbar, falls 8080 schon belegt ist
+```
+
+```bash
+docker compose up -d
+ss -ltnp | grep 8080            # muss 127.0.0.1:8080 zeigen, nicht 0.0.0.0
+```
+
+**2. Im Proxy eintragen.** Drei Dinge zählen, egal welcher Proxy:
+
+* **kein Puffern auf `/api/events`** — sonst steht der Live-Ticker
+* **`X-Forwarded-Proto` durchreichen** — daran erkennt SparBit HTTPS und setzt
+  das Session-Cookie mit `Secure`
+* **lange Lesezeit** für den SSE-Stream, sonst bricht er im Minutentakt ab
+
+<details>
+<summary><strong>Caddy</strong></summary>
 
 ```caddy
-deals.example.com {
-    reverse_proxy localhost:8080 {
-        flush_interval -1   # ohne das kommt der Live-Ticker nie an
+spar-bit.example.de {
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1        # ohne das kommt der Live-Ticker nie an
     }
 }
 ```
 
-Zwei Dinge zählen: **kein Puffern auf `/api/events`** (sonst steht der
-Live-Ticker), und **HTTPS verwenden** — dann setzt SparBit das Session-Cookie
-automatisch mit `Secure`.
+Caddy setzt `X-Forwarded-Proto` von selbst und holt das Zertifikat automatisch.
+</details>
+
+<details>
+<summary><strong>nginx auf dem Host</strong></summary>
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name spar-bit.example.de;
+
+    # ssl_certificate … von certbot
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Live-Ticker: puffern aus, Verbindung offen lassen.
+    location /api/events {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 24h;
+    }
+}
+```
+
+Zertifikat danach mit `certbot --nginx -d spar-bit.example.de`.
+</details>
+
+<details>
+<summary><strong>Traefik</strong> (Labels statt Portfreigabe)</summary>
+
+Beim `frontend` in der `docker-compose.yml` den `ports`-Block streichen und
+stattdessen Labels setzen — Traefik spricht dann direkt mit dem Container:
+
+```yaml
+    networks: [default, proxy]           # das Netz deines Traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: proxy
+      traefik.http.routers.sparbit.rule: Host(`spar-bit.example.de`)
+      traefik.http.routers.sparbit.entrypoints: websecure
+      traefik.http.routers.sparbit.tls.certresolver: le
+      traefik.http.services.sparbit.loadbalancer.server.port: "80"
+```
+
+und unten im `networks`-Block:
+
+```yaml
+networks:
+  proxy:
+    external: true
+```
+
+Traefik setzt `X-Forwarded-Proto` selbst; SSE läuft ohne Zusatzoption.
+</details>
+
+<details>
+<summary><strong>Nginx Proxy Manager</strong> (die Weboberfläche)</summary>
+
+*Hosts → Proxy Hosts → Add Proxy Host*
+
+| Feld | Wert |
+|---|---|
+| Domain Names | `spar-bit.example.de` |
+| Scheme | `http` |
+| Forward Hostname / IP | die Docker-Host-IP, meist `172.17.0.1` |
+| Forward Port | `8080` |
+| Websockets Support | **an** |
+| Block Common Exploits | an |
+
+Reiter *SSL*: Zertifikat anfordern, **Force SSL** an. Dann unter *Advanced*:
+
+```nginx
+location /api/events {
+    proxy_pass http://172.17.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection        "";
+    proxy_buffering off;
+    proxy_read_timeout 24h;
+}
+```
+</details>
+
+**3. Prüfen.** Anmelden, dann im Browser unter *Logs & System* nachsehen, ob
+der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
+`sparbit_session` das Häkchen bei **Secure** haben — fehlt es, kommt
+`X-Forwarded-Proto` nicht durch.
 
 ---
 
@@ -501,7 +624,7 @@ automatisch mit `Secure`.
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 322 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 324 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
