@@ -92,6 +92,10 @@ export interface Deal {
   fehler_gruende: string[];
   fehler_erwartet_eur: number | null;
   fehler_gemeldet_am?: string | null;
+  /** Stabile Schlüssel der Indizien, die zugeschlagen haben. */
+  fehler_indizien?: string[];
+  /** Rückmeldung des Benutzers: war das wirklich ein Preisfehler? */
+  urteil_mensch?: "echt" | "fehlalarm" | null;
   /** Nur bei Sortierung "fuer_mich" gesetzt. */
   passt_zu_mir?: number;
   passt_weil?: string[];
@@ -429,6 +433,24 @@ export interface PreisfehlerListe {
   items: Deal[];
 }
 
+export interface IndizBilanz {
+  schluessel: string;
+  name: string;
+  echt: number;
+  fehlalarm: number;
+  treffsicherheit: number;
+}
+
+export interface PreisfehlerAuswertung {
+  beurteilt: number;
+  echt: number;
+  fehlalarm: number;
+  indizien: IndizBilanz[];
+  vorschlag: number | null;
+  vorschlag_grund: string;
+  aktuelle_schwelle: number;
+}
+
 export interface Fehlerurteil {
   punkte: number;
   stufe: string;
@@ -529,6 +551,10 @@ export const api = {
     list: (tage = 7, nurHeiss = false) =>
       get<PreisfehlerListe>(`/preisfehler?tage=${tage}&nur_heiss=${nurHeiss}`),
     pruefen: (id: number) => post<Fehlerurteil>(`/preisfehler/${id}/pruefen`),
+    auswertung: () => get<PreisfehlerAuswertung>("/preisfehler/auswertung"),
+    rueckmeldung: (id: number, urteil: "echt" | "fehlalarm") =>
+      post<{ ok: boolean; urteil_mensch: string | null }>(
+        `/preisfehler/${id}/rueckmeldung`, { urteil }),
     verwerfen: (id: number) =>
       post<{ ok: boolean; id: number }>(`/preisfehler/${id}/verwerfen`),
   },

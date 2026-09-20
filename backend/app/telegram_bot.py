@@ -131,9 +131,31 @@ class TelegramBot:
             antwort = self._toggle_bookmark(data[5:])
         elif data.startswith("mute:"):
             antwort = self._snooze_source(data[5:])
+        elif data.startswith("echt:"):
+            antwort = self._preisfehler_urteil(data[5:], "echt")
+        elif data.startswith("falsch:"):
+            antwort = self._preisfehler_urteil(data[7:], "fehlalarm")
 
         await client.post(API.format(token=token, method="answerCallbackQuery"),
                           json={"callback_query_id": query["id"], "text": antwort})
+
+    def _preisfehler_urteil(self, raw_id: str, urteil: str) -> str:
+        """Die Rueckmeldung, aus der der Waechter lernt."""
+        from .pricefehler import ECHT, notiere_rueckmeldung
+
+        try:
+            deal_id = int(raw_id)
+        except ValueError:
+            return "Ungueltige Deal-ID"
+        with SessionLocal() as db:
+            deal = notiere_rueckmeldung(db, deal_id, urteil)
+            if deal is None:
+                return "Deal nicht gefunden"
+            if deal.fehler_urteil_mensch is None:
+                return "Rückmeldung zurückgenommen"
+            return ("Danke — als echter Preisfehler vermerkt"
+                    if deal.fehler_urteil_mensch == ECHT
+                    else "Danke — als Fehlalarm vermerkt")
 
     def _toggle_bookmark(self, raw_id: str) -> str:
         try:

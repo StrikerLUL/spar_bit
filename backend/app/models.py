@@ -147,6 +147,13 @@ class Deal(Base):
     fehler_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
     fehler_stufe: Mapped[str | None] = mapped_column(String(16), index=True)
     fehler_gruende: Mapped[list] = mapped_column(JSON, default=list)
+    # Stabile Schluessel der Indizien, die zugeschlagen haben - Grundlage
+    # fuer die Auswertung "welches Indiz lag bei echten Funden wie oft
+    # richtig". Die Gruende darueber sind freier Text und taugen dafuer nicht.
+    fehler_indizien: Mapped[list] = mapped_column(JSON, default=list)
+    # Rueckmeldung des Benutzers: "echt", "fehlalarm" oder None.
+    fehler_urteil_mensch: Mapped[str | None] = mapped_column(String(16), index=True)
+    fehler_urteil_am: Mapped[datetime | None] = mapped_column(UTCDateTime)
     fehler_erwartet_eur: Mapped[float | None] = mapped_column(Float)
     fehler_am: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # Wann zuletzt wegen dieses Preisfehlers gemeldet wurde - verhindert,

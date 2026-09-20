@@ -149,7 +149,16 @@ class Telegram(Channel):
         if note.quelle:
             row2.append({"text": "🔇 Quelle stumm",
                          "callback_data": f"mute:{note.quelle}"})
-        return [r for r in (row1, row2) if r]
+
+        # Nur bei Preisfehlern: hier ist die Rueckmeldung wertvoll, weil die
+        # Gewichte des Waechters sonst nie an der Wirklichkeit geeicht werden.
+        row3 = []
+        if note.ist_preisfehler and note.deal_id:
+            row3 = [{"text": "✅ Echter Fehler",
+                     "callback_data": f"echt:{note.deal_id}"},
+                    {"text": "🚫 Fehlalarm",
+                     "callback_data": f"falsch:{note.deal_id}"}]
+        return [r for r in (row1, row2, row3) if r]
 
 
 register(Telegram())

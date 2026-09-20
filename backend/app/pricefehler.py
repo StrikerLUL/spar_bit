@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from . import money
 from .currency import to_eur
+from .db import get_setting
 from .models import Deal, DealOffer, PriceHistory, utcnow
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ LABEL = {
 # Ab welcher Punktzahl welche Stufe gilt.
 SCHWELLE_HEISS = 70
 SCHWELLE_VERDACHT = 45
+# Unter so vielen Rueckmeldungen wird keine Schwelle vorgeschlagen - eine
+# aus drei Beobachtungen waere schlechter als die begruendete Vorgabe.
+MIN_RUECKMELDUNGEN = 10
 
 
 # --- Wortlisten -----------------------------------------------------------
@@ -106,6 +110,11 @@ class Fehlerurteil:
     punkte: int = 0
     stufe: str = KEIN
     gruende: list[str] = field(default_factory=list)
+    # Stabile Schluessel der Indizien, die zugeschlagen haben. Die Gruende
+    # sind frei formulierter Text und taugen nicht zum Auswerten - fuer die
+    # Frage "welches Indiz lag bei echten Funden wie oft richtig" braucht es
+    # etwas, das sich nicht mit jeder Umformulierung aendert.
+    indizien: list[str] = field(default_factory=list)
     # Der Preis, den der Artikel nach allem Wissen eigentlich kosten muesste.
     erwartet_eur: float | None = None
     ersparnis_eur: float | None = None
@@ -120,7 +129,8 @@ class Fehlerurteil:
 
     def as_dict(self) -> dict:
         return {"punkte": self.punkte, "stufe": self.stufe,
-                "gruende": list(self.gruende), "label": self.label,
+                "gruende": list(self.gruende), "indizien": list(self.indizien),
+                "label": self.label,
                 "erwartet_eur": self.erwartet_eur,
                 "ersparnis_eur": self.ersparnis_eur}
 
@@ -202,14 +212,17 @@ def bewerte(
 
     punkte = 0
     gruende: list[str] = []
+    indizien: list[str] = []
     referenzen: list[float] = []
 
     # --- Indiz 1: die Community sagt es selbst --------------------------
     if explizit:
         punkte += 55
+        indizien.append("ausgewiesen")
         gruende.append("Als Preisfehler ausgewiesen.")
     elif vage:
         punkte += 30
+        indizien.append("vage_genannt")
         gruende.append("Wird als möglicher Preisfehler gehandelt.")
 
     # --- Indiz 2: der eigene beobachtete Verlauf ------------------------
@@ -229,6 +242,7 @@ def bewerte(
             elif anteil <= 0.45:
                 punkte += 25
             if anteil <= 0.45:
+                indizien.append("unter_eigenem_verlauf")
                 gruende.append(
                     f"Kostet sonst um {money.betrag(mittel)} — das sind "
                     f"{round((1 - anteil) * 100)} % weniger als üblich.")
@@ -236,6 +250,7 @@ def bewerte(
             # Artikel war noch nie auch nur in der Naehe.
             if tiefst > 0 and preis_eur <= tiefst * 0.5:
                 punkte += 15
+                indizien.append("unter_tiefstpreis")
                 gruende.append(
                     f"Günstigster bisher beobachteter Preis war "
                     f"{money.betrag(tiefst)}.")
@@ -248,11 +263,13 @@ def bewerte(
             anteil = preis_eur / guenstigster_fremd
             if anteil <= 0.3:
                 punkte += 35
+                indizien.append("unter_fremdpreis")
                 gruende.append(
                     f"Andere Quellen verlangen mindestens "
                     f"{money.betrag(guenstigster_fremd)} für denselben Artikel.")
             elif anteil <= 0.5:
                 punkte += 18
+                indizien.append("unter_fremdpreis")
                 gruende.append(
                     f"Woanders kostet es {money.betrag(guenstigster_fremd)}.")
 
@@ -266,6 +283,7 @@ def bewerte(
         stellen = _dezimalverschiebung(preis_eur, referenz)
         if stellen:
             punkte += 30
+            indizien.append("kommastelle")
             gruende.append(
                 f"Der Preis sieht aus wie {money.betrag(referenz)} mit "
                 f"verrutschtem Komma ({'ein' if stellen == 1 else stellen} "
@@ -278,6 +296,7 @@ def bewerte(
             and rabatt_prozent >= 85):
         referenzen.append(originalpreis_eur)
         punkte += 20
+        indizien.append("extremrabatt_auf_uvp")
         gruende.append(
             f"{round(rabatt_prozent)} % unter dem Listenpreis von "
             f"{money.betrag(originalpreis_eur)}.")
@@ -287,6 +306,7 @@ def bewerte(
     # normalen guten Deals.
     if temperatur is not None and temperatur >= 600 and punkte > 0:
         punkte += 10
+        indizien.append("hohe_resonanz")
         gruende.append(f"Sehr hohe Resonanz ({round(temperatur)}°).")
 
     if not punkte:
@@ -317,6 +337,7 @@ def bewerte(
     punkte = max(0, min(100, punkte))
     urteil.punkte = punkte
     urteil.gruende = gruende
+    urteil.indizien = indizien
     urteil.erwartet_eur = round(erwartet, 2) if erwartet else None
     urteil.ersparnis_eur = round(ersparnis, 2) if ersparnis else None
     urteil.stufe = (HEISS if punkte >= SCHWELLE_HEISS
@@ -387,6 +408,7 @@ def aktualisiere(db: Session, deals: list[Deal]) -> list[Deal]:
         deal.fehler_score = urteil.punkte
         deal.fehler_stufe = urteil.stufe
         deal.fehler_gruende = urteil.gruende
+        deal.fehler_indizien = urteil.indizien
         deal.fehler_erwartet_eur = urteil.erwartet_eur
         deal.fehler_am = utcnow()
         if urteil.stufe == HEISS and vorher != HEISS:
@@ -396,3 +418,116 @@ def aktualisiere(db: Session, deals: list[Deal]) -> list[Deal]:
                         extra={"deal_id": deal.id})
     db.commit()
     return frisch_heiss
+
+
+# --- Rueckmeldung des Benutzers -------------------------------------------
+
+ECHT = "echt"
+FEHLALARM = "fehlalarm"
+
+# Wie die Indizien im UI heissen. Absichtlich hier und nicht im Frontend:
+# wer ein Indiz umbenennt, soll es an einer Stelle tun.
+INDIZ_NAMEN = {
+    "ausgewiesen": "Ausdrücklich als Preisfehler genannt",
+    "vage_genannt": "Als möglicher Preisfehler gehandelt",
+    "unter_eigenem_verlauf": "Weit unter dem eigenen Verlauf",
+    "unter_tiefstpreis": "Unter dem bisherigen Tiefstpreis",
+    "unter_fremdpreis": "Weit unter anderen Quellen",
+    "kommastelle": "Verrutschte Kommastelle",
+    "extremrabatt_auf_uvp": "Extremrabatt auf glaubwürdigen UVP",
+    "hohe_resonanz": "Sehr hohe Resonanz",
+}
+
+
+def bewerte_rueckmeldungen(db: Session) -> dict:
+    """Auswerten, welches Indiz wie oft richtig lag.
+
+    Die Gewichte oben sind begruendet, aber am Schreibtisch gewaehlt. Erst
+    die Rueckmeldungen sagen, welche Indizien auf diesem Rechner, mit
+    diesen Quellen, tatsaechlich taugen. Ausgewertet wird nur, was der
+    Benutzer beurteilt hat - alles andere waere geraten.
+    """
+    beurteilt = list(db.scalars(
+        select(Deal).where(Deal.fehler_urteil_mensch.isnot(None))))
+
+    echt = [d for d in beurteilt if d.fehler_urteil_mensch == ECHT]
+    falsch = [d for d in beurteilt if d.fehler_urteil_mensch == FEHLALARM]
+
+    indizien = []
+    for schluessel, name in INDIZ_NAMEN.items():
+        traf_echt = sum(1 for d in echt if schluessel in (d.fehler_indizien or []))
+        traf_falsch = sum(1 for d in falsch if schluessel in (d.fehler_indizien or []))
+        gesamt = traf_echt + traf_falsch
+        if not gesamt:
+            continue
+        indizien.append({
+            "schluessel": schluessel,
+            "name": name,
+            "echt": traf_echt,
+            "fehlalarm": traf_falsch,
+            "treffsicherheit": round(traf_echt / gesamt * 100),
+        })
+    indizien.sort(key=lambda i: (-i["treffsicherheit"], -i["echt"]))
+
+    return {
+        "beurteilt": len(beurteilt),
+        "echt": len(echt),
+        "fehlalarm": len(falsch),
+        "indizien": indizien,
+        **schwellen_vorschlag(db, echt, falsch),
+    }
+
+
+def schwellen_vorschlag(db: Session, echt: list[Deal],
+                        falsch: list[Deal]) -> dict:
+    """Eine Schwelle vorschlagen - aber nie selbst verstellen.
+
+    Gesucht ist der niedrigste Wert, der noch alle Fehlalarme draussen
+    laesst. Gibt es zu wenige Rueckmeldungen, wird gar nichts vorgeschlagen:
+    eine Schwelle aus drei Beobachtungen waere schlechter als die begruendete
+    Vorgabe.
+    """
+    aktuell = int(get_setting(db, "preisfehler_schwelle", SCHWELLE_HEISS)
+                  or SCHWELLE_HEISS)
+    if len(echt) + len(falsch) < MIN_RUECKMELDUNGEN:
+        return {"vorschlag": None, "aktuelle_schwelle": aktuell,
+                "vorschlag_grund": (
+                    f"Noch zu wenig Rückmeldungen — ab "
+                    f"{MIN_RUECKMELDUNGEN} lässt sich etwas sagen.")}
+
+    hoechster_fehlalarm = max((d.fehler_score or 0 for d in falsch), default=0)
+    if not falsch:
+        # Keine Fehlalarme: die Schwelle koennte runter, damit weniger
+        # durchrutscht. Nicht unter die Verdachtsschwelle.
+        niedrigster_echter = min((d.fehler_score or 0 for d in echt), default=aktuell)
+        vorschlag = max(SCHWELLE_VERDACHT, min(aktuell, niedrigster_echter))
+        grund = ("Kein einziger Fehlalarm — die Schwelle darf niedriger "
+                 "liegen, dann rutscht weniger durch.")
+    else:
+        vorschlag = min(100, hoechster_fehlalarm + 1)
+        noch_dabei = sum(1 for d in echt if (d.fehler_score or 0) >= vorschlag)
+        grund = (f"Über {hoechster_fehlalarm} Punkten war kein Fehlalarm mehr "
+                 f"dabei; {noch_dabei} von {len(echt)} echten Funden bleiben.")
+
+    if vorschlag == aktuell:
+        return {"vorschlag": None, "aktuelle_schwelle": aktuell,
+                "vorschlag_grund": "Die eingestellte Schwelle passt."}
+    return {"vorschlag": vorschlag, "aktuelle_schwelle": aktuell,
+            "vorschlag_grund": grund}
+
+
+def notiere_rueckmeldung(db: Session, deal_id: int, urteil: str) -> Deal | None:
+    """Rueckmeldung speichern. Nochmal druecken nimmt sie zurueck."""
+    if urteil not in (ECHT, FEHLALARM):
+        raise ValueError(f"Unbekanntes Urteil '{urteil}'")
+    deal = db.get(Deal, deal_id)
+    if deal is None:
+        return None
+    if deal.fehler_urteil_mensch == urteil:
+        deal.fehler_urteil_mensch = None
+        deal.fehler_urteil_am = None
+    else:
+        deal.fehler_urteil_mensch = urteil
+        deal.fehler_urteil_am = utcnow()
+    db.commit()
+    return deal

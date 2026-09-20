@@ -1044,11 +1044,12 @@ Ehrlich benannt statt verschwiegen:
 
 * **Kein Endpoint ist vorab verifiziert.** Siehe [ENDPOINTS.md](ENDPOINTS.md) —
   der erste Schritt ist `python -m tools.verify_endpoints`.
-* **Die Preisfehler-Erkennung ist nicht gegen echte Funde geeicht.** Die
-  Gewichte sind begründet, aber am Schreibtisch gewählt und gegen
-  konstruierte Fälle getestet — nicht an einem Jahr echter mydealz-Daten
-  kalibriert. Rechne in den ersten Wochen mit Fehlalarmen und stell die
-  Schwelle nach.
+* **Die Preisfehler-Erkennung startet ungeeicht.** Die Gewichte sind
+  begründet, aber am Schreibtisch gewählt. SparBit lernt jetzt dazu: klick
+  bei einem Fund auf „Echter Fehler" oder „Fehlalarm" (geht auch per
+  Telegram-Knopf), und unter *Preisfehler → einstellen → Eichung* steht,
+  welches Indiz bei dir wie oft richtig lag — samt Vorschlag für die
+  Schwelle. Verstellt wird nichts von selbst.
 * **Fremdpreise braucht es erst.** Das stärkste Indiz nach der Kommastelle ist
   der Vergleich mit anderen Quellen — den gibt es nur, wenn mehrere Quellen
   denselben Artikel melden. Mit einer eingeschalteten Quelle bleibt der

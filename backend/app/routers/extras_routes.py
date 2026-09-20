@@ -437,8 +437,42 @@ def preisfehler_liste(tage: int = Query(7, ge=1, le=90),
             "fehler_gruende": d.fehler_gruende or [],
             "fehler_erwartet_eur": d.fehler_erwartet_eur,
             "fehler_gemeldet_am": d.fehler_gemeldet_am,
+            "fehler_indizien": d.fehler_indizien or [],
+            "urteil_mensch": d.fehler_urteil_mensch,
         } for d in rows],
     }
+
+
+class Rueckmeldung(BaseModel):
+    urteil: str          # "echt" | "fehlalarm"
+
+
+@router.post("/preisfehler/{deal_id}/rueckmeldung")
+def preisfehler_rueckmeldung(deal_id: int, body: Rueckmeldung,
+                             db: Session = Depends(get_db)) -> dict:
+    """War das wirklich ein Preisfehler? Nochmal drücken nimmt es zurück."""
+    from ..pricefehler import notiere_rueckmeldung
+
+    try:
+        deal = notiere_rueckmeldung(db, deal_id, body.urteil)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if deal is None:
+        raise HTTPException(404, "Deal nicht gefunden")
+    return {"ok": True, "urteil_mensch": deal.fehler_urteil_mensch}
+
+
+@router.get("/preisfehler/auswertung")
+def preisfehler_auswertung(db: Session = Depends(get_db)) -> dict:
+    """Welches Indiz lag wie oft richtig - und was folgt daraus.
+
+    Die Gewichte des Wächters sind begründet, aber am Schreibtisch
+    gewählt. Erst die Rückmeldungen sagen, welche Indizien mit diesen
+    Quellen tatsächlich taugen.
+    """
+    from ..pricefehler import bewerte_rueckmeldungen
+
+    return bewerte_rueckmeldungen(db)
 
 
 @router.post("/preisfehler/{deal_id}/pruefen")
@@ -466,12 +500,19 @@ def preisfehler_verwerfen(deal_id: int, db: Session = Depends(get_db)) -> dict:
     """Fehlalarm wegklicken.
 
     Setzt die Meldesperre, statt die Punktzahl zu loeschen: die Begruendung
-    bleibt nachvollziehbar, aber es kommt keine zweite Nachricht.
+    bleibt nachvollziehbar, aber es kommt keine zweite Nachricht. Zaehlt
+    zugleich als Rueckmeldung - wer hier klickt, hat das Urteil ja gefaellt,
+    und daraus soll der Waechter lernen.
     """
+    from ..pricefehler import FEHLALARM
+
     deal = db.get(Deal, deal_id)
     if deal is None:
         raise HTTPException(404, "Deal nicht gefunden")
     deal.fehler_stufe = "kein"
     deal.fehler_gemeldet_am = utcnow()
+    if deal.fehler_urteil_mensch is None:
+        deal.fehler_urteil_mensch = FEHLALARM
+        deal.fehler_urteil_am = utcnow()
     db.commit()
     return {"ok": True, "id": deal.id}

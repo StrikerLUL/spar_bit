@@ -1,8 +1,12 @@
 import {
-  AlertTriangle, BellOff, ExternalLink, RefreshCw, ShieldCheck, ShieldOff,
+  AlertTriangle, BellOff, CheckCircle2, ExternalLink, RefreshCw, ShieldCheck,
+  ShieldOff, Target,
 } from "lucide-react";
 import * as React from "react";
-import { api, type AppSettings, type Deal, type PreisfehlerListe } from "@/lib/api";
+import {
+  api, type AppSettings, type Deal, type PreisfehlerAuswertung,
+  type PreisfehlerListe,
+} from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import {
   bildQuelle, cn, eurHinweis, formatAmount, formatPrice, sourceLabel, timeAgo,
@@ -33,6 +37,18 @@ export function Preisfehler() {
     () => api.preisfehler.list(tage, nurHeiss), [tage, nurHeiss, stand]);
 
   const neu = () => setStand((n) => n + 1);
+
+  const alsEcht = async (deal: Deal) => {
+    try {
+      const raus = await api.preisfehler.rueckmeldung(deal.id, "echt");
+      toast.push("success",
+        raus.urteil_mensch ? "Als echter Fehler vermerkt" : "Rückmeldung zurückgenommen",
+        deal.titel.slice(0, 60));
+      neu();
+    } catch (err) {
+      toast.push("error", "Ging nicht", (err as Error).message);
+    }
+  };
 
   const verwerfen = async (deal: Deal) => {
     await api.preisfehler.verwerfen(deal.id);
@@ -108,6 +124,7 @@ export function Preisfehler() {
             <Fund key={deal.id} deal={deal}
                   onOeffnen={() => setOffen(deal.id)}
                   onVerwerfen={() => verwerfen(deal)}
+                  onEcht={() => alsEcht(deal)}
                   onPruefen={() => pruefen(deal)} />
           ))}
         </div>
@@ -201,6 +218,9 @@ function Waechter({ aktiv, schwelle }: { aktiv?: boolean; schwelle?: number }) {
                     preisfehler_schwelle: settings.preisfehler_schwelle })}>
             Schwelle speichern
           </Button>
+
+          <Eichung schwelleSetzen={(wert) =>
+            speichern({ preisfehler_schwelle: wert })} />
         </div>
       )}
     </Card>
@@ -208,13 +228,91 @@ function Waechter({ aktiv, schwelle }: { aktiv?: boolean; schwelle?: number }) {
 }
 
 
+/** Was die Rückmeldungen über die eigenen Gewichte sagen.
+ *
+ *  Die Gewichte des Wächters sind begründet, aber am Schreibtisch gewählt.
+ *  Erst die Rückmeldungen zeigen, welche Indizien mit diesen Quellen
+ *  tatsächlich taugen. Ein Vorschlag wird gemacht, nie etwas von selbst
+ *  verstellt — dafür ist die Datenlage zu dünn und die Folge zu ärgerlich.
+ */
+function Eichung({ schwelleSetzen }: { schwelleSetzen: (wert: number) => void }) {
+  const { data } = useAsync<PreisfehlerAuswertung>(
+    () => api.preisfehler.auswertung(), []);
+
+  if (!data) return null;
+
+  return (
+    <div className="mt-4 border-t border-border pt-3.5">
+      <p className="label flex items-center gap-1.5">
+        <Target className="h-3.5 w-3.5 text-primary" />
+        Eichung
+      </p>
+
+      {data.beurteilt === 0 ? (
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+          Noch keine Rückmeldungen. Klick bei einem Fund auf „Echter Fehler"
+          oder „Fehlalarm" — daraus lernt der Wächter, welche Indizien bei
+          deinen Quellen taugen.
+        </p>
+      ) : (
+        <>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {data.echt} echt · {data.fehlalarm} Fehlalarm
+            {" "}({data.beurteilt} beurteilt)
+          </p>
+
+          {data.indizien.length > 0 && (
+            <ul className="mt-2.5 space-y-1.5">
+              {data.indizien.map((i) => (
+                <li key={i.schluessel} className="text-xs">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate">{i.name}</span>
+                    <span className={cn(
+                      "tabular shrink-0 font-medium",
+                      i.treffsicherheit >= 70 ? "text-success"
+                        : i.treffsicherheit >= 40 ? "text-warning"
+                          : "text-destructive")}>
+                      {i.treffsicherheit} %
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-primary"
+                         style={{ width: `${i.treffsicherheit}%` }} />
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    {i.echt} echt / {i.fehlalarm} Fehlalarm
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-3 rounded-md bg-muted/40 px-3 py-2">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {data.vorschlag_grund}
+            </p>
+            {data.vorschlag !== null && (
+              <Button size="sm" variant="outline" className="mt-2"
+                      onClick={() => schwelleSetzen(data.vorschlag!)}>
+                Schwelle auf {data.vorschlag} setzen
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 /** Ein Fund als breite Zeile — Bild klein, Begründung gross. */
 function Fund({
-  deal, onOeffnen, onVerwerfen, onPruefen,
+  deal, onOeffnen, onVerwerfen, onPruefen, onEcht,
 }: {
   deal: Deal;
   onOeffnen: () => void;
   onVerwerfen: () => void;
+  onEcht: () => void;
   onPruefen: () => void;
 }) {
   const heiss = deal.fehler_stufe === "heiss";
@@ -296,6 +394,13 @@ function Fund({
                     title="Mit dem aktuellen Wissensstand neu bewerten">
               <RefreshCw className="h-3.5 w-3.5" />
               Neu prüfen
+            </Button>
+            <Button
+              variant={deal.urteil_mensch === "echt" ? "signal" : "ghost"}
+              size="sm" onClick={onEcht}
+              title="War wirklich ein Preisfehler — daraus lernt der Wächter">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Echter Fehler
             </Button>
             <Button variant="ghost" size="sm" onClick={onVerwerfen}
                     title="Kein Preisfehler — nicht mehr melden">
