@@ -1,14 +1,17 @@
 import {
-  AlertTriangle, CheckCircle2, ExternalLink, Eye, Plus, RefreshCw, Target,
-  Trash2, XCircle,
+  AlertTriangle, CheckCircle2, ExternalLink, Eye, ListPlus, Plus, RefreshCw,
+  Target, Trash2, XCircle,
 } from "lucide-react";
 import * as React from "react";
-import { api, type WatchItem, type WatchTest } from "@/lib/api";
+import {
+  api, type SammelErgebnis, type WatchItem, type WatchTest,
+} from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { cn, formatPrice, timeAgo } from "@/lib/utils";
 import { Sparkline } from "@/components/charts";
 import {
   Badge, Button, Card, Dialog, EmptyState, Input, Label, Skeleton, Switch,
+  Textarea,
 } from "@/components/ui";
 import { PageHeader } from "@/components/Layout";
 import { useToast } from "@/components/Toast";
@@ -17,6 +20,7 @@ export function Watchlist() {
   const toast = useToast();
   const { data, loading, reload } = useAsync<WatchItem[]>(() => api.watch.list(), []);
   const [anlegen, setAnlegen] = React.useState(false);
+  const [sammel, setSammel] = React.useState(false);
   const [detail, setDetail] = React.useState<number | null>(null);
 
   return (
@@ -25,10 +29,16 @@ export function Watchlist() {
         title="Wunschliste"
         description="Artikel, die SparBit selbst beobachtet — unabhängig davon, ob sie jemand als Deal postet."
         action={
-          <Button onClick={() => setAnlegen(true)}>
-            <Plus className="h-4 w-4" />
-            Artikel beobachten
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setSammel(true)}>
+              <ListPlus className="h-4 w-4" />
+              Mehrere auf einmal
+            </Button>
+            <Button onClick={() => setAnlegen(true)}>
+              <Plus className="h-4 w-4" />
+              Artikel beobachten
+            </Button>
+          </div>
         }
       />
 
@@ -64,6 +74,9 @@ export function Watchlist() {
           onClose={() => setAnlegen(false)}
           onSaved={() => { setAnlegen(false); reload(); toast.push("success", "Aufgenommen"); }}
         />
+      )}
+      {sammel && (
+        <SammelDialog onClose={() => setSammel(false)} onFertig={reload} />
       )}
       {detail !== null && (
         <DetailDialog id={detail} onClose={() => setDetail(null)} onChanged={reload} />
@@ -382,3 +395,135 @@ const Zeile = ({ label, wert }: { label: string; wert: string }) => (
     <dd className="truncate text-right">{wert}</dd>
   </div>
 );
+
+
+/** Mehrere Artikel auf einmal aufnehmen — eine URL je Zeile.
+ *
+ *  Jeden einzeln über ein Formular einzutragen ist der Grund, warum
+ *  Wunschlisten leer bleiben. Was sich nicht lesen lässt, wird trotzdem
+ *  aufgenommen: oft zickt eine Seite nur beim ersten Mal, und der nächste
+ *  Lauf holt es nach.
+ */
+function SammelDialog({ onClose, onFertig }: {
+  onClose: () => void;
+  onFertig: () => void;
+}) {
+  const toast = useToast();
+  const [urls, setUrls] = React.useState("");
+  const [ziel, setZiel] = React.useState("");
+  const [laeuft, setLaeuft] = React.useState(false);
+  const [ergebnis, setErgebnis] = React.useState<SammelErgebnis | null>(null);
+
+  const zeilen = urls.split("\n")
+    .map((z) => z.trim())
+    .filter((z) => /^https?:\/\//i.test(z));
+  const anzahl = new Set(zeilen).size;
+
+  const starten = async () => {
+    setLaeuft(true);
+    try {
+      const raus = await api.watch.sammel(urls, ziel ? Number(ziel) : null);
+      setErgebnis(raus);
+      onFertig();
+    } catch (err) {
+      toast.push("error", "Import fehlgeschlagen", (err as Error).message);
+    } finally {
+      setLaeuft(false);
+    }
+  };
+
+  if (ergebnis) {
+    const z = ergebnis.zusammenfassung;
+    return (
+      <Dialog open onClose={onClose} title="Import fertig"
+        footer={<Button onClick={onClose}>Schließen</Button>}>
+        <div className="space-y-4">
+          <p className="text-sm">
+            <strong>{z.neu}</strong> aufgenommen
+            {z.mit_preis > 0 && `, davon ${z.mit_preis} mit Preis`}
+            {z.doppelt > 0 && ` · ${z.doppelt} standen schon drin`}
+          </p>
+
+          {ergebnis.fehler.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-warning">
+                Kein Preis gefunden — bleiben trotzdem in der Liste und werden
+                beim nächsten Lauf erneut versucht:
+              </p>
+              <ul className="space-y-1">
+                {ergebnis.fehler.map((f) => (
+                  <li key={f.url} className="text-xs">
+                    <span className="text-foreground/90">{f.name}</span>
+                    <span className="ml-1.5 text-muted-foreground">{f.grund}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ergebnis.uebersprungen.length > 0 && (
+            <ul className="space-y-1">
+              {ergebnis.uebersprungen.map((u) => (
+                <li key={u.url} className="truncate text-xs text-muted-foreground">
+                  {u.url} — {u.grund}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Mehrere Artikel aufnehmen"
+      description="Eine URL je Zeile. Namen und Preise holt SparBit selbst."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
+          <Button onClick={starten} loading={laeuft} disabled={anzahl === 0}>
+            {anzahl > 0 ? `${anzahl} aufnehmen` : "Aufnehmen"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="sammel-urls">Shop-Adressen</Label>
+          <Textarea
+            id="sammel-urls"
+            rows={8}
+            value={urls}
+            onChange={(e) => setUrls(e.target.value)}
+            placeholder={"https://shop.de/artikel-eins\nhttps://anderer-shop.de/artikel-zwei"}
+            className="font-mono text-xs"
+          />
+          <p className="text-xs text-muted-foreground">
+            {anzahl === 0
+              ? "Noch keine gültige Adresse — jede Zeile beginnt mit http:// oder https://"
+              : `${anzahl} Adresse${anzahl === 1 ? "" : "n"} erkannt`}
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="sammel-ziel">Zielpreis für alle (optional)</Label>
+          <Input id="sammel-ziel" type="number" step="0.01" value={ziel}
+                 placeholder="z. B. 199"
+                 onChange={(e) => setZiel(e.target.value)} />
+          <p className="text-xs text-muted-foreground">
+            Lässt sich später je Artikel ändern.
+          </p>
+        </div>
+
+        {laeuft && (
+          <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            Jede Seite wird einzeln geholt — das dauert ein paar Sekunden.
+          </p>
+        )}
+      </div>
+    </Dialog>
+  );
+}

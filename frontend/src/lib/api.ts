@@ -433,6 +433,19 @@ export interface PreisfehlerListe {
   items: Deal[];
 }
 
+export interface SammelErgebnis {
+  angelegt: WatchItem[];
+  uebersprungen: Array<{ url: string; grund: string }>;
+  fehler: Array<{ url: string; id: number; name: string; grund: string }>;
+  zusammenfassung: {
+    gelesen: number;
+    neu: number;
+    mit_preis: number;
+    ohne_preis: number;
+    doppelt: number;
+  };
+}
+
 export interface HygieneBefund {
   art: "regel_laut" | "regel_leer" | "regel_ohne_kanal" | "quelle_rauschen";
   betrifft: string;
@@ -659,6 +672,10 @@ export const api = {
     remove: (id: number) => del<{ ok: boolean }>(`/watch/${id}`),
     pruefen: (id: number) => post<WatchTest>(`/watch/${id}/pruefen`),
     testen: (url: string) => post<WatchTest>("/watch-test", { url }),
+    sammel: (urls: string, ziel_preis?: number | null, intervall_minuten?: number) =>
+      post<SammelErgebnis>("/watch/sammel",
+        { urls, ziel_preis: ziel_preis ?? null,
+          intervall_minuten: intervall_minuten ?? 180 }),
   },
   urteil: {
     stufen: () => get<UrteilStufe[]>("/urteile"),

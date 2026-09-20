@@ -93,6 +93,98 @@ async def anlegen(body: WatchBody, db: Session = Depends(get_db)) -> dict:
     return ergebnis
 
 
+class SammelBody(BaseModel):
+    urls: str = Field(max_length=20000)
+    ziel_preis: float | None = Field(None, ge=0)
+    intervall_minuten: int = Field(180, ge=30, le=10080)
+
+
+# Mehr als das auf einmal hiesse, den Server fuer Minuten zu blockieren -
+# jede Seite wird ja einzeln geholt.
+SAMMEL_MAX = 25
+
+
+@router.post("/watch/sammel")
+async def sammel_anlegen(body: SammelBody,
+                         db: Session = Depends(get_db)) -> dict:
+    """Mehrere Artikel auf einmal aufnehmen - eine URL je Zeile.
+
+    Namen und Preise werden gleich geholt, damit man sofort sieht, was
+    gelesen werden konnte. Was scheitert, wird trotzdem aufgenommen und
+    beim naechsten Lauf erneut versucht - haeufig ist es nur eine Seite,
+    die beim ersten Mal zickt.
+    """
+    roh = [z.strip() for z in body.urls.splitlines()]
+    kandidaten: list[str] = []
+    for zeile in roh:
+        if not zeile or not zeile.lower().startswith(("http://", "https://")):
+            continue
+        if zeile not in kandidaten:
+            kandidaten.append(zeile)
+
+    if not kandidaten:
+        raise HTTPException(400, "Keine gültige URL gefunden — eine pro Zeile, "
+                                 "beginnend mit http:// oder https://")
+    if len(kandidaten) > SAMMEL_MAX:
+        raise HTTPException(400, f"Höchstens {SAMMEL_MAX} auf einmal — "
+                                 f"{len(kandidaten)} waren es.")
+
+    vorhanden = {e.url for e in db.scalars(select(WatchItem))}
+    http = get_http()
+    angelegt, uebersprungen, fehler = [], [], []
+
+    for url in kandidaten:
+        if url in vorhanden:
+            uebersprungen.append({"url": url, "grund": "steht schon drin"})
+            continue
+
+        # Vorlaeufiger Name aus der URL - der erste Abruf ersetzt ihn, wenn
+        # die Seite einen hergibt.
+        eintrag = WatchItem(name=_name_aus_url(url), url=url,
+                            ziel_preis=body.ziel_preis,
+                            intervall_minuten=body.intervall_minuten, aktiv=True)
+        db.add(eintrag)
+        db.commit()
+        db.refresh(eintrag)
+        vorhanden.add(url)
+
+        try:
+            fund = await pruefe_eintrag(db, eintrag, http)
+        except Exception as exc:                      # eine Seite darf nicht alles abbrechen
+            log.warning("Sammelimport: %s: %s", url, exc)
+            fund = None
+        db.refresh(eintrag)
+
+        if fund:
+            angelegt.append(_watch_dict(eintrag))
+        else:
+            fehler.append({"url": url, "id": eintrag.id,
+                           "name": eintrag.name,
+                           "grund": eintrag.letzter_fehler or "kein Preis gefunden"})
+
+    return {"angelegt": angelegt, "uebersprungen": uebersprungen,
+            "fehler": fehler,
+            "zusammenfassung": {
+                "gelesen": len(kandidaten), "neu": len(angelegt) + len(fehler),
+                "mit_preis": len(angelegt), "ohne_preis": len(fehler),
+                "doppelt": len(uebersprungen)}}
+
+
+def _name_aus_url(url: str) -> str:
+    """Ein brauchbarer Platzhalter, bis die Seite einen echten Namen liefert."""
+    from urllib.parse import unquote, urlparse
+
+    pfad = urlparse(url).path.rstrip("/")
+    letzter = unquote(pfad.rsplit("/", 1)[-1]) if pfad else ""
+    # Endung und Trennzeichen weg: "lego-technic-42143.html" -> "lego technic 42143"
+    letzter = letzter.rsplit(".", 1)[0] if "." in letzter[-6:] else letzter
+    lesbar = " ".join(w for w in letzter.replace("-", " ").replace("_", " ").split()
+                      if w)
+    if len(lesbar) >= 3:
+        return lesbar[:255]
+    return (urlparse(url).netloc or url)[:255]
+
+
 @router.put("/watch/{watch_id}")
 def aendern(watch_id: int, body: WatchBody, db: Session = Depends(get_db)) -> dict:
     eintrag = db.get(WatchItem, watch_id)
