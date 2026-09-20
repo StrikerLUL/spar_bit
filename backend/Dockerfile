@@ -12,11 +12,16 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
  && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# Build-Kontext ist die Projektwurzel (siehe docker-compose.yml), damit
+# cli.py mit ins Image kann. Die Pfade sind darum backend/-relativ.
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
-COPY tools ./tools
+COPY backend/app ./app
+COPY backend/tools ./tools
+# Die Kommandozeile: "docker compose exec backend python cli.py status"
+# bzw. bequemer "./sparbit cli status".
+COPY cli.py ./cli.py
 
 # Nicht als root laufen.
 RUN useradd --system --uid 10001 --create-home sparbit \

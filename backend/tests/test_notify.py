@@ -256,7 +256,7 @@ def test_kanaele_nutzen_die_oeffentliche_client_api():
     """Kein Griff in PoliteClient._client - sonst bricht jede Umstellung dort."""
     import pathlib
     ordner = pathlib.Path(__file__).resolve().parents[1] / "app" / "notify"
-    schuldige = [p.name for p in ordner.glob("*.py") if "_client" in p.read_text()]
+    schuldige = [p.name for p in ordner.glob("*.py") if "_client" in p.read_text("utf-8")]
     assert not schuldige, f"greifen auf _client zu: {schuldige}"
 
 

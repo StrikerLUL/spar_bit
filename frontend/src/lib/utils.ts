@@ -5,27 +5,73 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const CURRENCY_SYMBOL: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
+const CURRENCY_SYMBOL: Record<string, string> = {
+  EUR: "€", USD: "$", GBP: "£", CHF: "CHF", PLN: "zł",
+};
+
+export const currencySymbol = (currency = "EUR"): string =>
+  CURRENCY_SYMBOL[currency?.toUpperCase()] ?? currency ?? "EUR";
+
+/** Geldbetrag ohne die "gratis"-Sonderbehandlung.
+ *
+ *  Für Summen wie "gespart": 0 € heisst null Ersparnis, nicht "gratis".
+ *  Formatiert wird über Intl statt per .replace(".", ","), sonst fehlt bei
+ *  vierstelligen Beträgen der Tausenderpunkt — "1299,00 €" liest sich als
+ *  ein Zehntel von dem, was es ist.
+ */
+export function formatAmount(
+  value: number | null | undefined,
+  currency = "EUR",
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  const zahl = new Intl.NumberFormat("de-DE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+  return `${zahl} ${currencySymbol(currency)}`;
+}
 
 export function formatPrice(
   value: number | null | undefined,
   currency = "EUR",
 ): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
   if (value <= 0.009) return "gratis";
-  const symbol = CURRENCY_SYMBOL[currency] ?? currency;
-  return `${value.toFixed(2).replace(".", ",")} ${symbol}`;
+  return formatAmount(value, currency);
 }
 
-/** Geldbetrag ohne die "gratis"-Sonderbehandlung.
- *  Fuer Summen wie "gespart": 0 EUR heisst null Ersparnis, nicht "gratis". */
-export function formatAmount(
-  value: number | null | undefined,
+/** Der EUR-Hinweis hinter einem Fremdwährungspreis: "$ 9.99 (≈ 9,19 €)".
+ *
+ *  Ohne ihn steht auf der Karte eine Zahl, die man weder mit dem eigenen
+ *  Preislimit noch mit dem Deal daneben vergleichen kann — und CheapShark
+ *  liefert grundsätzlich USD.
+ */
+export function eurHinweis(
+  preisEur: number | null | undefined,
   currency = "EUR",
-): string {
-  if (value === null || value === undefined) return "—";
-  const symbol = CURRENCY_SYMBOL[currency] ?? currency;
-  return `${value.toFixed(2).replace(".", ",")} ${symbol}`;
+): string | null {
+  if (preisEur === null || preisEur === undefined) return null;
+  if ((currency ?? "EUR").toUpperCase() === "EUR") return null;
+  if (preisEur <= 0.009) return null;
+  return `≈ ${formatAmount(preisEur, "EUR")}`;
+}
+
+/** Ob ein Streichpreis überhaupt angezeigt werden darf.
+ *
+ *  Ein "Originalpreis" unter oder gleich dem aktuellen Preis ist immer ein
+ *  Datenfehler. Er wurde bisher trotzdem durchgestrichen danebengesetzt,
+ *  was den Deal schlechter aussehen liess, als er ist.
+ */
+export function zeigeStreichpreis(deal: {
+  preis?: number | null;
+  originalpreis?: number | null;
+  ist_gratis?: boolean;
+}): boolean {
+  const { preis, originalpreis } = deal;
+  if (originalpreis === null || originalpreis === undefined) return false;
+  if (deal.ist_gratis) return originalpreis > 0;
+  if (preis === null || preis === undefined) return false;
+  return originalpreis > preis;
 }
 
 export function formatNumber(value: number | null | undefined): string {

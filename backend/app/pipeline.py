@@ -7,6 +7,7 @@ from datetime import datetime, time, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import money
 from .currency import to_eur
 from .db import get_setting
 from .dedupe import canonical_url, normalize_title, titles_match, url_hash
@@ -89,6 +90,13 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
                       item.titel[:60], source_id, cand.titel[:60], cand.quelle)
             return None
 
+    # Streichpreis nur uebernehmen, wenn er ueber dem Preis liegt, und den
+    # Rabatt daraus rechnen. Sonst steht auf der Karte ein Prozentwert, der
+    # sich aus den beiden danebenstehenden Zahlen nicht ergibt.
+    original = item.originalpreis
+    if original is not None and item.preis is not None and original <= item.preis:
+        original = None
+
     deal = Deal(
         url_hash=uhash,
         titel=item.titel[:1000],
@@ -97,8 +105,9 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         url=item.url,
         bild=item.bild,
         preis=item.preis,
-        originalpreis=item.originalpreis,
-        rabatt_prozent=item.rabatt_prozent,
+        originalpreis=original,
+        rabatt_prozent=_rabatt(item.preis, original, item.rabatt_prozent,
+                               item.ist_gratis),
         waehrung=item.waehrung,
         preis_eur=to_eur(item.preis, item.waehrung),
         ist_gratis=item.ist_gratis,
@@ -163,6 +172,12 @@ def _apply_price(db: Session, deal: Deal, item: DealItem, source_id: str) -> Non
     Es gewinnt der guenstigere Preis - derselbe Artikel taucht bei mehreren
     Quellen zu verschiedenen Preisen auf, und interessant ist der beste.
     Jede echte Aenderung landet in der Historie.
+
+    Wichtig ist, dass Preis, Waehrung, Streichpreis und Rabatt gemeinsam
+    umziehen. Frueher wurden nur Preis und Waehrung ersetzt - der alte
+    Streichpreis blieb stehen und wurde dann mit dem neuen Waehrungszeichen
+    angezeigt: ein EUR-Betrag mit Dollarzeichen davor, und ein Rabatt, der
+    zu keinem der beiden Preise mehr passte.
     """
     if item.preis is None:
         return
@@ -179,14 +194,47 @@ def _apply_price(db: Session, deal: Deal, item: DealItem, source_id: str) -> Non
         return
 
     geaendert = deal.preis != item.preis
+    waehrung_wechselt = (deal.waehrung or "EUR") != (item.waehrung or "EUR")
+
     deal.preis = item.preis
     deal.waehrung = item.waehrung
     deal.preis_eur = neu_eur
-    deal.rabatt_prozent = item.rabatt_prozent or deal.rabatt_prozent
     deal.ist_gratis = deal.ist_gratis or item.ist_gratis
+
+    # Streichpreis: der der neuen Quelle, sonst der alte - aber nur, solange
+    # die Waehrung dieselbe bleibt und er ueber dem neuen Preis liegt.
+    if item.originalpreis is not None and item.originalpreis > item.preis:
+        deal.originalpreis = item.originalpreis
+    elif waehrung_wechselt or (deal.originalpreis is not None
+                               and deal.originalpreis <= item.preis):
+        deal.originalpreis = None
+
+    deal.rabatt_prozent = _rabatt(deal.preis, deal.originalpreis,
+                                  item.rabatt_prozent, deal.ist_gratis)
+
     if geaendert:
         db.add(PriceHistory(deal_id=deal.id, preis=item.preis,
                             waehrung=item.waehrung, quelle=source_id))
+
+
+def _rabatt(preis: float | None, original: float | None,
+            gemeldet: float | None, gratis: bool = False) -> float | None:
+    """Rabatt, der zu den angezeigten Zahlen passt.
+
+    Wenn ein Streichpreis dasteht, wird der Prozentwert daraus gerechnet -
+    ein von der Quelle gemeldeter Rabatt, der gegen eine andere UVP gerechnet
+    wurde, waere sonst neben zwei Preisen zu sehen, aus denen er sich nicht
+    ergibt. Der gemeldete Wert greift nur, wenn es keinen Streichpreis gibt.
+    """
+    if gratis:
+        return 100.0
+    if preis is not None and original and original > preis > 0:
+        return round((1 - preis / original) * 100, 1)
+    if preis == 0 and original:
+        return 100.0
+    if original is None and gemeldet is not None and 0 < gemeldet <= 100:
+        return round(float(gemeldet), 1)
+    return None
 
 
 def _deal_payload(deal: Deal) -> dict:
@@ -194,10 +242,37 @@ def _deal_payload(deal: Deal) -> dict:
         "id": deal.id, "titel": deal.titel, "url": deal.url, "bild": deal.bild,
         "preis": deal.preis, "originalpreis": deal.originalpreis,
         "rabatt_prozent": deal.rabatt_prozent, "waehrung": deal.waehrung,
+        "preis_eur": deal.preis_eur,
         "ist_gratis": deal.ist_gratis, "haendler": deal.haendler,
         "quelle": deal.quelle, "temperatur": deal.temperatur,
+        "fehler_stufe": deal.fehler_stufe, "fehler_score": deal.fehler_score,
         "first_seen": deal.first_seen.isoformat() if deal.first_seen else None,
     }
+
+
+def _note(deal: Deal, *, regel: str, prioritaet: str = "NORMAL",
+          titel: str | None = None, beschreibung: str | None = None) -> Notification:
+    """Eine Meldung aus einem Deal bauen.
+
+    An einer Stelle, weil es drei Absender gibt (Regeltreffer, Preisalarm,
+    Preisfehler-Waechter) und eine Meldung ueberall dieselben Zahlen zeigen
+    soll. Frueher stand der Aufbau dreimal im Code, mit drei verschiedenen
+    Feldlisten - eine davon vergass den EUR-Gegenwert.
+    """
+    fehler = (deal.fehler_gruende or [])
+    return Notification(
+        titel=titel or deal.titel,
+        url=deal.url, quelle=deal.quelle, regel=regel,
+        preis=deal.preis, originalpreis=deal.originalpreis,
+        rabatt_prozent=deal.rabatt_prozent, waehrung=deal.waehrung,
+        preis_eur=deal.preis_eur,
+        haendler=deal.haendler, bild=deal.bild, ist_gratis=deal.ist_gratis,
+        beschreibung=beschreibung if beschreibung is not None else deal.beschreibung,
+        deal_id=deal.id, prioritaet=prioritaet, tags=deal.tags or [],
+        urteil=deal.urteil, urteil_text=deal.urteil_text,
+        fehler_stufe=deal.fehler_stufe,
+        fehler_text=" ".join(fehler[:2]) if fehler else None,
+    )
 
 
 # --- Regel-Auswertung ------------------------------------------------------
@@ -282,15 +357,8 @@ async def dispatch(db: Session, hits: list[tuple[Rule, Deal]], http) -> int:
             log.warning("Regel '%s' hat keinen Kanal konfiguriert", rule.name)
             continue
 
-        note = Notification(
-            titel=deal.titel, url=deal.url, quelle=deal.quelle, regel=rule.name,
-            preis=deal.preis, originalpreis=deal.originalpreis,
-            rabatt_prozent=deal.rabatt_prozent, waehrung=deal.waehrung,
-            haendler=deal.haendler, bild=deal.bild, ist_gratis=deal.ist_gratis,
-            beschreibung=deal.beschreibung, deal_id=deal.id,
-            prioritaet="SOFORT" if sofort else "NORMAL", tags=deal.tags or [],
-            urteil=deal.urteil, urteil_text=deal.urteil_text,
-        )
+        note = _note(deal, regel=rule.name,
+                     prioritaet="SOFORT" if sofort else "NORMAL")
 
         for cid in target_ids:
             chan_row = channels.get(cid)
@@ -384,15 +452,10 @@ async def dispatch_alarms(db: Session, deals: list[Deal], http) -> int:
 
     sent = 0
     for deal in deals:
-        note = Notification(
-            titel=f"Preisalarm: {deal.titel}", url=deal.url, quelle=deal.quelle,
-            regel="Preisalarm", preis=deal.preis, originalpreis=deal.originalpreis,
-            rabatt_prozent=deal.rabatt_prozent, waehrung=deal.waehrung,
-            haendler=deal.haendler, bild=deal.bild, ist_gratis=deal.ist_gratis,
-            beschreibung=f"Dein Zielpreis war {deal.alarm_preis:.2f} EUR.",
-            deal_id=deal.id, prioritaet="SOFORT", tags=deal.tags or [],
-            urteil=deal.urteil, urteil_text=deal.urteil_text,
-        )
+        note = _note(deal, regel="Preisalarm", prioritaet="SOFORT",
+                     titel=f"Preisalarm: {deal.titel}",
+                     beschreibung=("Dein Zielpreis war "
+                                   f"{money.betrag(deal.alarm_preis)}."))
         for row in channels:
             impl = get_channel(row.type)
             if impl is None:
@@ -411,3 +474,76 @@ async def dispatch_alarms(db: Session, deals: list[Deal], http) -> int:
                                        error=f"{type(exc).__name__}: {exc}"[:500]))
     db.commit()
     return sent
+
+
+# --- Preisfehler-Waechter --------------------------------------------------
+#
+# Ein eigener Zustellweg neben den Regeln, und das mit Absicht: ein
+# Preisfehler ist nach zwanzig Minuten korrigiert. Er darf nicht davon
+# abhaengen, ob jemand vorher eine passende Regel gebaut hat, und er darf
+# nicht in der Ruhezeit liegen bleiben. Wer um drei Uhr nachts nicht geweckt
+# werden will, schaltet den Waechter ab - aber gedrosselt ist er nicht
+# nuetzlich, sondern nur noch unzuverlaessig.
+
+# Wie lange derselbe Deal nicht erneut gemeldet wird. Ohne diese Sperre
+# meldet sich SparBit bei jedem Quellenlauf aufs Neue, solange der falsche
+# Preis online steht.
+FEHLER_SPERRE_STUNDEN = 12
+
+
+def waechter_aktiv(db: Session) -> bool:
+    return bool(get_setting(db, "preisfehler_waechter", True))
+
+
+async def dispatch_preisfehler(db: Session, deals: list[Deal], http) -> int:
+    """Preisfehler ueber alle aktiven Kanaele melden - sofort, ohne Regel."""
+    if not deals or not waechter_aktiv(db):
+        return 0
+
+    kanaele = [c for c in db.scalars(select(Channel)) if c.enabled]
+    if not kanaele:
+        log.warning("Preisfehler gefunden, aber kein Kanal eingerichtet: %s",
+                    ", ".join(d.titel[:40] for d in deals[:3]))
+        return 0
+
+    sperre = utcnow() - timedelta(hours=FEHLER_SPERRE_STUNDEN)
+    gesendet = 0
+
+    for deal in deals:
+        if deal.fehler_gemeldet_am and deal.fehler_gemeldet_am > sperre:
+            continue
+
+        gruende = deal.fehler_gruende or []
+        note = _note(
+            deal, regel="Preisfehler-Wächter", prioritaet="SOFORT",
+            titel=deal.titel,
+            beschreibung=" ".join(gruende) or "Auffällig niedriger Preis.")
+
+        for kanal in kanaele:
+            impl = get_channel(kanal.type)
+            if impl is None:
+                continue
+            try:
+                await impl.send(kanal.config or {}, note, http)
+                kanal.last_used = utcnow()
+                gesendet += 1
+                db.add(NotificationLog(
+                    channel_id=kanal.id, channel_type=kanal.type,
+                    rule_name="Preisfehler", deal_id=deal.id,
+                    deal_titel=deal.titel[:500], ok=True))
+            except Exception as exc:
+                kanal.error_count += 1
+                log.error("Preisfehler-Meldung über %s fehlgeschlagen: %s",
+                          kanal.type, exc)
+                db.add(NotificationLog(
+                    channel_id=kanal.id, channel_type=kanal.type,
+                    rule_name="Preisfehler", deal_id=deal.id,
+                    deal_titel=deal.titel[:500], ok=False,
+                    error=f"{type(exc).__name__}: {exc}"[:500]))
+
+        deal.fehler_gemeldet_am = utcnow()
+        broker.publish("preisfehler", {**_deal_payload(deal),
+                                       "gruende": gruende})
+
+    db.commit()
+    return gesendet

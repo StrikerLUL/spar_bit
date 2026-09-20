@@ -50,6 +50,13 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("deals", "urteil_text", "TEXT"),
     ("deals", "urteil_am", "DATETIME"),
     ("rules", "min_urteil", "VARCHAR(24)"),
+    ("deals", "fehler_score", "INTEGER DEFAULT 0"),
+    ("deals", "fehler_stufe", "VARCHAR(16)"),
+    ("deals", "fehler_gruende", "JSON"),
+    ("deals", "fehler_erwartet_eur", "FLOAT"),
+    ("deals", "fehler_am", "DATETIME"),
+    ("deals", "fehler_gemeldet_am", "DATETIME"),
+    ("rules", "min_fehler_score", "INTEGER"),
 ]
 
 

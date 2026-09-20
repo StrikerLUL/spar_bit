@@ -1,5 +1,5 @@
 import {
-  Bookmark, Boxes, Download, Search, SlidersHorizontal, Sparkles, Star, Trash2, X,
+  Bookmark, Boxes, Download, Search, SlidersHorizontal, Star, Target, Trash2, X,
 } from "lucide-react";
 import * as React from "react";
 import { api, type Deal, type SavedSearch, type Source } from "@/lib/api";
@@ -304,7 +304,7 @@ export function Feed() {
           {sortierung === "fuer_mich" && data?.hinweis && (
             <Card className="mb-4 border-warning/30 bg-warning/5 p-3">
               <p className="text-xs leading-relaxed text-muted-foreground">
-                <Sparkles className="mr-1 inline h-3.5 w-3.5 text-warning" />
+                <Target className="mr-1 inline h-3.5 w-3.5 text-primary" />
                 {data.hinweis}
               </p>
             </Card>

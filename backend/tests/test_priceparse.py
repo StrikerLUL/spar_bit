@@ -75,3 +75,45 @@ def test_original_aus_rabatt_hergeleitet():
     p = parse_price_text("Jetzt 10,00 € (-50%)")
     assert p.preis == 10.0
     assert p.originalpreis == 20.0
+
+
+# --- Richtungs-Regression --------------------------------------------------
+# Diese Faelle lieferten frueher den durchgestrichenen UVP als aktuellen
+# Preis. Sie stehen hier einzeln, damit ein Rueckfall sofort auffaellt.
+
+@pytest.mark.parametrize("text,preis,orig", [
+    # "statt" steht VOR beiden Preisen - der erste danach ist der alte.
+    ("statt 59,99 nur 9,99", 9.99, 59.99),
+    ("Sony WH-1000XM5 statt 379 € jetzt 229 €", 229.0, 379.0),
+    ("LEGO 42115 statt 349,99 € nur 249 €", 249.0, 349.99),
+    # Nur einer der beiden Betraege traegt ein Waehrungszeichen.
+    ("Nur 9,99 statt 19,99 €", 9.99, 19.99),
+    ("iPhone 15 für 699 statt 949 Euro", 699.0, 949.0),
+    # Reihenfolge andersherum - muss weiterhin stimmen.
+    ("PS5 Slim 349€ statt 549,99€", 349.0, 549.99),
+    ("Angebot: 49,99 € (UVP 129,99 €)", 49.99, 129.99),
+])
+def test_richtung_preis_und_uvp(text, preis, orig):
+    p = parse_price_text(text)
+    assert p.preis == preis, f"aktueller Preis falsch in: {text}"
+    assert p.originalpreis == orig, f"Originalpreis falsch in: {text}"
+
+
+@pytest.mark.parametrize("text,preis", [
+    # "3 für 2" darf nicht als Preis von 2 € durchgehen.
+    ("3 für 2 Aktion: 14,99 €", 14.99),
+    # Technische Daten sind keine Preise.
+    ("Samsung 65 Zoll TV, 4K, 120 Hz - 799 €", 799.0),
+    ("16 GB RAM Notebook ab 499 €", 499.0),
+    ("Akku 5000 mAh, Laden mit 65 W - 249,00 €", 249.0),
+])
+def test_keine_zahl_aus_dem_fliesstext(text, preis):
+    assert parse_price_text(text).preis == preis
+
+
+def test_unsinniger_streichpreis_wird_verworfen():
+    """Ein 'Originalpreis' unter dem Preis ist ein Parse-Unfall.
+    Lieber keinen Streichpreis zeigen als einen falschen."""
+    p = parse_price_text("Sonderposten 89,90 € statt 49,90 €")
+    assert p.preis is not None
+    assert p.originalpreis is None or p.originalpreis > p.preis

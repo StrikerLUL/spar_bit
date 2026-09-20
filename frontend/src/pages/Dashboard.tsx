@@ -1,5 +1,5 @@
 import {
-  Activity, Euro, Gift, Radio, Target, TrendingUp, Zap,
+  Activity, AlertTriangle, Euro, Gift, Target, TrendingUp, Zap,
 } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
@@ -29,11 +29,24 @@ export function Dashboard({ live }: { live: LiveItem[] }) {
   return (
     <>
       <PageHeader
-        title="Dashboard"
+        title="Übersicht"
         description="Was gerade reinkommt — und ob deine Quellen gesund sind."
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Preisfehler steht an erster Stelle: es ist die einzige Zahl hier,
+            auf die man sofort reagieren würde. */}
+        <Tile
+          icon={<AlertTriangle className="h-4 w-4" />}
+          label="Preisfehler"
+          value={loading ? null : formatNumber(stats?.preisfehler_offen ?? 0)}
+          hint={
+            <Link to="/preisfehler" className="hover:text-foreground hover:underline">
+              belegte Fälle, 3 Tage
+            </Link>
+          }
+          signal={(stats?.preisfehler_offen ?? 0) > 0}
+        />
         <Tile
           icon={<Target className="h-4 w-4" />}
           label="Treffer heute"
@@ -42,46 +55,33 @@ export function Dashboard({ live }: { live: LiveItem[] }) {
         />
         <Tile
           icon={<Gift className="h-4 w-4" />}
-          label="Gratis diese Woche"
+          label="Gratis / Woche"
           value={loading ? null : formatNumber(stats?.gratis_diese_woche)}
           hint="0-€-Funde"
-          accent
         />
         <Tile
           icon={<Euro className="h-4 w-4" />}
           label="Gespart (7 Tage)"
           value={loading ? null : formatAmount(stats?.gesparter_betrag ?? 0)}
-          hint="Summe über Regeltreffer"
-        />
-        <Tile
-          icon={<Radio className="h-4 w-4" />}
-          label="Quellen"
-          value={
-            loading ? null : (
-              <span className="flex items-center gap-2">
-                {stats?.quellen_ampel.gruen ?? 0}
-                <span className="text-sm font-normal text-muted-foreground">
-                  / {(stats?.quellen_ampel.gruen ?? 0) +
-                     (stats?.quellen_ampel.gelb ?? 0) +
-                     (stats?.quellen_ampel.rot ?? 0)}
-                </span>
-              </span>
-            )
-          }
-          hint={
-            stats ? (
-              <span className="flex items-center gap-2.5">
-                <Ampel status="ok" count={stats.quellen_ampel.gruen} />
-                <Ampel status="warn" count={stats.quellen_ampel.gelb} />
-                <Ampel status="error" count={stats.quellen_ampel.rot} />
-                <Ampel status="off" count={stats.quellen_ampel.aus} />
-              </span>
-            ) : undefined
-          }
+          hint="über Regeltreffer, in EUR"
         />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3 lg:gap-6">
+      {stats && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-border bg-card px-3.5 py-2 text-xs">
+          <span className="label">Quellen</span>
+          <Ampel status="ok" count={stats.quellen_ampel.gruen} titel="laufen" />
+          <Ampel status="warn" count={stats.quellen_ampel.gelb} titel="mit Fehlern" />
+          <Ampel status="error" count={stats.quellen_ampel.rot} titel="gesperrt" />
+          <Ampel status="off" count={stats.quellen_ampel.aus} titel="aus" />
+          <Link to="/quellen"
+                className="ml-auto text-muted-foreground hover:text-foreground hover:underline">
+            verwalten
+          </Link>
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
         {/* Live-Ticker */}
         <Card className="lg:col-span-2">
           <CardHeader className="flex-row items-center justify-between space-y-0">
@@ -128,7 +128,7 @@ export function Dashboard({ live }: { live: LiveItem[] }) {
                     )}
                     <span className="tabular shrink-0 text-xs font-medium">
                       {item.ist_gratis ? (
-                        <span className="text-primary">gratis</span>
+                        <span className="text-success">gratis</span>
                       ) : (
                         formatPrice(item.preis ?? null, item.waehrung ?? "EUR")
                       )}
@@ -227,16 +227,25 @@ export function Dashboard({ live }: { live: LiveItem[] }) {
   );
 }
 
+const AMPEL_TEXT: Record<string, string> = {
+  ok: "laufen", warn: "mit Fehlern", error: "gesperrt", off: "aus",
+};
+
 const Ampel = ({
   status,
   count,
+  titel,
 }: {
   status: "ok" | "warn" | "error" | "off";
   count: number;
+  titel?: string;
 }) => (
-  <span className="inline-flex items-center gap-1">
+  // Zahl UND Wort, nicht nur ein farbiger Punkt: "3 gesperrt" versteht man
+  // auch ohne zu wissen, dass Rot hier Circuit Breaker bedeutet.
+  <span className="inline-flex items-center gap-1.5">
     <StatusDot status={status} />
-    <span className="tabular">{count}</span>
+    <span className="tabular font-medium">{count}</span>
+    <span className="text-muted-foreground">{titel ?? AMPEL_TEXT[status]}</span>
   </span>
 );
 
@@ -245,28 +254,32 @@ function Tile({
   label,
   value,
   hint,
-  accent,
+  signal,
 }: {
   icon: React.ReactNode;
   label: string;
   value: React.ReactNode | null;
   hint?: React.ReactNode;
-  accent?: boolean;
+  /** Hebt die Kachel hervor - nur für die Preisfehler-Zahl, und auch da
+   *  nur, wenn sie über null liegt. Eine dauerhaft rote Kachel liest
+   *  nach einer Woche niemand mehr. */
+  signal?: boolean;
 }) {
   return (
-    <Card hover className="overflow-hidden">
-      <div className="p-4 sm:p-5">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <span className={cn(accent && "text-primary")}>{icon}</span>
-          <span className="truncate text-xs font-medium uppercase tracking-wide">
-            {label}
+    <Card className={cn("overflow-hidden", signal && "border-signal/45")}>
+      <div className="p-3.5">
+        <div className="flex items-center gap-1.5">
+          <span className={signal ? "text-signal" : "text-muted-foreground"}>
+            {icon}
           </span>
+          <span className="label truncate">{label}</span>
         </div>
-        <div className="mt-2.5 text-2xl font-semibold tabular sm:text-3xl">
-          {value === null ? <Skeleton className="h-8 w-20" /> : value}
+        <div className={cn("tabular mt-2 text-[26px] font-semibold leading-none tracking-tight",
+                           signal && "text-signal")}>
+          {value === null ? <Skeleton className="h-7 w-20" /> : value}
         </div>
         {hint && (
-          <div className="mt-1.5 text-xs text-muted-foreground">{hint}</div>
+          <div className="mt-2 text-[11px] leading-snug text-muted-foreground">{hint}</div>
         )}
       </div>
     </Card>

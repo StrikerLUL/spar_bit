@@ -23,7 +23,8 @@ from .images import hole_fuer_deals
 from .verdict import aktualisiere as urteile_aktualisieren
 from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
 from .pipeline import (check_price_alarms, dispatch, dispatch_alarms,
-                       ingest, match_rules, send_digest)
+                       dispatch_preisfehler, ingest, match_rules, send_digest)
+from . import pricefehler
 from .sources import all_sources, get_source
 from .sources.base import FetchContext
 
@@ -156,6 +157,19 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
                         urteile_aktualisieren(db, fresh)
                     except Exception as exc:
                         log.debug("Urteile fehlgeschlagen: %s", exc)
+
+                # Preisfehler vor den Regeln pruefen und sofort melden.
+                # Die Reihenfolge ist wichtig: der Waechter braucht das
+                # Urteil (eine fragwuerdige UVP darf keinen Fehler belegen),
+                # und die Regeln brauchen den Fehler-Score, damit eine Regel
+                # "nur Preisfehler" ueberhaupt greifen kann.
+                if fresh:
+                    try:
+                        heiss = pricefehler.aktualisiere(db, fresh)
+                        if heiss:
+                            await dispatch_preisfehler(db, heiss, get_http())
+                    except Exception as exc:
+                        log.error("Preisfehler-Pruefung fehlgeschlagen: %s", exc)
 
                 # Preisalarme greifen auch, wenn der Deal nicht neu ist -
                 # gerade dann ist er ja im Preis gefallen.
@@ -317,6 +331,30 @@ async def watch_job() -> None:
         log.error("Wunschliste fehlgeschlagen: %s", exc)
 
 
+async def preisfehler_job() -> None:
+    """Bestehende Deals erneut auf Preisfehler pruefen.
+
+    Ein Preis faellt nicht nur beim ersten Sehen. Ein Artikel, der seit Tagen
+    im Feed steht und heute auf ein Zehntel rutscht, ist derselbe Fund - er
+    kaeme ohne diesen Lauf nie zur Sprache, weil er nicht mehr "neu" ist.
+    """
+    try:
+        from datetime import timedelta as _td
+        with SessionLocal() as db:
+            kandidaten = list(db.scalars(
+                select(Deal)
+                .where(Deal.first_seen >= utcnow() - _td(days=7),
+                       Deal.ist_gratis.is_(False),
+                       Deal.preis_eur.isnot(None))
+                .order_by(desc(Deal.last_seen)).limit(400)))
+            heiss = pricefehler.aktualisiere(db, kandidaten)
+            if heiss:
+                log.warning("Preisfehler-Nachlauf: %d neue Funde", len(heiss))
+                await dispatch_preisfehler(db, heiss, get_http())
+    except Exception as exc:
+        log.error("Preisfehler-Nachlauf fehlgeschlagen: %s", exc)
+
+
 def urteile_job() -> None:
     """Urteile der letzten Tage nachziehen - der Verlauf waechst ja weiter."""
     try:
@@ -374,6 +412,9 @@ def start() -> None:
                       max_instances=1, coalesce=True)
     scheduler.add_job(urteile_job, IntervalTrigger(hours=3), id="urteile",
                       max_instances=1, coalesce=True)
+    # Haeufiger als die Urteile: ein Preisfehler ist nach einer Stunde weg.
+    scheduler.add_job(preisfehler_job, IntervalTrigger(minutes=20),
+                      id="preisfehler", max_instances=1, coalesce=True)
     scheduler.add_job(sync_jobs, IntervalTrigger(seconds=60), id="sync",
                       max_instances=1, coalesce=True)
     try:

@@ -14,6 +14,7 @@ import { Claimer } from "@/pages/Claimer";
 import { Dashboard, type LiveItem } from "@/pages/Dashboard";
 import { Feed } from "@/pages/Feed";
 import { Notifications } from "@/pages/Notifications";
+import { Preisfehler } from "@/pages/Preisfehler";
 import { Rules } from "@/pages/Rules";
 import { Sources } from "@/pages/Sources";
 import { Statistics } from "@/pages/Statistics";
@@ -66,6 +67,20 @@ export default function App() {
           [{ ...item, regel: "Wunschliste", _at: Date.now() }, ...current]
             .slice(0, MAX_LIVE));
         showDesktop(`Wunschliste: ${item.titel}`, item.grund ?? "", item.url);
+      },
+      // Preisfehler bekommen eine eigene Desktop-Meldung: sie sind der
+      // einzige Ereignistyp, bei dem Sekunden zaehlen.
+      preisfehler: (data: unknown) => {
+        const item = data as LiveItem & { gruende?: string[] };
+        setLive((current) =>
+          [{ ...item, regel: "Preisfehler", _at: Date.now() }, ...current]
+            .slice(0, MAX_LIVE));
+        showDesktop(
+          `Preisfehler: ${item.titel}`,
+          `${formatPrice(item.preis ?? null, item.waehrung ?? "EUR")} — ${
+            item.gruende?.[0] ?? "auffällig niedriger Preis"}`,
+          item.url,
+        );
       },
       alarm: (data: unknown) => {
         const item = data as LiveItem;
@@ -152,6 +167,7 @@ function Shell({
         <Routes>
           <Route path="/" element={<Dashboard live={live} />} />
           <Route path="/feed" element={<Feed />} />
+          <Route path="/preisfehler" element={<Preisfehler />} />
           <Route path="/wunschliste" element={<Watchlist />} />
           <Route path="/statistiken" element={<Statistics />} />
           <Route path="/quellen" element={<Sources />} />

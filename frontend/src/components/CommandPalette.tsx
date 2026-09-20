@@ -98,11 +98,11 @@ export function CommandPalette({
 
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center pt-[12vh]">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in"
+      <div className="absolute inset-0 bg-black/65 animate-fade-in"
            onClick={onClose} aria-hidden />
       <div role="dialog" aria-modal="true" aria-label="Schnellzugriff"
            onKeyDown={onKey}
-           className="relative z-10 w-full max-w-lg overflow-hidden rounded-lg border border-border bg-card shadow-2xl animate-slide-up">
+           className="relative z-10 w-full max-w-lg overflow-hidden rounded-md border border-border bg-popover shadow-xl shadow-black/40 animate-slide-up">
         <div className="flex items-center gap-3 border-b border-border px-4">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
           <input

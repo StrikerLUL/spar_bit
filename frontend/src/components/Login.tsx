@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react";
+import { Tag } from "lucide-react";
 import * as React from "react";
 import { ApiError, api } from "@/lib/api";
 import { Button, Card, Input, Label } from "@/components/ui";
@@ -57,7 +57,7 @@ export function Login({
         <form onSubmit={submit} className="space-y-5 p-6 sm:p-8">
           <div className="space-y-2 text-center">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary/15">
-              <Sparkles className="h-6 w-6 text-primary" />
+              <Tag className="h-6 w-6 -rotate-90 text-primary" strokeWidth={2} />
             </div>
             <h1 className="text-xl font-semibold tracking-tight">
               {setupMode ? "SparBit einrichten" : "Willkommen zurück"}

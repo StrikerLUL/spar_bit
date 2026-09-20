@@ -40,7 +40,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             onClick={() => dismiss(toast.id)}
             className={cn(
               "pointer-events-auto w-full max-w-sm cursor-pointer rounded-lg border p-3.5",
-              "shadow-xl backdrop-blur-xl animate-slide-up",
+              "shadow-lg shadow-black/30 animate-slide-up",
               toast.kind === "success" && "border-success/30 bg-success/10",
               toast.kind === "error" && "border-destructive/30 bg-destructive/10",
               toast.kind === "info" && "border-border bg-card/95",

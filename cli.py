@@ -8,6 +8,8 @@
     python cli.py quellen an mydealz
     python cli.py regeln hinzufuegen "Alles Gratis" --gratis --sofort --kanal 1
     python cli.py wunschliste hinzufuegen https://shop.de/artikel --ziel 199
+    python cli.py preisfehler liste
+    python cli.py preisfehler waechter --an --schwelle 65
 
 Arbeitet direkt auf der Datenbank in ./data - laeuft also auch, wenn der
 Server gerade aus ist. Wer die Datei lesen kann, hat ohnehin alles; ein
@@ -53,6 +55,25 @@ def _in_die_venv() -> None:
         pass                                    # dann eben mit dem aktuellen
 
 
+def _utf8_ausgabe() -> None:
+    """Die Konsole auf UTF-8 stellen.
+
+    Die Windows-Konsole benutzt per Voreinstellung cp1252. Ein Pfeil oder ein
+    Umlaut in der Ausgabe beendet die CLI dann mit einem UnicodeEncodeError -
+    das Programm bricht also an seiner eigenen Tabellenzeichnung ab. Umlaute
+    kommen in dieser CLI in jeder zweiten Ausgabe vor, insofern ist das kein
+    Randfall.
+    """
+    for strom in (sys.stdout, sys.stderr):
+        umstellen = getattr(strom, "reconfigure", None)
+        if umstellen is not None:
+            try:
+                umstellen(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
+_utf8_ausgabe()
 _in_die_venv()
 sys.path.insert(0, str(ROOT / "backend"))
 os.environ.setdefault("SPARBIT_DATA_DIR", str(ROOT / "data"))
@@ -165,12 +186,118 @@ def befehl_status(args) -> int:
                                              .where(Match.created_at >= heute)) or 0)],
             ["Quellen aktiv", f"{len(aktiv)} von {len(quellen)}"
                               + (rot(f"  ({len(gesperrt)} gesperrt)") if gesperrt else "")],
+            ["Preisfehler (3 T)", _preisfehler_zaehler(db)],
             ["Regeln aktiv", str(db.scalar(select(func.count()).select_from(Rule)
                                            .where(Rule.enabled.is_(True))) or 0)],
             ["Kanäle", str(db.scalar(select(func.count()).select_from(Channel)) or 0)],
             ["Wunschliste", str(db.scalar(select(func.count()).select_from(WatchItem)) or 0)],
         ])
         print()
+    return 0
+
+
+def _preisfehler_zaehler(db) -> str:
+    """Belegte Preisfehler der letzten drei Tage, rot wenn es welche gibt."""
+    from datetime import timedelta
+    from sqlalchemy import func, select
+    from app.models import Deal, utcnow
+    from app.pricefehler import HEISS
+
+    anzahl = db.scalar(
+        select(func.count()).select_from(Deal)
+        .where(Deal.fehler_stufe == HEISS,
+               Deal.first_seen >= utcnow() - timedelta(days=3))) or 0
+    return rot(str(anzahl)) if anzahl else "0"
+
+
+# --- preisfehler -----------------------------------------------------------
+
+def befehl_preisfehler(args) -> int:
+    """Die Funde auflisten, mit Begruendung."""
+    from datetime import timedelta
+    from sqlalchemy import desc, select
+    from app.db import SessionLocal
+    from app.models import Deal, utcnow
+    from app.money import betrag
+    from app.pricefehler import HEISS, VERDACHT
+
+    stufen = [HEISS] if args.nur_belegt else [HEISS, VERDACHT]
+    with SessionLocal() as db:
+        funde = list(db.scalars(
+            select(Deal)
+            .where(Deal.fehler_stufe.in_(stufen),
+                   Deal.last_seen >= utcnow() - timedelta(days=args.tage))
+            .order_by(desc(Deal.fehler_score)).limit(args.anzahl)))
+
+        if not funde:
+            print(grau(f"\n  Keine Preisfehler in den letzten {args.tage} Tagen.\n"))
+            return 0
+
+        print(fett(f"\n  {len(funde)} Preisfehler\n"))
+        for d in funde:
+            marke = rot("BELEGT ") if d.fehler_stufe == HEISS else gelb("Verdacht")
+            preis = betrag(d.preis, d.waehrung)
+            erwartet = (f"  statt ~{betrag(d.fehler_erwartet_eur)}"
+                        if d.fehler_erwartet_eur else "")
+            print(f"  {marke} {str(d.fehler_score).rjust(3)}/100  "
+                  f"{fett(preis)}{erwartet}")
+            print(f"           {d.titel[:88]}")
+            for grund in (d.fehler_gruende or [])[:3]:
+                print(grau(f"           - {grund}"))
+            print(grau(f"           {d.url}"))
+            print()
+    return 0
+
+
+def befehl_preisfehler_pruefen(args) -> int:
+    """Alle jungen Deals neu bewerten - nach einem Kurs- oder Schwellenwechsel."""
+    from datetime import timedelta
+    from sqlalchemy import desc, select
+    from app.db import SessionLocal
+    from app.models import Deal, utcnow
+    from app import pricefehler
+
+    with SessionLocal() as db:
+        kandidaten = list(db.scalars(
+            select(Deal)
+            .where(Deal.first_seen >= utcnow() - timedelta(days=args.tage),
+                   Deal.ist_gratis.is_(False), Deal.preis_eur.isnot(None))
+            .order_by(desc(Deal.last_seen)).limit(2000)))
+        print(f"  {len(kandidaten)} Deals werden geprüft ...")
+        neu = pricefehler.aktualisiere(db, kandidaten)
+        heiss = [d for d in kandidaten if d.fehler_stufe == pricefehler.HEISS]
+        verdacht = [d for d in kandidaten if d.fehler_stufe == pricefehler.VERDACHT]
+    print(gruen(f"  {len(heiss)} belegt, {len(verdacht)} Verdacht, "
+                f"{len(neu)} davon neu"))
+    print(grau("  Ansehen mit:  sparbit preisfehler liste\n"))
+    return 0
+
+
+def befehl_preisfehler_waechter(args) -> int:
+    """Den Waechter ein- oder ausschalten und die Schwelle setzen."""
+    from app.db import SessionLocal, get_setting, set_setting
+    from app.pricefehler import SCHWELLE_HEISS
+
+    with SessionLocal() as db:
+        if args.an:
+            set_setting(db, "preisfehler_waechter", True)
+        elif args.aus:
+            set_setting(db, "preisfehler_waechter", False)
+        if args.schwelle is not None:
+            set_setting(db, "preisfehler_schwelle",
+                        max(30, min(100, args.schwelle)))
+        db.commit()
+
+        aktiv = bool(get_setting(db, "preisfehler_waechter", True))
+        schwelle = int(get_setting(db, "preisfehler_schwelle", SCHWELLE_HEISS))
+
+    print()
+    print(f"  Wächter:  {gruen('an') if aktiv else grau('aus')}")
+    print(f"  Schwelle: {schwelle} von 100 Punkten")
+    if aktiv:
+        print(grau("  Meldet an Regeln und Ruhezeiten vorbei über alle "
+                   "aktiven Kanäle."))
+    print()
     return 0
 
 
@@ -502,6 +629,8 @@ def befehl_regeln_liste(args) -> int:
                 bedingungen.append(f"≥{regel.min_rabatt_prozent:g}%")
             if regel.min_urteil:
                 bedingungen.append(f"Urteil≥{regel.min_urteil}")
+            if regel.min_fehler_score:
+                bedingungen.append(f"Preisfehler≥{regel.min_fehler_score}")
             if regel.sources:
                 bedingungen.append("Quelle " + kuerze(regel.sources, "/"))
             if regel.haendler:
@@ -534,13 +663,15 @@ def befehl_regel_hinzufuegen(args) -> int:
         min_rabatt_prozent=args.min_rabatt,
         nur_gratis=args.gratis,
         min_urteil=args.urteil,
+        min_fehler_score=args.preisfehler,
         sources=args.quelle or [],
         kategorien=[], haendler=args.haendler or [],
         channels=args.kanal or [],
     )
     if not any([regel.keywords, regel.required_keywords, regel.nur_gratis,
                 regel.max_preis is not None, regel.min_rabatt_prozent is not None,
-                regel.min_urteil, regel.sources, regel.haendler]):
+                regel.min_urteil, regel.min_fehler_score, regel.sources,
+                regel.haendler]):
         return fehler("Die Regel hat keine Bedingung — sie würde nichts treffen. "
                       "Mindestens eine Option angeben (--gratis, --keyword, …).")
     doppelt = ({w.lower() for w in regel.keywords + regel.required_keywords}
@@ -869,6 +1000,8 @@ def baue_parser() -> argparse.ArgumentParser:
     rh.add_argument("--gratis", action="store_true", help="nur 0-€-Funde")
     rh.add_argument("--max-preis", type=float, dest="max_preis")
     rh.add_argument("--min-rabatt", type=float, dest="min_rabatt")
+    rh.add_argument("--preisfehler", type=int, metavar="PUNKTE",
+                    help="nur Deals ab so vielen Preisfehler-Punkten (z. B. 70)")
     rh.add_argument("--urteil", choices=["bestpreis", "sehr_gut", "gut", "normal"],
                     help="Mindest-Preisurteil")
     rh.add_argument("--quelle", action="append", help="nur diese Quellen")
@@ -915,6 +1048,27 @@ def baue_parser() -> argparse.ArgumentParser:
     wp.set_defaults(fn=befehl_watch_pruefen)
 
     # deals
+    # --- preisfehler ---
+    f = bereiche.add_parser("preisfehler", help="Preisfehler-Funde und Wächter")
+    fb = f.add_subparsers(dest="unterbefehl", required=True)
+    fl = fb.add_parser("liste", help="gefundene Preisfehler")
+    fl.add_argument("--tage", type=int, default=7)
+    fl.add_argument("--anzahl", type=int, default=20)
+    fl.add_argument("--nur-belegt", action="store_true", dest="nur_belegt",
+                    help="Verdachtsfälle ausblenden")
+    fl.set_defaults(fn=befehl_preisfehler)
+
+    fp = fb.add_parser("pruefen", help="alle jungen Deals neu bewerten")
+    fp.add_argument("--tage", type=int, default=7)
+    fp.set_defaults(fn=befehl_preisfehler_pruefen)
+
+    fw = fb.add_parser("waechter", help="Sofortmeldung ein-/ausschalten")
+    fw.add_argument("--an", action="store_true")
+    fw.add_argument("--aus", action="store_true")
+    fw.add_argument("--schwelle", type=int,
+                    help="ab wie vielen Punkten gemeldet wird (30-100)")
+    fw.set_defaults(fn=befehl_preisfehler_waechter)
+
     d = bereiche.add_parser("deals", help="gesammelte Deals ansehen")
     d.add_argument("suche", nargs="?", help='z. B. lego oder "nintendo switch"')
     d.add_argument("--gratis", action="store_true")

@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+#
+# SparBit auf dem Server bedienen - ein Befehl statt einer docker-compose-Zeile.
+#
+#   ./sparbit status | start | stop | neustart | logs | update | sichern
+#            | wiederherstellen <datei> | shell | cli <argumente...>
+#
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")"
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; C=$'\033[36m'; N=$'\033[0m'
+else
+  B=""; G=""; Y=""; C=""; N=""
+fi
+
+# Das https-Profil nur mitgeben, wenn eine Domain konfiguriert ist - sonst
+# startet "up" einen Caddy ohne Domain, der sofort wieder ausfaellt.
+profil() {
+  if grep -qE '^SPARBIT_DOMAIN=.+' .env 2>/dev/null; then
+    printf '%s' "--profile https"
+  fi
+}
+
+dc() { docker compose $(profil) "$@"; }
+
+port() {
+  grep -E '^SPARBIT_WEB_PORT=' .env 2>/dev/null | head -1 | cut -d= -f2- \
+    || printf '8080'
+}
+
+befehl="${1:-status}"
+shift || true
+
+case "$befehl" in
+
+  start|hoch)
+    dc up -d
+    printf '%s✓%s SparBit gestartet — http://localhost:%s\n' "$G" "$N" "$(port)"
+    ;;
+
+  stop|runter)
+    dc down
+    printf '%s✓%s SparBit angehalten. Die Daten bleiben im Volume.\n' "$G" "$N"
+    ;;
+
+  neustart|restart)
+    dc restart "$@"
+    printf '%s✓%s Neu gestartet\n' "$G" "$N"
+    ;;
+
+  status)
+    printf '\n%sContainer%s\n' "$B" "$N"
+    dc ps
+    printf '\n%sSparBit%s\n' "$B" "$N"
+    if curl -fsS "http://127.0.0.1:$(port)/api/health" >/dev/null 2>&1; then
+      printf '  %s●%s erreichbar auf Port %s\n' "$G" "$N" "$(port)"
+    else
+      printf '  %s●%s antwortet nicht — %s./sparbit logs%s\n' "$Y" "$N" "$C" "$N"
+    fi
+    # Die inhaltliche Lage kommt aus der CLI im Container, damit hier keine
+    # zweite Auswertung derselben Datenbank entsteht.
+    dc exec -T backend python cli.py status 2>/dev/null || true
+    printf '\n'
+    ;;
+
+  logs)
+    # Ohne Argument alle Dienste, sonst gezielt einen ("./sparbit logs backend").
+    dc logs -f --tail=100 "$@"
+    ;;
+
+  update)
+    printf '%s▸%s Änderungen holen\n' "$C" "$N"
+    git pull --ff-only
+    printf '%s▸%s Neu bauen und starten\n' "$C" "$N"
+    dc up -d --build
+    # Alte Images wegräumen: auf einem kleinen VPS läuft sonst nach ein paar
+    # Updates die Platte voll, und zwar an der unauffälligsten Stelle.
+    docker image prune -f >/dev/null 2>&1 || true
+    printf '%s✓%s Aktualisiert\n' "$G" "$N"
+    ;;
+
+  sichern|backup)
+    ziel="${1:-sparbit-$(date +%Y%m%d-%H%M).db}"
+    # Über die SQLite-eigene Backup-API statt cp: eine laufende Datenbank
+    # hat Änderungen im WAL, die eine Dateikopie nicht mitnimmt.
+    dc exec -T backend python -c "
+import sqlite3, sys
+quelle = sqlite3.connect('/data/sparbit.db')
+ziel = sqlite3.connect('/tmp/backup.db')
+quelle.backup(ziel)
+ziel.close(); quelle.close()
+sys.stderr.write('ok\n')
+"
+    docker compose cp backend:/tmp/backup.db "$ziel"
+    dc exec -T backend rm -f /tmp/backup.db
+    printf '%s✓%s Gesichert: %s (%s)\n' "$G" "$N" "$ziel" \
+           "$(du -h "$ziel" | cut -f1)"
+    ;;
+
+  wiederherstellen|restore)
+    datei="${1:?Bitte die Sicherungsdatei angeben}"
+    [ -f "$datei" ] || { printf 'Datei nicht gefunden: %s\n' "$datei" >&2; exit 1; }
+    printf '%s!%s Das überschreibt die aktuelle Datenbank.\n' "$Y" "$N"
+    read -rp "  Wirklich? [j/N] " a
+    case "$a" in [jJyY]*) ;; *) printf 'Abgebrochen.\n'; exit 0 ;; esac
+    dc stop backend
+    docker compose cp "$datei" backend:/data/sparbit.db
+    # WAL und Shared-Memory der alten Datenbank müssen weg, sonst liest
+    # SQLite sie über die frisch eingespielte Datei drüber.
+    dc run --rm -T backend sh -c 'rm -f /data/sparbit.db-wal /data/sparbit.db-shm'
+    dc start backend
+    printf '%s✓%s Wiederhergestellt\n' "$G" "$N"
+    ;;
+
+  cli)
+    dc exec -T backend python cli.py "$@"
+    ;;
+
+  shell)
+    dc exec backend sh
+    ;;
+
+  *)
+    cat <<HILFE
+
+${B}SparBit bedienen${N}
+
+  ./sparbit status              Was läuft, und geht es ihm gut
+  ./sparbit start | stop        Hoch- und runterfahren
+  ./sparbit neustart [dienst]   Neu starten
+  ./sparbit logs [dienst]       Logs mitlesen (Strg+C beendet)
+  ./sparbit update              Änderungen holen, neu bauen, aufräumen
+  ./sparbit sichern [datei]     Datenbank sichern
+  ./sparbit wiederherstellen <datei>
+  ./sparbit cli <argumente>     Die SparBit-CLI im Container
+  ./sparbit shell               Shell im Backend-Container
+
+${B}Beispiele${N}
+  ./sparbit cli quellen an mydealz
+  ./sparbit cli kanaele testen 1
+  ./sparbit logs backend
+
+HILFE
+    ;;
+esac

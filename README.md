@@ -1,15 +1,29 @@
 # SparBit
 
-Deal- und Freebie-Zentrale für zu Hause: sammelt Gratis-Sachen, Preisfehler und
-starke Rabatte aus vielen Quellen, **beurteilt sie am eigenen Preisverlauf**,
-filtert nach deinen Regeln und meldet Treffer sofort — per Telegram, Discord,
-Slack, Matrix, Gotify, Pushover, ntfy, E-Mail, Webhook oder als
-Desktop-Meldung. Alles einstellbar **im Browser und auf der Kommandozeile**.
+**Findet Preisfehler, bevor sie korrigiert sind.**
 
-**Läuft auf deinem eigenen Rechner.** Kein Server, kein Docker, keine
-Konfigurationsdateien. Ein Befehl genügt.
+Ein Preisfehler ist kein Rabatt. Es ist ein Versehen des Händlers — eine
+verrutschte Kommastelle, eine vergessene Null. Der Fernseher für 899 € steht
+plötzlich für 89,90 € drin, und zwanzig Minuten später nicht mehr.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-322-22c55e)
+SparBit beobachtet dafür rund um die Uhr 14 Deal-Quellen, vergleicht jeden
+Preis mit dem **eigenen beobachteten Verlauf** und mit dem, was andere Quellen
+für denselben Artikel verlangen — und weckt dich, wenn etwas nicht
+zusammenpasst. Mit Begründung, nicht mit einer Punktzahl.
+
+Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
+einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über neun
+Kanäle melden.
+
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-357-22c55e)
+
+**Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS und Zertifikat:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/StrikerLUL/spar_bit/refs/heads/claude/deal-freebie-zentrale-gpi8dr/install.sh | bash
+```
+
+**Auf dem eigenen Rechner** — kein Docker, keine Konfigurationsdatei:
 
 ```bash
 git clone https://github.com/StrikerLUL/spar_bit.git
@@ -19,11 +33,13 @@ python run.py
 
 ---
 
-**Inhalt** · [Loslegen](#loslegen) · [Die ersten 10 Minuten](#die-ersten-10-minuten)
-· [Was SparBit kann](#was-sparbit-kann)
+**Inhalt** · [Preisfehler](#preisfehler) · [Auf einem VPS](#auf-einem-vps)
+· [Auf dem eigenen Rechner](#auf-dem-eigenen-rechner)
+· [Die ersten 10 Minuten](#die-ersten-10-minuten)
+· [Was SparBit sonst kann](#was-sparbit-sonst-kann)
 · [Benachrichtigungen](#benachrichtigungen-einrichten)
 · [Kommandozeile](#kommandozeile) · [API-Keys](#api-keys-optional)
-· [Mit Docker](#mit-docker) · [Entwicklung](#entwicklung)
+· [Server betreiben](#server-betreiben) · [Entwicklung](#entwicklung)
 · [Sicherheit](#sicherheit) · [Problemlösung](#problemlösung)
 · [Bekannte Lücken](#bekannte-lücken)
 
@@ -36,7 +52,154 @@ python run.py
 
 ---
 
-## Loslegen
+## Preisfehler
+
+Der naheliegende Ansatz — „melde alles über 90 % Rabatt" — funktioniert nicht.
+Er meldet jeden Steam-Sale und jeden aufgeblasenen UVP, und nach einer Woche
+hat man den Kanal stummgeschaltet. Deshalb prüft SparBit nicht **eine**
+Schwelle, sondern sammelt **Indizien** und addiert sie zu einer Punktzahl von
+0 bis 100.
+
+| Indiz | Punkte | Warum es zählt |
+|---|--:|---|
+| Ausdrücklich als Preisfehler gemeldet | 55 | Das verlässlichste Signal überhaupt — jemand hat den Artikel gesehen |
+| „vermutlich Preisfehler" | 30 | Ein Hinweis, keine Feststellung |
+| Weit unter dem eigenen Verlauf | 25–45 | Gestuft nach Abstand zum üblichen Preis |
+| Noch nie annähernd so günstig | 15 | Unterbietet den bisherigen Tiefstpreis um die Hälfte |
+| Andere Quellen verlangen ein Vielfaches | 18–35 | Derselbe Artikel, dreifacher Preis |
+| **Verrutschte Kommastelle** | 30 | 899,00 → 89,90 ist Faktor 10 |
+| Extremrabatt auf glaubwürdigen UVP | 20 | Nur wenn die UVP nicht schon als fragwürdig erkannt ist |
+| Sehr hohe Resonanz | 10 | Stützt nur — trägt nie allein |
+
+**Ab 70 Punkten** („belegt") meldet der Wächter sofort, **ab 45** („Verdacht")
+erscheint der Fund nur im Feed und auf der Preisfehler-Seite.
+
+Das stärkste Einzelindiz ist die **verrutschte Kommastelle**, weil es eine
+Mechanik beschreibt und nicht bloß „billig" heißt: Händler setzen Rabatte auf
+krumme 71 oder 83 Prozent, nie auf exakt 90,0 Prozent. Genau dieser Faktor 10
+ist die Signatur eines Tippfehlers.
+
+### Was *nicht* gemeldet wird
+
+Das ist der wichtigere Teil. Ein Wächter, der täglich anschlägt, ist keiner.
+
+* **Gratis-Angebote** — Absicht, kein Versehen.
+* **Gutscheine, Sammeldeals, Verträge, Abos, B-Ware, Refurbished** — dort
+  gehört ein niedriger Preis zur Bauart des Angebots.
+* **Spiele-Shops** (Steam, GOG, Epic, CheapShark, ITAD, GG.deals) werden stark
+  gedämpft: 92 % auf ein altes Spiel ist dort der Normalfall. Steht aber
+  ausdrücklich „Preisfehler" dabei, sticht das die Dämpfung.
+* **Kleinbeträge** — unter 25 € Ersparnis reicht es höchstens für „Verdacht".
+  Rechnerisch auffällig, praktisch egal.
+* **Alles ohne Vergleichsgröße** — ohne eigenen Verlauf und ohne Fremdpreis
+  weiß SparBit nicht, wovon der Preis abweichen soll. Dann sagt es das,
+  statt zu raten.
+* **Fragwürdige UVP** — hat ein Artikel seine angebliche UVP nie erreicht,
+  belegt ein Rabatt darauf gar nichts.
+
+### Der Wächter
+
+Preisfehler sind kurzlebig. Deshalb hat der Wächter einen **eigenen
+Meldeweg neben den Regeln**: er braucht keine passend gebaute Regel und hält
+sich nicht an Ruhezeiten. Er geht über alle aktiven Kanäle raus, gleich beim
+Quellenlauf, und prüft zusätzlich alle 20 Minuten die Deals der letzten Woche
+noch einmal — ein Preis fällt ja nicht nur beim ersten Sehen.
+
+Damit derselbe Fund nicht bei jedem Durchlauf erneut das Handy weckt, gilt
+eine Sperre von 12 Stunden pro Deal.
+
+Einstellbar unter *Preisfehler* im Browser oder auf der Kommandozeile:
+
+```bash
+python cli.py preisfehler liste                  # Funde mit Begründung
+python cli.py preisfehler liste --nur-belegt
+python cli.py preisfehler waechter --an --schwelle 65
+python cli.py preisfehler waechter --aus         # nachts lieber Ruhe
+python cli.py preisfehler pruefen                # alles neu bewerten
+```
+
+Die Schwelle ist ein Regler, kein Schalter: **30** lässt kaum etwas durch die
+Maschen und produziert Fehlalarme, **100** meldet nur noch das Eindeutige.
+
+Für eine Regel, die Preisfehler an einen *bestimmten* Kanal schickt, gibt es
+die Bedingung ebenfalls:
+
+```bash
+python cli.py regeln hinzufuegen "Preisfehler aufs Handy" \
+  --preisfehler 70 --sofort --kanal 1
+```
+
+### Ein Fund sieht so aus
+
+```
+BELEGT  100/100  89,90 €  statt ~1.499,00 €
+        LG OLED evo C4 55 Zoll — statt 1.499,00 € nur 89,90 € (Preisfehler?)
+        - Als Preisfehler ausgewiesen.
+        - Kostet sonst um 1.474,00 € — das sind 94 % weniger als üblich.
+        - Günstigster bisher beobachteter Preis war 1.399,00 €.
+        - 94 % unter dem Listenpreis von 1.499,00 €.
+        - Sehr hohe Resonanz (1840°).
+```
+
+In der Meldung steht nie „Preisfehler (87 Punkte)", sondern **warum**. Nur so
+lässt sich in zwei Sekunden entscheiden, ob man dem Fund glaubt.
+
+> Ein Händler darf eine Bestellung zu einem fehlerhaften Preis stornieren.
+> Ein Anspruch besteht nicht — SparBit schreibt das unter jeden belegten Fund.
+
+---
+
+## Auf einem VPS
+
+Ein Befehl. Das Skript prüft die Voraussetzungen, installiert bei Bedarf
+Docker, erzeugt den Sitzungsschlüssel, fragt nach einer Domain und richtet
+bei Bedarf HTTPS ein:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/StrikerLUL/spar_bit/refs/heads/claude/deal-freebie-zentrale-gpi8dr/install.sh | bash
+```
+
+Die **einzige** Frage ist die nach der Domain:
+
+* **Mit Domain** → Caddy holt automatisch ein Let's-Encrypt-Zertifikat und
+  erneuert es. Danach `https://deine-domain`. Es gibt nichts zu konfigurieren
+  und nichts, was in 90 Tagen abläuft und vergessen wird. Voraussetzung: der
+  A-Record zeigt auf diesen Server, Port 80 und 443 sind offen.
+* **Ohne Domain** → läuft auf Port 8080. Dann bitte **nicht** offen ins
+  Internet hängen, sondern über einen SSH-Tunnel benutzen:
+  `ssh -L 8080:127.0.0.1:8080 user@server`.
+
+Danach im Browser Konto anlegen, einen Kanal einrichten, mydealz einschalten —
+fertig.
+
+### Betrieb
+
+Alles über ein Skript im Installationsverzeichnis (Vorgabe `/opt/sparbit`):
+
+```bash
+./sparbit status        # läuft alles, und geht es ihm gut
+./sparbit logs          # mitlesen (Strg+C beendet)
+./sparbit update        # holen, neu bauen, alte Images aufräumen
+./sparbit sichern       # Datenbank sichern (über die SQLite-Backup-API)
+./sparbit wiederherstellen sparbit-20260920.db
+./sparbit cli preisfehler liste
+```
+
+`sichern` kopiert nicht einfach die Datei: eine laufende SQLite-Datenbank hat
+Änderungen im WAL, die eine Dateikopie nicht mitnimmt. Für ein tägliches
+Backup reicht ein Cron-Eintrag:
+
+```cron
+0 4 * * * cd /opt/sparbit && ./sparbit sichern /var/backups/sparbit-$(date +\%F).db
+```
+
+**Systemanforderungen:** 1 GB RAM reichen (der Frontend-Build ist die
+anspruchsvollste Stelle — bei weniger vorher Swap anlegen), rund 1 GB Platte.
+Ein Einsteiger-VPS für ein paar Euro im Monat genügt.
+
+---
+
+## Auf dem eigenen Rechner
 
 Du brauchst **Python 3.11 oder neuer**. Node.js ist optional — nur nötig, wenn
 du die Oberfläche selbst neu bauen willst.
@@ -67,7 +230,21 @@ Alle Daten liegen in `./data/`. Ordner mitnehmen = Umzug erledigt.
 
 ## Die ersten 10 Minuten
 
-**1. Quellen prüfen und einschalten.** Unter *Quellen* bei jeder interessanten
+**1. Einen Kanal einrichten — zuerst.** Unter *Kanäle* → **Kanal hinzufügen**.
+Ohne Kanal meldet sich SparBit nie, auch nicht bei einem Preisfehler; es
+sammelt dann nur still vor sich hin. Neun Kanäle stehen zur Wahl, beliebig
+viele parallel:
+
+* **Desktop-Meldungen** — einschalten, einmal erlauben, fertig. Kein Bot,
+  kein Token. Funktioniert nur, solange der Browser offen ist.
+* **Telegram, Discord, Slack, Matrix, Gotify, Pushover, ntfy, E-Mail,
+  Webhook** — [siehe unten](#benachrichtigungen-einrichten). Für einen
+  Server ist Telegram oder ntfy die naheliegende Wahl.
+
+Danach **Test senden** drücken. Kommt nichts an, stimmt die Konfiguration
+nicht — das jetzt zu merken ist besser als beim ersten Preisfehler.
+
+**2. Quellen prüfen und einschalten.** Unter *Quellen* bei jeder interessanten
 Quelle **„Jetzt testen"** drücken — der Test ruft den echten Endpoint auf und
 zeigt die ersten Treffer. Grün heißt einschalten, rot nennt den Grund. Fang mit
 **mydealz**, **Reddit** und **Epic** an, die decken schon viel ab.
@@ -78,22 +255,24 @@ Alles auf einmal prüfen:
 cd backend && python -m tools.verify_endpoints
 ```
 
-**2. Benachrichtigung einrichten.** Unter *Benachrichtigungen* →
-**Kanal hinzufügen**. Neun Kanäle stehen zur Wahl, beliebig viele parallel:
+**3. Der Preisfehler-Wächter läuft schon.** Er ist ab Werk an und braucht keine
+Regel. Auf der Seite *Preisfehler* siehst du, was er gefunden hat, und stellst
+die Empfindlichkeit ein. Wer nachts nicht geweckt werden will, schaltet ihn
+dort aus — drosseln hilft nicht, es macht ihn nur unzuverlässig.
 
-* **Desktop-Meldungen** — einschalten, einmal erlauben, fertig. Kein Bot,
-  kein Token.
-* **Telegram, Discord, Slack, Matrix, Gotify, Pushover, ntfy, E-Mail,
-  Webhook** — [siehe unten](#benachrichtigungen-einrichten).
+**4. Erste Regel.** Für alles andere: unter *Regeln* eine **Vorlage** anklicken
+(„Alles Gratis", „Preisfehler", „Günstige Technik" …), anpassen, speichern.
+Rechts siehst du beim Tippen, wie viele der letzten 500 Deals die Regel
+getroffen hätte — samt Beispielen und den Deals, die *knapp* daneben lagen.
+Damit tunst du Regeln ohne Rauschen.
 
-**3. Erste Regel.** Unter *Regeln* eine **Vorlage** anklicken („Alles Gratis",
-„Preisfehler" …), anpassen, speichern. Rechts siehst du beim Tippen, wie viele
-der letzten 500 Deals die Regel getroffen hätte — samt Beispielen und den
-Deals, die *knapp* daneben lagen. Damit tunst du Regeln ohne Rauschen.
+> **Geduld beim Urteil.** Preisurteil und Preisfehler-Erkennung brauchen einen
+> eigenen Preisverlauf. In den ersten Tagen steht öfter „zu wenig Daten" da —
+> das ist Absicht. Ein erfundenes Urteil wäre schlimmer als keines.
 
 ---
 
-## Was SparBit kann
+## Was SparBit sonst kann
 
 ### Finden
 
@@ -157,8 +336,8 @@ Produktvarianten bleiben getrennt: „Hades" und „Hades II", „iPhone 15" und
 ### Filtern
 
 Regeln aus Keywords (ODER), Pflicht-Keywords (UND) und Blacklist, dazu
-Preisgrenze, Mindestrabatt, „nur 0 €", Mindest-Temperatur, Preisurteil sowie
-Quellen-, Kategorie- und Händlerfilter. Priorität **SOFORT** (Push in Sekunden)
+Preisgrenze, Mindestrabatt, „nur 0 €", Mindest-Temperatur, Preisurteil,
+**Preisfehler-Punktzahl** sowie Quellen-, Kategorie- und Händlerfilter. Priorität **SOFORT** (Push in Sekunden)
 oder **NORMAL** (Sammelmeldung).
 
 Die **Live-Vorschau** beim Bauen zeigt Trefferzahl, Beispiele, „knapp verfehlt"
@@ -181,9 +360,41 @@ eine einfache Suche nicht kann:
 | `ssd -gebraucht` | „gebraucht" ausschließen |
 | `kopfhör*` | Präfix, findet auch „Kopfhörern" |
 
-Preise werden robust aus deutschem Text gelesen — `12,99€ statt 89,90€`, `-95%`,
-`gratis`, `1.299,00 €` — und in **Euro umgerechnet**, damit „max. 20 €" auch bei
-USD- und GBP-Quellen richtig greift.
+### Preise richtig lesen
+
+Alles oben steht und fällt damit, dass der Preis stimmt. Das Schwierige daran
+ist nicht, Zahlen zu finden, sondern zu entscheiden, **welche** davon der
+aktuelle Preis ist: ein Deal-Titel nennt fast immer zwei Beträge, und wer den
+falschen nimmt, zeigt den durchgestrichenen UVP als Preis an.
+
+SparBit hängt dafür an jede gefundene Zahl ein Etikett aus dem Wort, das
+unmittelbar davor steht (`statt`, `UVP` → alt; `nur`, `jetzt`, `für` → neu) —
+aber nur, wenn zwischen Wort und Zahl keine *andere* Zahl liegt. Genau diese
+Bedingung entscheidet die kniffligen Fälle:
+
+| Titel | Preis | statt |
+|---|--:|--:|
+| `12,99€ statt 89,90€` | 12,99 € | 89,90 € |
+| `statt 59,99 nur 9,99` | 9,99 € | 59,99 € |
+| `Sony XM5 statt 379 € jetzt 229 €` | 229 € | 379 € |
+| `Nur 9,99 statt 19,99 €` | 9,99 € | 19,99 € |
+| `iPhone 15 für 699 statt 949 Euro` | 699 € | 949 € |
+| `3 für 2 Aktion: 14,99 €` | 14,99 € | — |
+| `16 GB RAM Notebook ab 499 €` | 499 € | — |
+
+Die letzten beiden Zeilen sind die Bremse: eine Zahl ohne Währungszeichen wird
+nur dann als Preis akzeptiert, wenn sie ein **Paar** vervollständigt — es gibt
+schon einen „alten" Preis und der neue liegt darunter. Ohne diese Regel meldet
+`3 für 2` einen Preis von 2 €.
+
+Alle Beträge werden zusätzlich in **Euro umgerechnet**, damit „max. 20 €" auch
+bei USD- und GBP-Quellen greift; in der Oberfläche steht der Gegenwert daneben
+(`29,99 $ · ≈ 27,59 €`). Preis, Streichpreis, Währung und Rabatt ziehen dabei
+immer gemeinsam um: übernimmt eine günstigere Quelle in anderer Währung den
+Deal, verschwindet der alte Streichpreis, statt mit dem neuen Währungszeichen
+stehen zu bleiben. Und ein Prozentwert wird aus den beiden angezeigten Zahlen
+gerechnet, nicht von der Quelle übernommen — sonst steht er neben zwei Preisen,
+aus denen er sich nicht ergibt.
 
 ### Melden
 
@@ -204,7 +415,7 @@ abschaltbar und mit *Test senden* sofort prüfbar:
 | **Desktop** | derselbe Rechner, kein Konto nötig | ein Klick im Browser |
 
 Jede Meldung trägt **das Preisurteil mit** — ein Bestpreis kommt grün, ein
-fragwürdiger UVP rot, eine SOFORT-Regel gelb. Discord erwähnt eine Rolle nur
+Preisfehler rot mit seiner Begründung, eine SOFORT-Regel gelb. Discord erwähnt eine Rolle nur
 bei SOFORT, Gotify und ntfy heben dann die Priorität an; sonst bleibt es leise.
 
 * Ruhezeiten, die SOFORT-Regeln durchlassen
@@ -388,6 +599,7 @@ python cli.py deals lego --anzahl 10
 | `quellen` | `liste`, `an <quelle>`, `aus <quelle>`, `intervall <quelle> <minuten>`, `testen [quelle]`, `jetzt <quelle>` |
 | `regeln` | `liste`, `hinzufuegen <name> [Optionen]`, `an`, `aus`, `loeschen`, `testen <id>` |
 | `wunschliste` | `liste`, `hinzufuegen <url> --ziel 199`, `entfernen <id>`, `pruefen [id]` |
+| `preisfehler` | `liste [--tage 7] [--nur-belegt]`, `pruefen`, `waechter --an/--aus --schwelle 70` |
 | `deals` | `[suchbegriff] --gratis --urteil bestpreis --anzahl 20` |
 
 Ein paar Beispiele:
@@ -407,6 +619,10 @@ python cli.py regeln hinzufuegen "Alles Gratis" --gratis --sofort --kanal 1
 python cli.py regeln hinzufuegen "Lego" --keyword lego --max-preis 49.99 \
   --min-rabatt 30 --blacklist gebraucht --kanal 1
 python cli.py regeln testen 2 --anzahl 500
+
+# Preisfehler ansehen und den Wächter empfindlicher stellen
+python cli.py preisfehler liste --nur-belegt
+python cli.py preisfehler waechter --an --schwelle 60
 ```
 
 `regeln testen` zeigt dieselbe Vorschau wie das UI: wie viele der letzten Deals
@@ -440,10 +656,11 @@ Datenbank, nicht in einer Datei, und werden bei jeder Rückgabe maskiert.
 
 ---
 
-## Mit Docker
+## Server betreiben
 
-Wenn SparBit dauerhaft auf einem Server laufen soll — oder du den Auto-Claimer
-willst:
+Für den normalen Fall gibt es [den Installer](#auf-einem-vps). Was hier steht,
+brauchst du nur, wenn du es von Hand machen oder etwas abweichend aufsetzen
+willst.
 
 ```bash
 cp .env.example .env
@@ -456,6 +673,15 @@ Danach <http://server-ip:8080>. Ohne Claimer:
 ```bash
 docker compose up -d --build backend frontend
 ```
+
+Mit HTTPS (`SPARBIT_DOMAIN` muss in der `.env` stehen):
+
+```bash
+docker compose --profile https up -d --build
+```
+
+Dann sollte der Frontend-Port nicht mehr nach außen zeigen — dafür
+`SPARBIT_WEB_BIND=127.0.0.1` in die `.env`.
 
 ### Auto-Claimer einrichten
 
@@ -477,10 +703,11 @@ Falls das Image Probleme macht, ist
 [claabs/epicgames-freegames-node](https://github.com/claabs/epicgames-freegames-node)
 der Fallback (nur Epic). Das Log-Parsing kommt mit beiden Formaten zurecht.
 
-### Hinter Caddy oder Traefik
+### Hinter einem eigenen Proxy
 
-Beim `frontend` die Portfreigabe auf `127.0.0.1:8080:80` ändern und den Proxy
-davorhängen.
+Der `https`-Profil bringt Caddy und [`deploy/Caddyfile`](deploy/Caddyfile)
+schon mit. Wer stattdessen einen vorhandenen Proxy benutzt, setzt
+`SPARBIT_WEB_BIND=127.0.0.1` und hängt ihn davor.
 
 ```caddy
 deals.example.com {
@@ -501,7 +728,7 @@ automatisch mit `Secure`.
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 322 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 357 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -570,17 +797,21 @@ Speichern, solange sie leer sind.
 ### Aufbau
 
 ```
-Quellen (Plugins) ─┐                                        Kanäle (Plugins)
-Wunschliste ───────┼─► Dedupe ─► SQLite (WAL) ─► Regeln ─►  Telegram, Discord,
-Erweiterung ───────┘   URL-Hash    Deals,         Keywords,  Slack, Matrix,
-  isoliert,          + Zahlen-     Historie,      Preis EUR, Gotify, Pushover,
-  Schutzschalter     + Titel-      Angebote,      Rabatt,    ntfy, E-Mail,
-  je Quelle            vergleich   Urteile        Urteil     Webhook, Desktop
-       │                   │            │             │           │
-       │              Preisurteil   Lernmodell        │           │
-       │              (Verlauf)     (lokal)           │           │
-       └──── APScheduler ───────────┴──── SSE ──► Web-UI ◄────────┘
-                    │                              CLI ◄─────────┘
+Quellen (Plugins) ─┐                                       Kanäle (Plugins)
+Wunschliste ───────┼─► Dedupe ─► SQLite (WAL) ─► Regeln ─► Telegram, Discord,
+Erweiterung ───────┘   URL-Hash    Deals,        Keywords,  Slack, Matrix,
+  isoliert,          + Zahlen-     Historie,     Preis EUR, Gotify, Pushover,
+  Schutzschalter     + Titel-      Angebote,     Rabatt,    ntfy, E-Mail,
+  je Quelle            vergleich   Urteile       Urteil     Webhook, Desktop
+       │                   │           │             │           ▲
+       │            Preisurteil    Lernmodell        │           │
+       │            (Verlauf)      (lokal)           │           │
+       │                   │                         │           │
+       │            Preisfehler ────────────────────────────────►┤
+       │            (Indizien)   eigener Meldeweg: ohne Regel,   │
+       │                   │     ohne Ruhezeit, sofort           │
+       └──── APScheduler ──┴──────── SSE ──► Web-UI ◄────────────┘
+                    │                         CLI ◄──────────────┘
 ```
 
 Backend: Python 3.11+, FastAPI, SQLAlchemy 2, SQLite (WAL), APScheduler, httpx.
@@ -656,6 +887,15 @@ Ehrlich benannt statt verschwiegen:
   der erste Schritt ist `python -m tools.verify_endpoints`.
 * **Der stündliche Digest ist keiner.** NORMAL-Regeln verschicken aufgestaute
   Treffer weiterhin als Einzelnachrichten statt als eine Sammelmeldung.
+* **Die Preisfehler-Erkennung ist nicht gegen echte Funde geeicht.** Die
+  Gewichte sind begründet, aber am Schreibtisch gewählt und gegen
+  konstruierte Fälle getestet — nicht an einem Jahr echter mydealz-Daten
+  kalibriert. Rechne in den ersten Wochen mit Fehlalarmen und stell die
+  Schwelle nach.
+* **Fremdpreise braucht es erst.** Das stärkste Indiz nach der Kommastelle ist
+  der Vergleich mit anderen Quellen — den gibt es nur, wenn mehrere Quellen
+  denselben Artikel melden. Mit einer eingeschalteten Quelle bleibt der
+  Detektor auf den eigenen Verlauf angewiesen.
 * **Der Claimer hat keinen Startknopf.** Die Claimer-Seite zeigt den Befehl zum
   Abtippen, statt den Container selbst zu starten.
 * **Sechs Quellen fehlen bewusst** — itch.io, Indiegala, Fanatical, Humble,

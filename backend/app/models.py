@@ -112,6 +112,19 @@ class Deal(Base):
     urteil: Mapped[str | None] = mapped_column(String(24), index=True)
     urteil_text: Mapped[str | None] = mapped_column(Text)
     urteil_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Preisfehler-Verdacht - siehe app/pricefehler.py. Getrennt vom Urteil,
+    # weil es eine andere Frage beantwortet: nicht "ist der Preis gut", sondern
+    # "hat sich hier jemand vertippt".
+    fehler_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    fehler_stufe: Mapped[str | None] = mapped_column(String(16), index=True)
+    fehler_gruende: Mapped[list] = mapped_column(JSON, default=list)
+    fehler_erwartet_eur: Mapped[float | None] = mapped_column(Float)
+    fehler_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Wann zuletzt wegen dieses Preisfehlers gemeldet wurde - verhindert,
+    # dass derselbe Fund bei jedem Quellenlauf erneut das Handy weckt.
+    fehler_gemeldet_am: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+
     # Preisalarm: melden, sobald der Preis unter diese Schwelle faellt.
     alarm_preis: Mapped[float | None] = mapped_column(Float)
     alarm_ausgeloest: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -121,6 +134,8 @@ class Deal(Base):
 
 Index("ix_deals_first_seen_desc", Deal.first_seen.desc())
 Index("ix_deals_gratis_seen", Deal.ist_gratis, Deal.first_seen.desc())
+# Die Preisfehler-Seite fragt genau danach - und zwar oft.
+Index("ix_deals_fehler", Deal.fehler_stufe, Deal.first_seen.desc())
 
 
 class Rule(Base):
@@ -140,6 +155,9 @@ class Rule(Base):
     min_temperatur: Mapped[float | None] = mapped_column(Float)
     # Nur Deals ab dieser Urteilsstufe (siehe app/verdict.py).
     min_urteil: Mapped[str | None] = mapped_column(String(24))
+    # Nur Deals mit mindestens so vielen Preisfehler-Punkten
+    # (siehe app/pricefehler.py). 0 / None = egal.
+    min_fehler_score: Mapped[int | None] = mapped_column(Integer)
 
     sources: Mapped[list] = mapped_column(JSON, default=list)     # leer = alle
     kategorien: Mapped[list] = mapped_column(JSON, default=list)
