@@ -433,6 +433,22 @@ export interface PreisfehlerListe {
   items: Deal[];
 }
 
+export interface HygieneBefund {
+  art: "regel_laut" | "regel_leer" | "regel_ohne_kanal" | "quelle_rauschen";
+  betrifft: string;
+  regel_id: number | null;
+  quelle_id: string | null;
+  text: string;
+  vorschlag: string;
+  aktion: { art?: string; quelle?: string };
+  zahlen: Record<string, number>;
+}
+
+export interface Hygiene {
+  fenster_tage: number;
+  befunde: HygieneBefund[];
+}
+
 export interface IndizBilanz {
   schluessel: string;
   name: string;
@@ -547,6 +563,7 @@ export const api = {
       post<{ id: number; bookmarked: boolean }>(`/deals/${id}/bookmark`),
   },
   stats: () => get<Stats>("/stats"),
+  hygiene: () => get<Hygiene>("/hygiene"),
   preisfehler: {
     list: (tage = 7, nurHeiss = false) =>
       get<PreisfehlerListe>(`/preisfehler?tage=${tage}&nur_heiss=${nurHeiss}`),

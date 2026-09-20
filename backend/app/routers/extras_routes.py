@@ -462,6 +462,20 @@ def preisfehler_rueckmeldung(deal_id: int, body: Rueckmeldung,
     return {"ok": True, "urteil_mensch": deal.fehler_urteil_mensch}
 
 
+@router.get("/hygiene")
+def hygiene(db: Session = Depends(get_db)) -> dict:
+    """Regeln und Quellen, die Aufmerksamkeit verdienen.
+
+    Vorgeschlagen, nie ausgeführt: eine Regel abzuschalten, die jemand
+    absichtlich weit gefasst hat, wäre schlimmer als der Hinweis nützt.
+    """
+    from .. import hygiene as modul
+
+    befunde = modul.pruefe(db)
+    return {"fenster_tage": modul.FENSTER_TAGE,
+            "befunde": modul.als_dict(befunde)}
+
+
 @router.get("/preisfehler/auswertung")
 def preisfehler_auswertung(db: Session = Depends(get_db)) -> dict:
     """Welches Indiz lag wie oft richtig - und was folgt daraus.
