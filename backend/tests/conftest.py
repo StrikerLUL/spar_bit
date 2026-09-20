@@ -13,6 +13,22 @@ os.environ.setdefault("SPARBIT_DATA_DIR", "/tmp/sparbit-tests")
 os.environ.setdefault("SPARBIT_LOG_JSON", "false")
 
 
+def lade_app_neu():
+    """app.main mit der aktuellen Umgebung frisch importieren.
+
+    Wichtig ist, auch das Paket "app" selbst zu entfernen: bleibt es liegen,
+    findet "from .. import updater" das alte Submodul als Attribut des
+    Pakets und importiert es gar nicht neu - die Einstellungen von vorhin
+    leben dann im frisch gebauten Router weiter.
+    """
+    import importlib
+
+    for name in [n for n in sys.modules if n == "app" or n.startswith("app.")]:
+        del sys.modules[name]
+    import app.main as main
+    return importlib.reload(main)
+
+
 def pytest_addoption(parser):
     parser.addoption("--live-fixtures", default=None,
                      help="Ordner mit echten, per tools/verify_endpoints.py "

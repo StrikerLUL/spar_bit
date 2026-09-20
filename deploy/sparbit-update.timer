@@ -1,0 +1,13 @@
+[Unit]
+Description=SparBit minuetlich auf Update-Wuensche pruefen
+
+[Timer]
+# Jede Minute - damit der Knopf im UI zuegig wirkt. Die Fernabfrage
+# begrenzt das Skript selbst auf SPARBIT_UPDATE_INTERVALL.
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=sparbit-update.service
+
+[Install]
+WantedBy=timers.target

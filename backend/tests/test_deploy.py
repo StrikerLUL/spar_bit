@@ -125,3 +125,95 @@ def test_compose_loest_ohne_domain_auf(tmp_path):
         capture_output=True, text=True, cwd=str(WURZEL), timeout=120)
     assert ergebnis.returncode == 0, ergebnis.stderr
     assert "frontend" in ergebnis.stdout
+
+
+# --- Auto-Updater ----------------------------------------------------------
+
+SKRIPT = WURZEL / "deploy" / "sparbit-autoupdate.sh"
+UNIT = WURZEL / "deploy" / "sparbit-update.service"
+TIMER = WURZEL / "deploy" / "sparbit-update.timer"
+
+
+def test_updater_skript_ist_gueltige_shell():
+    import shutil
+    import subprocess
+    if shutil.which("bash") is None:
+        pytest.skip("bash fehlt")
+    lauf = subprocess.run(["bash", "-n", str(SKRIPT)], capture_output=True, text=True)
+    assert lauf.returncode == 0, lauf.stderr
+
+
+def test_updater_ist_ausfuehrbar():
+    import os
+    assert os.access(SKRIPT, os.X_OK), "systemd startet nur ein ausführbares Skript"
+
+
+def test_updater_faellt_ohne_token_weich_aus():
+    """Ohne Token darf das Skript nicht blind loslaufen."""
+    text = SKRIPT.read_text()
+    assert 'if [ -z "$TOKEN" ]' in text
+    assert "exit 0" in text
+
+
+def test_updater_unterscheidet_403_von_server_aus():
+    """Sonst sucht man bei einem Tippfehler im Token am falschen Ende."""
+    text = SKRIPT.read_text()
+    assert "403)" in text
+    assert "000|" in text          # curl meldet 000, wenn nichts zustande kam
+
+
+def test_updater_zieht_nur_vorwaerts():
+    """Ein Merge oder Reset wuerde lokale Stände auf dem Server zerstören."""
+    text = SKRIPT.read_text()
+    assert "merge --ff-only" in text
+    assert "reset --hard" not in text
+    assert "checkout -f" not in text
+
+
+def test_updater_sichert_vor_dem_einspielen():
+    assert "sparbit sichern" in SKRIPT.read_text()
+
+
+def test_updater_laeuft_nur_einmal_gleichzeitig():
+    text = SKRIPT.read_text()
+    assert 'mkdir "$SPERRE"' in text
+    assert "trap" in text
+
+
+def test_systemd_units_sind_lesbar():
+    import configparser
+    for pfad in (UNIT, TIMER):
+        c = configparser.ConfigParser(strict=False)
+        c.optionxform = str
+        c.read(pfad)
+        assert c.sections(), pfad.name
+
+    c = configparser.ConfigParser(strict=False)
+    c.optionxform = str
+    c.read(TIMER)
+    # Minuetlich, damit der Knopf im UI zuegig wirkt.
+    assert c["Timer"]["OnUnitActiveSec"] == "1min"
+    assert c["Timer"]["Unit"] == "sparbit-update.service"
+
+    c = configparser.ConfigParser(strict=False)
+    c.optionxform = str
+    c.read(UNIT)
+    assert c["Service"]["Type"] == "oneshot"
+    # Ein haengender Build darf den Timer nicht dauerhaft blockieren.
+    assert "TimeoutStartSec" in c["Service"]
+
+
+def test_installer_legt_ein_token_an():
+    text = (WURZEL / "install.sh").read_text()
+    assert "setze SPARBIT_UPDATE_TOKEN" in text
+    assert "openssl rand -hex 32" in text
+    # Der Timer darf nicht als root laufen - sonst gehoeren die von git
+    # angelegten Dateien danach root und "./sparbit update" scheitert.
+    assert "User=$besitzer" in text
+
+
+def test_manuelles_update_nutzt_dieselbe_sperre():
+    """Zwei gleichzeitige Builds am selben Compose-Projekt gehen schief."""
+    text = (WURZEL / "sparbit").read_text()
+    assert "mkdir .update/sperre" in text
+    assert "trap 'rmdir .update/sperre" in text

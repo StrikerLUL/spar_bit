@@ -193,6 +193,13 @@ konfiguriere() {
          || head -c 36 /dev/urandom | base64 | tr -d '\n')"
   setze SPARBIT_SECRET_KEY "$key"
 
+  # Gemeinsames Geheimnis zwischen Web-UI und dem Update-Skript auf dem Host.
+  # Ohne das gibt es den Update-Bereich im UI nicht.
+  local update_token
+  update_token="$(openssl rand -hex 32 2>/dev/null \
+                  || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  setze SPARBIT_UPDATE_TOKEN "$update_token"
+
   local tz
   tz="$(cat /etc/timezone 2>/dev/null || echo Europe/Berlin)"
   setze TZ "$tz"
@@ -272,6 +279,42 @@ frage_domain() {
 
 
 # --- 5. Starten ------------------------------------------------------------
+
+# --- 5b. Updates per Knopfdruck --------------------------------------------
+
+richte_updates_ein() {
+  schritt "Updates"
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    warn "Kein systemd - der Update-Knopf im UI bleibt ohne Wirkung."
+    printf '    Von Hand aktualisieren: %s/sparbit update\n' "$ZIEL"
+    return
+  fi
+
+  # Der Timer laeuft als der Benutzer, dem das Verzeichnis gehoert. Sonst
+  # gehoerten die von git angelegten Dateien danach root, und ein spaeteres
+  # "./sparbit update" von Hand scheiterte an den Rechten.
+  local besitzer
+  besitzer="$(stat -c '%U' "$ZIEL" 2>/dev/null || id -un)"
+
+  local unit=/etc/systemd/system/sparbit-update.service
+  local timer=/etc/systemd/system/sparbit-update.timer
+
+  als_root cp "$ZIEL/deploy/sparbit-update.service" "$unit"
+  als_root cp "$ZIEL/deploy/sparbit-update.timer" "$timer"
+  als_root sed -i "s|/opt/sparbit|$ZIEL|g; s|^User=.*|User=$besitzer|" "$unit"
+
+  als_root systemctl daemon-reload
+  if als_root systemctl enable --now sparbit-update.timer >/dev/null 2>&1; then
+    ok "Timer läuft — der Knopf im UI wirkt binnen einer Minute"
+    printf '    Neue Commits werden stündlich bemerkt; ob sie auch\n'
+    printf '    eingespielt werden, entscheidet der Schalter im UI\n'
+    printf '    unter „Logs & System → Updates".\n'
+  else
+    warn "Timer ließ sich nicht starten: systemctl status sparbit-update.timer"
+  fi
+}
+
 
 starten() {
   schritt "Container bauen und starten"
@@ -353,6 +396,7 @@ main() {
   konfiguriere
   frage_domain
   starten
+  richte_updates_ein
   abschluss
 }
 

@@ -1,10 +1,11 @@
 import {
-  Copy, Download, HardDrive, Image, Keyboard, Puzzle, RefreshCw,
-  ScrollText, Trash2, Upload,
+  ArrowUpCircle, CheckCircle2, Copy, Download, HardDrive, Image, Keyboard,
+  Puzzle, RefreshCw, ScrollText, Trash2, Upload, XCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
   api, type ApiTokenInfo, type BilderStatus, type LogLine, type SystemInfo,
+  type UpdateStatus,
 } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { useToast } from "@/components/Toast";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/utils";
 import {
   Badge, Button, Card, CardContent, CardHeader, CardTitle, Select, Skeleton,
+  Switch,
 } from "@/components/ui";
 import { PageHeader } from "@/components/Layout";
 
@@ -110,6 +112,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
         </Card>
 
         <div className="space-y-4">
+          <UpdateCard />
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -208,6 +212,173 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
     </>
   );
 }
+
+/** Stand des Codes, Knopf zum Aktualisieren, Schalter fuer die Automatik.
+ *
+ *  Die Arbeit macht ein Skript auf dem Host - hier wird nur ein Auftrag
+ *  hinterlegt und der Stand angezeigt, den das Skript zurueckmeldet. Darum
+ *  wird waehrend eines Laufs gepollt: eine Rueckmeldung per SSE gaebe es
+ *  nicht, das Backend startet zwischendurch ja selbst neu.
+ */
+function UpdateCard() {
+  const toast = useToast();
+  const { data, reload } = useAsync<UpdateStatus>(() => api.system.update(), []);
+  const [sende, setSende] = React.useState(false);
+
+  const laeuft = Boolean(data?.laeuft || data?.angefordert);
+
+  React.useEffect(() => {
+    if (!laeuft) return;
+    const timer = window.setInterval(reload, 4000);
+    return () => window.clearInterval(timer);
+  }, [laeuft, reload]);
+
+  if (!data) return <Skeleton className="h-44" />;
+
+  if (!data.eingerichtet) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ArrowUpCircle className="h-4 w-4 text-primary" />
+            Updates
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs leading-relaxed text-muted-foreground">{data.grund}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const neue = data.neue_commits ?? 0;
+  const letztes = data.letztes_update;
+
+  const jetzt = async () => {
+    setSende(true);
+    try {
+      const antwort = await api.system.updateJetzt();
+      toast.push("success", "Update angestoßen", antwort.hinweis);
+      reload();
+    } catch (err) {
+      toast.push("error", "Ging nicht", (err as Error).message);
+    } finally {
+      setSende(false);
+    }
+  };
+
+  const schalteAuto = async (an: boolean) => {
+    try {
+      await api.system.updateAuto(an);
+      toast.push("success", an ? "Automatik an" : "Automatik aus",
+        an ? "Neue Commits werden künftig selbst eingespielt."
+           : "Updates nur noch auf Knopfdruck.");
+      reload();
+    } catch (err) {
+      toast.push("error", "Ging nicht", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="flex items-center gap-2">
+          <ArrowUpCircle className="h-4 w-4 text-primary" />
+          Updates
+        </CardTitle>
+        {neue > 0 && !laeuft && (
+          <Badge variant="default">{neue} neu</Badge>
+        )}
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        <div className="space-y-1 text-sm">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-muted-foreground">Stand</span>
+            <span className="tabular font-medium">
+              {data.commit_kurz ?? "—"}
+              {data.zweig && (
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  ({data.zweig})
+                </span>
+              )}
+            </span>
+          </div>
+          {data.betreff && (
+            <p className="truncate text-xs text-muted-foreground" title={data.betreff}>
+              {data.betreff}
+            </p>
+          )}
+        </div>
+
+        {laeuft ? (
+          <div className="flex items-center gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" />
+            <span>
+              {data.laeuft
+                ? "Wird gebaut und neu gestartet …"
+                : "Angefordert — startet binnen einer Minute."}
+            </span>
+          </div>
+        ) : (
+          <Button variant={neue > 0 ? "default" : "outline"} size="sm"
+            className="w-full" onClick={jetzt} loading={sende}>
+            <ArrowUpCircle className="h-3.5 w-3.5" />
+            {neue > 0 ? `${neue} Update${neue > 1 ? "s" : ""} einspielen`
+                      : "Auf Updates prüfen"}
+          </Button>
+        )}
+
+        <div className="flex items-start justify-between gap-3 border-t border-border pt-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">Automatisch</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Neue Commits ohne Nachfrage einspielen.
+            </p>
+          </div>
+          <Switch checked={Boolean(data.auto)} onChange={schalteAuto}
+            label="Automatische Updates" />
+        </div>
+
+        {letztes && (
+          <div className="border-t border-border pt-3">
+            <div className="flex items-center gap-1.5 text-xs">
+              {letztes.ok ? (
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+              )}
+              <span className={cn(!letztes.ok && "text-destructive")}>
+                {letztes.ok ? "Zuletzt aktualisiert" : "Letztes Update fehlgeschlagen"}
+              </span>
+              <span className="ml-auto text-muted-foreground">
+                {timeAgo(letztes.zeit)}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] tabular text-muted-foreground">
+              {letztes.von} → {letztes.nach}
+              {letztes.grund === "automatisch" && " · automatisch"}
+            </p>
+            {!letztes.ok && letztes.fehler && (
+              <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words
+                              rounded-md bg-destructive/10 p-2 text-[10px] leading-snug
+                              text-destructive">
+                {letztes.fehler.trim()}
+              </pre>
+            )}
+          </div>
+        )}
+
+        {data.geprueft_am && (
+          <p className="text-[11px] text-muted-foreground">
+            Zuletzt geprüft {timeAgo(data.geprueft_am)}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 
 const Row = ({ label, value }: { label: string; value: string }) => (
   <div className="flex items-baseline justify-between gap-3">

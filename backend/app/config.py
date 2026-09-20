@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     # vorhanden - direkt vom Backend serviert, dann reicht ein Prozess.
     frontend_dist: Path = PROJECT_ROOT / "frontend" / "dist"
 
+    # Gemeinsames Geheimnis zwischen Web-UI und dem Update-Skript auf dem
+    # Host. Nur wenn es gesetzt ist, gibt es den Update-Bereich im UI -
+    # sonst koennte der Knopf ohnehin niemanden erreichen. install.sh legt
+    # es an; von Hand:  openssl rand -hex 32
+    update_token: str = ""
+
     # Wo der lokale Start lauscht.
     host: str = "127.0.0.1"
     port: int = 8000

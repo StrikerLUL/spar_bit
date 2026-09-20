@@ -70,6 +70,16 @@ case "$befehl" in
     ;;
 
   update)
+    # Dieselbe Sperre wie der Auto-Updater: zwei gleichzeitige Builds am
+    # selben Compose-Projekt gehen schief.
+    mkdir -p .update
+    if ! mkdir .update/sperre 2>/dev/null; then
+      printf '%s!%s Es läuft gerade schon ein Update.\n' "$Y" "$N"
+      printf '    Stand ansehen:  journalctl -u sparbit-update -n 20\n'
+      exit 1
+    fi
+    trap 'rmdir .update/sperre 2>/dev/null' EXIT
+
     printf '%s▸%s Änderungen holen\n' "$C" "$N"
     git pull --ff-only
     printf '%s▸%s Neu bauen und starten\n' "$C" "$N"

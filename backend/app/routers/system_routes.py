@@ -6,7 +6,9 @@ import platform
 import sys
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import (APIRouter, Depends, Header, HTTPException, Query,
+                     Request)
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -16,6 +18,7 @@ from ..config import settings
 from ..db import get_db
 from ..events import broker
 from ..logging_setup import recent_logs
+from .. import updater
 from ..models import (Channel, ClaimEvent, Deal, Match, NotificationLog, Rule,
                       SourceConfig, SourceRun)
 from .. import claimer as claimer_mod
@@ -86,6 +89,55 @@ def backup(db: Session = Depends(get_db)) -> JSONResponse:
         content=json.loads(json.dumps(data, default=str)),
         headers={"Content-Disposition": f'attachment; filename="sparbit-backup-{stamp}.json"'},
     )
+
+
+# --- Updates ---------------------------------------------------------------
+
+class UpdateAuto(BaseModel):
+    auto: bool
+
+
+@router.get("/update")
+def update_status(db: Session = Depends(get_db)) -> dict:
+    return updater.status(db)
+
+
+@router.post("/update")
+def update_anfordern(db: Session = Depends(get_db)) -> dict:
+    """Bittet den Host-Updater, beim naechsten Lauf zu aktualisieren."""
+    try:
+        return updater.fordere_an(db)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.put("/update/auto")
+def update_auto(body: UpdateAuto, db: Session = Depends(get_db)) -> dict:
+    try:
+        return updater.setze_auto(db, body.auto)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+# Die beiden folgenden Endpunkte gehoeren dem Host-Skript, nicht dem Browser.
+# Sie haengen darum nicht an der Sitzung, sondern am gemeinsamen Token -
+# eine Sitzung hat ein systemd-Timer nicht.
+host_router = APIRouter(prefix="/api/system/update", tags=["system"])
+
+
+def _pruefe_token(x_sparbit_update: str = Header(default="")) -> None:
+    if not updater.token_stimmt(x_sparbit_update):
+        raise HTTPException(403, "Ungültiges Update-Token")
+
+
+@host_router.get("/auftrag", dependencies=[Depends(_pruefe_token)])
+def update_auftrag(db: Session = Depends(get_db)) -> dict:
+    return updater.hole_auftrag(db)
+
+
+@host_router.post("/bericht", dependencies=[Depends(_pruefe_token)])
+def update_bericht(bericht: dict, db: Session = Depends(get_db)) -> dict:
+    return updater.nimm_bericht(db, bericht)
 
 
 # --- SSE ------------------------------------------------------------------

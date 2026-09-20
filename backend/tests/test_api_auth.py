@@ -7,12 +7,8 @@ from fastapi.testclient import TestClient
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("SPARBIT_DATA_DIR", str(tmp_path))
     # Module neu laden, damit sie das frische Datenverzeichnis sehen.
-    import importlib, sys
-    for name in list(sys.modules):
-        if name.startswith("app."):
-            del sys.modules[name]
-    import app.main as main
-    importlib.reload(main)
+    from conftest import lade_app_neu
+    main = lade_app_neu()
     with TestClient(main.app) as c:
         yield c
 

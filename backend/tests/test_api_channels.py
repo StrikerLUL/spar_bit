@@ -11,12 +11,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("SPARBIT_DATA_DIR", str(tmp_path))
-    import importlib, sys
-    for name in list(sys.modules):
-        if name.startswith("app."):
-            del sys.modules[name]
-    import app.main as main
-    importlib.reload(main)
+    from conftest import lade_app_neu
+    main = lade_app_neu()
     with TestClient(main.app) as c:
         c.post("/api/auth/setup",
                json={"username": "cillian", "password": "einGutesPasswort1"})

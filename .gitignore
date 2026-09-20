@@ -41,3 +41,6 @@ backend/dist/
 
 # Live-Fixtures (koennen personalisierte Daten enthalten)
 backend/tests/fixtures/live/
+
+# Arbeitsverzeichnis des Auto-Updaters (Sperre, Protokoll, Sicherung)
+.update/

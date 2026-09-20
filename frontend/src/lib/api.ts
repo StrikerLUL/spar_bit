@@ -296,6 +296,31 @@ export interface ChannelType {
   options_schema: OptionSpec[];
 }
 
+export interface UpdateStatus {
+  eingerichtet: boolean;
+  /** Nur gesetzt, wenn eingerichtet false ist. */
+  grund?: string;
+  auto?: boolean;
+  angefordert?: boolean;
+  laeuft?: boolean;
+  zweig?: string | null;
+  commit?: string | null;
+  commit_kurz?: string | null;
+  betreff?: string | null;
+  commit_datum?: string | null;
+  neue_commits?: number | null;
+  geprueft_am?: string | null;
+  letztes_update?: {
+    zeit: string;
+    grund?: string;
+    ok: boolean;
+    von: string;
+    nach: string;
+    fehler: string | null;
+  } | null;
+  protokoll?: string | null;
+}
+
 export interface QuietHours {
   enabled: boolean;
   start: string;
@@ -530,6 +555,10 @@ export const api = {
     logs: (level = "ALL", limit = 300) =>
       get<LogLine[]>(`/system/logs?level=${level}&limit=${limit}`),
     backupUrl: "/api/system/backup",
+    update: () => get<UpdateStatus>("/system/update"),
+    updateJetzt: () => post<{ ok: boolean; hinweis: string }>("/system/update"),
+    updateAuto: (auto: boolean) =>
+      put<{ ok: boolean; auto: boolean }>("/system/update/auto", { auto }),
   },
   claimer: {
     status: () => get<ClaimerStatus>("/claimer/status"),

@@ -1,0 +1,16 @@
+[Unit]
+Description=SparBit aktualisieren (Knopf im UI und neue Commits)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# install.sh traegt hier den Besitzer des Verzeichnisses ein.
+User=root
+WorkingDirectory=/opt/sparbit
+ExecStart=/opt/sparbit/deploy/sparbit-autoupdate.sh
+# Wie oft hoechstens beim Git-Server nachgefragt wird. Der Knopf im UI
+# wirkt davon unabhaengig, den sieht jeder Lauf.
+Environment=SPARBIT_UPDATE_INTERVALL=900
+# Ein haengender Build darf den Timer nicht dauerhaft blockieren.
+TimeoutStartSec=30min

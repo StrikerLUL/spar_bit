@@ -15,9 +15,10 @@ Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
 einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über neun
 Kanäle melden.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-366-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-390-22c55e)
 
-**Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS und Zertifikat:
+**Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS, Zertifikat und
+Update-Knopf im UI:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/StrikerLUL/spar_bit/refs/heads/claude/deal-freebie-zentrale-gpi8dr/install.sh | bash
@@ -34,6 +35,7 @@ python run.py
 ---
 
 **Inhalt** · [Preisfehler](#preisfehler) · [Auf einem VPS](#auf-einem-vps)
+· [Updates per Knopfdruck](#updates-per-knopfdruck)
 · [Auf dem eigenen Rechner](#auf-dem-eigenen-rechner)
 · [Die ersten 10 Minuten](#die-ersten-10-minuten)
 · [Was SparBit sonst kann](#was-sparbit-sonst-kann)
@@ -196,6 +198,48 @@ Backup reicht ein Cron-Eintrag:
 **Systemanforderungen:** 1 GB RAM reichen (der Frontend-Build ist die
 anspruchsvollste Stelle — bei weniger vorher Swap anlegen), rund 1 GB Platte.
 Ein Einsteiger-VPS für ein paar Euro im Monat genügt.
+
+### Updates per Knopfdruck
+
+`install.sh` richtet einen systemd-Timer ein, der minütlich nachsieht, ob
+etwas zu tun ist. Im UI erscheint dann unter **Logs & System → Updates**:
+
+* der Stand des Servers (Commit, Zweig, Betreff)
+* **ein Knopf** — spielt neue Commits ein, wirkt binnen einer Minute
+* **ein Schalter „Automatisch"** — dann geschieht das nach jedem Push von
+  selbst, ohne dass du etwas anklickst
+* Ergebnis des letzten Laufs; ging etwas schief, steht die Build-Ausgabe
+  direkt daneben
+
+Vor jedem Update wird die Datenbank gesichert, und geholt wird nur
+**vorwärts** (`git merge --ff-only`) — lokale Änderungen auf dem Server
+werden nie überschrieben, das Update bricht dann lieber ab.
+
+Der Container fasst den Host nicht an: kein Docker-Socket, kein git im
+Image. Das UI hinterlegt nur einen Auftrag, den das Skript auf dem Host
+(`deploy/sparbit-autoupdate.sh`) abholt. Beide weisen sich mit
+`SPARBIT_UPDATE_TOKEN` aus der `.env` aus.
+
+Von Hand einrichten (oder nach einem Update von einer älteren Version):
+
+```bash
+cd /opt/sparbit
+openssl rand -hex 32                     # in die .env als SPARBIT_UPDATE_TOKEN
+./sparbit neustart backend
+
+sudo cp deploy/sparbit-update.service deploy/sparbit-update.timer \
+        /etc/systemd/system/
+sudo sed -i "s|/opt/sparbit|$PWD|g; s|^User=.*|User=$(stat -c '%U' .)|" \
+        /etc/systemd/system/sparbit-update.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now sparbit-update.timer
+```
+
+Nachsehen, ob er läuft: `systemctl list-timers sparbit-update`, Ausgabe des
+letzten Laufs mit `journalctl -u sparbit-update -n 50`.
+
+Ohne Timer (oder ohne systemd) bleibt alles wie vorher — `./sparbit update`
+macht dasselbe von Hand.
 
 ---
 
@@ -839,7 +883,7 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 366 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 390 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -979,6 +1023,10 @@ sperrt, nützt dir nichts.
 | Discord: „sieht nicht nach einer Discord-Webhook-URL aus" | Es ist die Kanal- statt der Webhook-URL. Die richtige beginnt mit `https://discord.com/api/webhooks/`. |
 | Matrix: 403 oder „Raum-ID beginnt mit !" | Die `#alias:server`-Form geht nicht; die interne ID steht unter *Raumeinstellungen → Erweitert*. Und der Bot muss dem Raum beigetreten sein. |
 | Pushover meldet „application token is invalid" | Token und Benutzerschlüssel vertauscht. Der Benutzerschlüssel steht auf der Pushover-Startseite. |
+| Kein Bereich „Updates" unter *Logs & System* | `SPARBIT_UPDATE_TOKEN` fehlt in der `.env`. Setzen, dann `./sparbit neustart backend`. |
+| Update-Knopf tut nichts | Der Timer läuft nicht: `systemctl list-timers sparbit-update`. Fehler im letzten Lauf: `journalctl -u sparbit-update -n 50`. |
+| „Token abgelehnt" im Journal | Die `.env` wurde nach dem Containerstart geändert — `./sparbit neustart backend`. |
+| Update bricht mit „Not possible to fast-forward" ab | Auf dem Server liegen eigene Commits. Absicht von SparBit: es überschreibt nichts. `git -C /opt/sparbit status` zeigt, was dort liegt. |
 | CLI: „Quelle gibt es nicht" | `python cli.py quellen liste` zeigt die gültigen IDs — bei Tippfehlern schlägt die CLI die richtige vor. |
 | Live-Ticker steht | Hinter einem Reverse-Proxy: Puffern für `/api/events` abschalten. |
 | „Zu viele Fehlversuche" | Die Anmeldebremse greift. Warte die angezeigte Zeit ab — der Knopf zählt herunter. |
