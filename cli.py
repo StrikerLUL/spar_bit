@@ -301,6 +301,48 @@ def befehl_preisfehler_waechter(args) -> int:
     return 0
 
 
+def befehl_feed_suche(args) -> int:
+    """Welche Feeds zeichnet diese Adresse aus?
+
+    Der Ausweg aus dem Pfad-Raten. Statt zu wissen, wie ein Shop seinen
+    Feed nennt, fragt man ihn - und zwar von dem Rechner aus, der auch
+    Netz hat.
+    """
+    import asyncio
+
+    from app import feedfinder
+    from app.http import PoliteClient
+
+    url = args.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+
+    async def lauf():
+        client = PoliteClient()
+        try:
+            return await feedfinder.suche(client, url)
+        finally:
+            await client.aclose()
+
+    ergebnis = asyncio.run(lauf())
+
+    print()
+    print(f"  {url}")
+    print(f"  {ergebnis['detail']}")
+    if not ergebnis["feeds"]:
+        print(grau("\n  Tipp: eine Uebersichts- oder Kategorieseite probieren,"))
+        print(grau("  nicht die Startseite - Feeds haengen meist an Rubriken.\n"))
+        return 1
+    print()
+    tabelle(["Feed-Adresse", "Titel", "Herkunft"],
+            [[f["url"], (f["titel"] or "-")[:34],
+              "ausgezeichnet" if f["herkunft"] == "link" else "geraten"]
+             for f in ergebnis["feeds"]])
+    print(grau("\n  Eintragen mit: sparbit quellen … bzw. im UI unter "
+               "Quellen → Einstellungen.\n"))
+    return 0
+
+
 # --- 18plus ----------------------------------------------------------------
 
 def befehl_erwachsen(args) -> int:
@@ -1176,6 +1218,11 @@ def baue_parser() -> argparse.ArgumentParser:
     fw.add_argument("--schwelle", type=int,
                     help="ab wie vielen Punkten gemeldet wird (30-100)")
     fw.set_defaults(fn=befehl_preisfehler_waechter)
+
+    fs = bereiche.add_parser("feed-suche",
+                             help="welchen Feed bietet eine Adresse an?")
+    fs.add_argument("url", help="Shop- oder Übersichtsseite")
+    fs.set_defaults(fn=befehl_feed_suche)
 
     e = bereiche.add_parser("18plus", help="18+-Bereich (standardmäßig aus)")
     e.add_argument("--an", action="store_true", help="freischalten")

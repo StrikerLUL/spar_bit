@@ -112,10 +112,20 @@ class FetchContext:
     options: dict[str, Any]
     api_key: str | None = None
     log: Any = None
+    # Was die Quelle waehrend des Laufs ueber sich selbst gelernt hat.
+    # Nach einem erfolgreichen Lauf schreibt der Runner das in die
+    # Konfiguration zurueck - so steht eine selbst gefundene Feed-Adresse
+    # beim naechsten Mal schon richtig da und ist im UI sichtbar.
+    notizen: dict[str, Any] = field(default_factory=dict)
 
     def opt(self, key: str, default: Any = None) -> Any:
         val = self.options.get(key, default)
         return default if val in (None, "") else val
+
+    def merke(self, key: str, wert: Any) -> None:
+        """Eine korrigierte Einstellung fuer den naechsten Lauf hinterlegen."""
+        if self.options.get(key) != wert:
+            self.notizen[key] = wert
 
 
 class Source(ABC):

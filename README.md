@@ -15,7 +15,7 @@ Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
 einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über neun
 Kanäle melden.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-598-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-622-22c55e)
 
 **Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS, Zertifikat und
 Update-Knopf im UI:
@@ -42,6 +42,7 @@ python run.py
 · [Benachrichtigungen](#benachrichtigungen-einrichten)
 · [Stimmt „gratis" auch?](#stimmt-gratis-auch)
 · [18+-Bereich](#18-bereich)
+· [Feed finden](#den-feed-finden-statt-ihn-zu-raten)
 · [Kommandozeile](#kommandozeile) · [API-Keys](#api-keys-optional)
 · [Server betreiben](#server-betreiben) · [Entwicklung](#entwicklung)
 · [Sicherheit](#sicherheit) · [Problemlösung](#problemlösung)
@@ -540,12 +541,62 @@ noch einmal hereinkommt.
 Auf der Seite selbst lassen sich die Bilder verdecken (Vorgabe an) — der
 Schleier geht beim Darüberfahren weg, Titel und Preis bleiben immer lesbar.
 
-**Die Quellen** sind `mydealz_erotik` (Erotik-Gruppe), `reddit_erwachsen`
-(Subreddits) und `erotik_feed` (eigene Shop-Feeds). Keine davon ist geprüft,
-und die vorbelegten Subreddit-Namen sind geraten. Welche Feed-Adressen sich
-bei welcher Shop-Software lohnen — Shopify hat an jeder Kollektion ein
-`.atom`, WordPress ein `/feed` — und welche Anbieter als Kandidaten in Frage
-kommen, steht vollständig in **[ENDPOINTS.md](ENDPOINTS.md#18-bereich)**.
+**Sechs Quellen** stehen bereit: die Erotik-Gruppen von `mydealz`,
+`Preisjäger.at`, `Dealabs` (FR) und `HotUKDeals` (UK), dazu
+`reddit_erwachsen` (Subreddits) und `erotik_feed`, wo du die Adresse eines
+beliebigen Shops einträgst. Keine davon ist geprüft, und die vorbelegten
+Gruppen-Pfade und Subreddit-Namen sind geraten — was SparBit damit macht,
+steht gleich unten unter [Den Feed finden](#den-feed-finden-statt-ihn-zu-raten).
+Welche Anbieter als Kandidaten taugen, steht vollständig in
+**[ENDPOINTS.md](ENDPOINTS.md#18-bereich)**.
+
+### Den Feed finden, statt ihn zu raten
+
+Nachgetragen, nachdem ein geratener Pfad im Betrieb danebenlag:
+
+```
+https://www.mydealz.de/gruppe/erotik-rss:
+ValueError: Kein gueltiger Feed (SAXParseException).
+Anfang der Antwort: '<!DOCTYPE html><html class="no-js …
+```
+
+Interessant daran: die Antwort war eine **echte Seite** — kein 404 und keine
+Cloudflare-Wand. Der Server war erreichbar und wusste, wo sein Feed liegt.
+Nur SparBit wusste es nicht. Praktisch jede Seite schreibt das in ihren Kopf:
+
+```html
+<link rel="alternate" type="application/rss+xml" href="/rss/gruppe/erotik">
+```
+
+Also rät SparBit nicht mehr, sondern fragt. Kommt HTML statt eines Feeds,
+liest es die ausgezeichneten Adressen aus der Seite, probiert sie der Reihe
+nach (höchstens drei) und **schreibt die funktionierende in die
+Quellen-Einstellungen zurück**. Beim nächsten Lauf steht dort die richtige
+Adresse, sichtbar im UI. Damit darf in einem Feed-Feld auch die blanke
+**Adresse eines Shops** stehen — die Angebotsseite genügt.
+
+Willst du es vorher wissen: **Quellen → Feed suchen**, oder auf der
+Kommandozeile:
+
+```
+$ python cli.py feed-suche https://pypi.org/
+  2 Feed-Adresse(n) gefunden auf 'PyPI · Der Python Package Index'.
+
+  Feed-Adresse                       Titel                        Herkunft
+  https://pypi.org/rss/updates.xml   RSS: Letzte 40 Aktualisier…  ausgezeichnet
+  https://pypi.org/rss/packages.xml  RSS: 40 neueste Pakete       ausgezeichnet
+```
+
+„Ausgezeichnet" heißt: die Seite gibt diesen Feed selbst an. „Geraten" heißt:
+die Adresse stand in einem Link und *sieht aus* wie ein Feed. Ein
+`rel="alternate icon"` — das Favicon, das in jeder zweiten Seite steht —
+zählt ausdrücklich nicht.
+
+Und die Fehlermeldungen sagen jetzt, was zu tun ist. Statt
+`SAXParseException` steht dort entweder *„Der Server hat eine HTML-Seite
+geliefert (Seitentitel: …). Auf der Seite ist auch kein Feed ausgezeichnet"*
+— oder *„Bot-Abwehr statt Inhalt — ein anderer Pfad hilft dagegen nicht."*
+Das sind zwei verschiedene Probleme, und man sucht sonst am falschen Ende.
 
 ### Melden
 
@@ -770,6 +821,7 @@ python cli.py deals lego --anzahl 10
 | `regeln` | `liste`, `hinzufuegen <name> [Optionen]`, `an`, `aus`, `loeschen`, `testen <id>` |
 | `wunschliste` | `liste`, `hinzufuegen <url> --ziel 199`, `entfernen <id>`, `pruefen [id]` |
 | `preisfehler` | `liste [--tage 7] [--nur-belegt]`, `pruefen`, `waechter --an/--aus --schwelle 70` |
+| `feed-suche` | `<adresse>` — welche Feeds gibt diese Seite an? |
 | `gratischeck` | `--an/--aus`, `--max-pro-lauf 12` |
 | `18plus` | `--an --ich-bin-volljaehrig`, `--aus`, `--melden an/aus` |
 | `deals` | `[suchbegriff] --gratis --urteil bestpreis --anzahl 20` |
@@ -1029,7 +1081,7 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 598 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 622 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -1209,10 +1261,15 @@ Ehrlich benannt statt verschwiegen:
   Community-Posts, die gar keinen nennen, ergeben `ungeprüft` — und dann
   bleibt alles, wie die Quelle es gemeldet hat. Das ist so gewollt, heißt
   aber: sie fängt nicht jeden Fall.
-* **Die 18+-Quellen sind ungeprüft wie alle anderen** — und die drei
-  vorbelegten Subreddit-Namen sind geraten. Erst testen, dann behalten;
-  Kandidaten und Feed-Konventionen stehen in
+* **Die 18+-Quellen sind ungeprüft wie alle anderen** — die vorbelegten
+  Gruppen-Pfade und Subreddit-Namen sind geraten. Neu ist, dass ein
+  falscher Pfad sich selbst heilt, solange die Seite ihren Feed auszeichnet;
+  tut sie das nicht, sagt die Fehlermeldung es im Klartext. Erst testen,
+  dann behalten; Kandidaten und Feed-Konventionen stehen in
   [ENDPOINTS.md](ENDPOINTS.md#18-bereich).
+* **Die Feed-Suche findet nur, was ausgezeichnet ist.** Seiten, die ihren
+  Feed nirgends nennen, bleiben Handarbeit — dafür steht die Tabelle der
+  üblichen Adressen je Shop-System in ENDPOINTS.md.
 
 ---
 

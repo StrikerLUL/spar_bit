@@ -6,6 +6,7 @@ Feed-URL ist als Option editierbar.
 """
 from __future__ import annotations
 
+from .. import feedfinder
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
                    Verification, register)
@@ -32,8 +33,10 @@ class WordpressDealSource(Source):
         url = ctx.opt("feed_url", self.feed_url)
         if not url:
             raise ValueError("Keine Feed-URL konfiguriert.")
-        text = await ctx.http.get_text(url, cache_key=f"{self.id}:{url}")
-        return self.parse(text)[: int(ctx.opt("max_items", 60))]
+        fund = await feedfinder.hole(ctx.http, url, cache_key=f"{self.id}:{url}")
+        if fund.entdeckt:
+            ctx.merke("feed_url", fund.url)
+        return self.parse(fund.text)[: int(ctx.opt("max_items", 60))]
 
     def parse(self, text: str) -> list[DealItem]:
         feed = parse_feed(text)

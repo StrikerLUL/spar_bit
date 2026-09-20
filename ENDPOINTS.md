@@ -126,6 +126,58 @@ Messungen — der Test auf deinem Server hat das letzte Wort.
   prüfen konnte. Wenn ein Pfad 404 gibt: im UI unter *Quellen → mydealz →
   Einstellungen* korrigieren, kein Neustart nötig.
 
+## SparBit sucht den Feed selbst
+
+Nachgetragen, nachdem ein geratener Pfad im Betrieb danebenlag:
+
+```
+https://www.mydealz.de/gruppe/erotik-rss:
+ValueError: Kein gueltiger Feed (SAXParseException).
+Anfang der Antwort: '<!DOCTYPE html><html class="no-js …
+```
+
+Die Antwort war eine **echte Seite** — kein 404, keine Cloudflare-Wand. Der
+Server war erreichbar und wusste, wo sein Feed liegt; nur SparBit wusste es
+nicht. Praktisch jede Seite schreibt das in ihren Kopf:
+
+```html
+<link rel="alternate" type="application/rss+xml" href="/rss/gruppe/erotik">
+```
+
+Darum gilt jetzt für **alle** Feed-Quellen: kommt HTML statt eines Feeds,
+liest SparBit die ausgezeichneten Feed-Adressen aus der Seite, probiert sie
+der Reihe nach (höchstens drei) und **schreibt die funktionierende in die
+Quellen-Einstellungen zurück**. Beim nächsten Lauf steht dort die richtige
+Adresse. Ein falsch geratener Pfad heilt sich damit von selbst — und du
+siehst im UI, was daraus geworden ist.
+
+Deshalb dürfen in den Feed-Feldern auch **Seiten-Adressen** stehen, nicht nur
+Feed-Adressen. Die Gruppen-Pfade von mydealz sind aus diesem Grund auf die
+Seiten umgestellt (`/gruppe/gratis` statt `/gruppe/gratis-rss`).
+
+### „Feed suchen"
+
+Wenn du es vorher wissen willst: *Quellen → Feed suchen* (oder
+`sparbit feed-suche <adresse>`) holt eine beliebige Seite und listet, welche
+Feeds sie angibt — mit Vermerk, ob die Adresse **ausgezeichnet** ist oder aus
+einem Link **geraten**. Das Ergebnis lässt sich direkt in ein Feed-Feld
+kopieren.
+
+```
+$ sparbit feed-suche https://pypi.org/
+  2 Feed-Adresse(n) gefunden auf 'PyPI · Der Python Package Index'.
+
+  Feed-Adresse                       Titel                        Herkunft
+  https://pypi.org/rss/updates.xml   RSS: Letzte 40 Aktualisier…  ausgezeichnet
+  https://pypi.org/rss/packages.xml  RSS: 40 neueste Pakete       ausgezeichnet
+```
+
+Und die Fehlermeldungen sagen jetzt, was zu tun ist. Statt
+`SAXParseException` steht dort entweder *„Der Server hat eine HTML-Seite
+geliefert (Seitentitel: …). Auf der Seite ist auch kein Feed ausgezeichnet"*
+oder *„Bot-Abwehr statt Inhalt — ein anderer Pfad hilft dagegen nicht."*
+Das sind zwei verschiedene Probleme, und man sucht sonst am falschen Ende.
+
 ## Wenn eine Quelle nicht funktioniert
 
 1. **„Jetzt testen"** drücken — die Fehlermeldung ist konkret (404, HTML statt
@@ -170,9 +222,19 @@ Deal-Host; 44 von 44 Endpoints scheitern am Proxy. Alles unten sind darum
 
 | Quelle | Typ | Vorbelegung | Anmerkung |
 |---|---|---|---|
-| `mydealz_erotik` | RSS | `/gruppe/erotik-rss` | Pepper-Konvention, ungeprüft |
+| `mydealz_erotik` | RSS | Seite `/gruppe/erotik` | Feed wird auf der Seite gesucht |
+| `preisjaeger_erotik` | RSS | Seite `/gruppe/erotik` | Österreich, gleiche Plattform |
+| `dealabs_erotik` | RSS | Seite `/groupe/erotique` | Frankreich, Slug geraten |
+| `hotukdeals_erwachsen` | RSS | Seite `/tag/adult` | UK, GBP → EUR, Slug geraten |
 | `reddit_erwachsen` | RSS | `SexToyDeals`, `NSFWdeals`, `AdultDeals` | **Namen geraten** — was 404 gibt, löschen |
-| `erotik_feed` | RSS/Atom | leer | Die eigentliche Arbeitsquelle, siehe unten |
+| `erotik_feed` | RSS/Atom | leer | Shop-Seite *oder* Feed, siehe unten |
+
+Die Gruppen-Pfade sind weiterhin geraten — aber sie sind jetzt die der
+**Seite**, nicht des Feeds. Gibt es die Gruppe unter dem Namen, findet
+SparBit den Feed darauf selbst. Gibt es sie nicht, sagt die Fehlermeldung
+das im Klartext statt eines Parser-Fehlers. Zusätzlich hat jede dieser
+Quellen **Suchbegriff-Feeds** — die greifen auch dann, wenn es die Gruppe
+gar nicht gibt.
 
 Kriterium für die Aufnahme ist dasselbe wie überall im Projekt: **es muss
 einen Feed oder eine dokumentierte API geben.** Erotik-Shops sind fast
@@ -202,9 +264,14 @@ Seitenquelltext oder an typischen Pfaden.
 | **PrestaShop** | `…/modules/feeder/rss.php` | `/themes/` + `id_product=` |
 | **Shopware 6** | kein Standard-RSS; manche Shops bieten einen Google-Shopping-Export als XML an | `/widgets/` |
 
-Vorgehen: Adresse im Browser öffnen. Kommt XML → unter *Quellen → Eigene
-18+-Feeds* eintragen → *Jetzt testen*. Kommt HTML oder 404 → nächste
-probieren. **Nichts eintragen, was du nicht selbst gesehen hast.**
+Vorgehen, kurz: **Adresse der Angebotsseite** unter *Quellen → Eigene
+18+-Quellen* eintragen und *Jetzt testen* drücken. Den Feed sucht SparBit
+selbst und trägt ihn ein. Willst du es vorher sehen: *Feed suchen* oben auf
+der Quellen-Seite, oder `sparbit feed-suche <adresse>`.
+
+Die Tabelle oben brauchst du nur, wenn die Seite ihren Feed **nicht**
+auszeichnet — dann musst du die Adresse von Hand raten, und dort steht,
+welche Schreibweise bei welcher Shop-Software üblich ist.
 
 Die Shopify-Variante ist am ergiebigsten: `.atom` ist dort fest eingebaut
 und lässt sich nicht abschalten, und auffällig viele Erotik-Shops laufen

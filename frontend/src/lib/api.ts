@@ -68,6 +68,20 @@ export interface GratisBefund {
   belege: string[];
 }
 
+export interface FeedSuche {
+  ok: boolean;
+  url: string;
+  detail: string;
+  ist_selbst_feed?: boolean;
+  feeds: Array<{
+    url: string;
+    titel: string | null;
+    typ: string | null;
+    /** "link" = von der Seite ausgezeichnet, "anker" = aus einem Link geraten. */
+    herkunft: "link" | "anker";
+  }>;
+}
+
 export interface ErwachsenStatus {
   an: boolean;
   bestaetigt_am: string | null;
@@ -655,6 +669,8 @@ export const api = {
     run: (id: string) => post<Record<string, unknown>>(`/sources/${id}/run`),
     reset: (id: string) => post<{ ok: boolean }>(`/sources/${id}/reset`),
     runs: (id: string) => get<SourceRun[]>(`/sources/${id}/runs`),
+    /** Welche Feeds zeichnet diese Adresse aus? */
+    feedSuche: (url: string) => post<FeedSuche>("/sources/feed-suche", { url }),
   },
   rules: {
     list: () => get<Rule[]>("/rules"),

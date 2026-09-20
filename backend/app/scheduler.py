@@ -150,6 +150,13 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
                     cfg.verification = "verified"
                     cfg.last_verified = utcnow()
 
+                # Was die Quelle unterwegs ueber sich gelernt hat, bleibt
+                # erhalten - z.B. eine selbst gefundene Feed-Adresse.
+                if ctx.notizen:
+                    cfg.options = {**(cfg.options or {}), **ctx.notizen}
+                    log.info("%s: Einstellungen korrigiert (%s)",
+                             source_id, ", ".join(sorted(ctx.notizen)))
+
                 fresh = ingest(db, source_id, items)
                 new_count = len(fresh)
 

@@ -1,9 +1,11 @@
 import {
-  AlertTriangle, BellOff, CheckCircle2, ExternalLink, FlaskConical, HelpCircle,
-  Key, Play, RotateCcw, TestTube2, XCircle,
+  AlertTriangle, BellOff, CheckCircle2, Copy, ExternalLink, FlaskConical,
+  HelpCircle, Key, Play, RotateCcw, Rss, TestTube2, XCircle,
 } from "lucide-react";
 import * as React from "react";
-import { api, type OptionSpec, type Source, type SourceTestResult } from "@/lib/api";
+import {
+  api, type FeedSuche, type OptionSpec, type Source, type SourceTestResult,
+} from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import {
   cn, formatDuration, formatPrice, linesToList, listToLines, timeAgo,
@@ -20,6 +22,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   reddit: "Reddit",
   gaming: "Gaming",
   experimental: "Experimentell",
+  erwachsen: "18+",
 };
 
 export function Sources() {
@@ -54,6 +57,8 @@ export function Sources() {
         title="Quellen"
         description="Jede Quelle einzeln schaltbar. Prüfe neue Quellen mit „Jetzt testen“, bevor du sie scharf stellst."
       />
+
+      <FeedSucher />
 
       <Card className="mb-6 border-warning/30 bg-warning/5 p-4">
         <div className="flex gap-3">
@@ -106,6 +111,100 @@ export function Sources() {
         />
       )}
     </>
+  );
+}
+
+/** Den Feed einer Seite finden, statt seinen Pfad zu raten.
+ *
+ *  Entstanden aus einer Fehlermeldung aus dem Betrieb: ein geratener
+ *  Gruppen-Pfad lieferte HTML, und der Parser warf eine SAXParseException.
+ *  Die Seite selbst weiß, wo ihr Feed liegt — man muss sie nur fragen.
+ */
+function FeedSucher() {
+  const toast = useToast();
+  const [url, setUrl] = React.useState("");
+  const [laeuft, setLaeuft] = React.useState(false);
+  const [ergebnis, setErgebnis] = React.useState<FeedSuche | null>(null);
+
+  const suchen = async () => {
+    if (!url.trim()) return;
+    setLaeuft(true);
+    setErgebnis(null);
+    try {
+      setErgebnis(await api.sources.feedSuche(url.trim()));
+    } catch (err) {
+      toast.push("error", "Suche fehlgeschlagen", (err as Error).message);
+    } finally {
+      setLaeuft(false);
+    }
+  };
+
+  const kopieren = async (wert: string) => {
+    try {
+      await navigator.clipboard.writeText(wert);
+      toast.push("success", "Kopiert", wert);
+    } catch {
+      toast.push("error", "Kopieren ging nicht", wert);
+    }
+  };
+
+  return (
+    <Card className="mb-6 p-4">
+      <div className="flex items-start gap-3">
+        <Rss className="mt-2 h-4 w-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <p className="text-sm font-medium">Feed suchen</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Adresse einer Shop- oder Übersichtsseite eintragen — SparBit
+              liest aus, welche Feeds die Seite selbst angibt. Das Ergebnis
+              passt direkt in ein Feed-Feld weiter unten.
+            </p>
+          </div>
+          <form className="flex gap-2"
+                onSubmit={(e) => { e.preventDefault(); void suchen(); }}>
+            <Input value={url} onChange={(e) => setUrl(e.target.value)}
+                   placeholder="https://www.beispiel-shop.de/angebote"
+                   className="flex-1" />
+            <Button type="submit" variant="outline" loading={laeuft}
+                    disabled={!url.trim()}>
+              Suchen
+            </Button>
+          </form>
+
+          {ergebnis && (
+            <div className="space-y-2 border-t border-border pt-2">
+              <p className={cn("text-xs", ergebnis.ok ? "text-foreground"
+                                                      : "text-muted-foreground")}>
+                {ergebnis.detail}
+              </p>
+              {ergebnis.feeds.map((feed) => (
+                <div key={feed.url}
+                     className="flex items-center gap-2 rounded-md border
+                                border-border bg-muted/30 px-2.5 py-1.5">
+                  <Badge variant={feed.herkunft === "link" ? "success" : "outline"}>
+                    {feed.herkunft === "link" ? "ausgezeichnet" : "geraten"}
+                  </Badge>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px]"
+                        title={feed.url}>
+                    {feed.url}
+                  </span>
+                  {feed.titel && (
+                    <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
+                      {feed.titel}
+                    </span>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => kopieren(feed.url)}
+                          title="Adresse kopieren">
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 

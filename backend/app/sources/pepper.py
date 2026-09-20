@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 
+from .. import feedfinder
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
                    Verification, register)
@@ -54,12 +55,16 @@ class PepperSource(Source):
     ]
 
     async def fetch(self, ctx: FetchContext) -> list[DealItem]:
-        urls: list[str] = []
-        for path in (ctx.opt("feeds") or []):
-            urls.append(self._abs(path))
+        pfade = [str(p) for p in (ctx.opt("feeds") or [])]
+        # Index mitfuehren, damit ein selbst gefundener Feed genau den
+        # Pfad ersetzt, der daneben lag - und nicht irgendeinen.
+        urls: list[tuple[int | None, str]] = [
+            (i, self._abs(p)) for i, p in enumerate(pfade)]
+
         tmpl = ctx.opt("search_path", "/search?q={term}&rss=1")
         for term in (ctx.opt("search_terms") or []):
-            urls.append(self._abs(tmpl.format(term=term.strip().replace(" ", "+"))))
+            urls.append((None,
+                         self._abs(tmpl.format(term=term.strip().replace(" ", "+")))))
 
         if not urls:
             raise ValueError(
@@ -70,13 +75,24 @@ class PepperSource(Source):
         min_temp = float(ctx.opt("min_temperatur", 0) or 0)
         items: list[DealItem] = []
         errors: list[str] = []
+        korrigiert: dict[int, str] = {}
 
-        for url in urls:
+        for index, url in urls:
             try:
-                text = await ctx.http.get_text(url, cache_key=f"{self.id}:{url}")
-                items.extend(self.parse(text, min_temp))
+                fund = await feedfinder.hole(ctx.http, url,
+                                             cache_key=f"{self.id}:{url}")
             except Exception as exc:  # eine kaputte Sub-Feed-URL kippt nicht alles
-                errors.append(f"{url}: {type(exc).__name__}: {exc}"[:200])
+                errors.append(f"{url}: {type(exc).__name__}: {exc}"[:260])
+                continue
+            if fund.entdeckt and index is not None:
+                korrigiert[index] = fund.url
+            items.extend(self.parse(fund.text, min_temp))
+
+        if korrigiert:
+            neu = list(pfade)
+            for index, url in korrigiert.items():
+                neu[index] = url
+            ctx.merke("feeds", neu)
 
         if not items and errors:
             raise RuntimeError(" | ".join(errors[:3]))
@@ -156,10 +172,10 @@ class MyDealz(PepperSource):
     options_schema = [
         OptionSpec("feeds", "Feed-Pfade", "list",
                    ["/rss/alle", "/rss/hot",
-                    "/gruppe/preisfehler-rss", "/gruppe/gratis-rss",
-                    "/gruppe/gaming-rss"],
-                   help="Vorbelegt mit den ueblichen Pfaden - bitte mit "
-                        "'Jetzt testen' pruefen und ggf. korrigieren."),
+                    "/gruppe/preisfehler", "/gruppe/gratis", "/gruppe/gaming"],
+                   help="Feed-Adresse oder Seiten-Adresse - bei einer Seite "
+                        "sucht SparBit den Feed selbst und traegt ihn hier "
+                        "ein. Die Gruppen-Pfade sind darum die der Seite."),
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", [],
                    help="z.B. lego, ssd, kopfhoerer"),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",

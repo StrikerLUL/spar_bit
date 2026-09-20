@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 
+from .. import feedfinder
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
                    Verification, register)
@@ -59,15 +60,17 @@ class Reddit(Source):
                 continue
             url = f"{base}/r/{sub}/{listing}/.rss"
             try:
-                text = await ctx.http.get_text(url, cache_key=f"reddit:{sub}:{listing}")
-                items.extend(self.parse(text, sub))
+                fund = await feedfinder.hole(
+                    ctx.http, url, cache_key=f"{self.id}:{sub}:{listing}")
+                items.extend(self.parse(fund.text, sub))
             except Exception as exc:
-                errors.append(f"r/{sub}: {type(exc).__name__}: {exc}"[:180])
+                errors.append(f"r/{sub}: {type(exc).__name__}: {exc}"[:260])
 
         if not items and errors:
             raise RuntimeError(" | ".join(errors[:3]))
         if errors and ctx.log:
-            ctx.log.warning("reddit: %d Subreddits fehlerhaft: %s", len(errors), errors[0])
+            ctx.log.warning("%s: %d Subreddits fehlerhaft: %s",
+                            self.id, len(errors), errors[0])
         return items
 
     def parse(self, text: str, sub: str = "") -> list[DealItem]:

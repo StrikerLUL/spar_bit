@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
+from .. import feedfinder
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
                    Verification, register)
@@ -44,12 +45,23 @@ class CustomFeed(Source):
 
         items: list[DealItem] = []
         errors: list[str] = []
-        for url in feeds:
+        korrigiert: dict[int, str] = {}
+        for nummer, url in enumerate(feeds):
             try:
-                text = await ctx.http.get_text(url, cache_key=f"custom:{url}")
+                fund = await feedfinder.hole(ctx.http, url,
+                                             cache_key=f"custom:{url}")
+                text = fund.text
+                if fund.entdeckt:
+                    korrigiert[nummer] = fund.url
                 items.extend(self.parse(text, label or urlsplit(url).hostname or "")[:cap])
             except Exception as exc:
-                errors.append(f"{url}: {type(exc).__name__}: {exc}"[:180])
+                errors.append(f"{url}: {type(exc).__name__}: {exc}"[:260])
+
+        if korrigiert:
+            neu = list(feeds)
+            for nummer, url in korrigiert.items():
+                neu[nummer] = url
+            ctx.merke("feeds", neu)
 
         if not items and errors:
             raise RuntimeError(" | ".join(errors[:3]))

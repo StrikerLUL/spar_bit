@@ -20,6 +20,10 @@ router = APIRouter(prefix="/api/sources", tags=["sources"],
                    dependencies=[Depends(current_user)])
 
 
+class FeedSuche(BaseModel):
+    url: str
+
+
 class SourceUpdate(BaseModel):
     enabled: bool | None = None
     interval_seconds: int | None = None
@@ -93,6 +97,25 @@ def list_sources(db: Session = Depends(get_db)) -> list[dict]:
             db.commit()
         out.append(_serialize(src, cfg, {"avg_duration_ms": avg_map.get(src.id, 0)}))
     return out
+
+
+@router.post("/feed-suche")
+async def feed_suche(body: FeedSuche) -> dict:
+    """Welche Feeds zeichnet diese Adresse aus?
+
+    Der Ausweg aus dem Pfad-Raten: statt zu wissen, wie ein Shop seinen
+    Feed nennt, fragt man ihn. Ergebnis sind die Adressen, die die Seite
+    selbst angibt - direkt in ein Feed-Feld kopierbar.
+    """
+    from .. import feedfinder
+
+    url = (body.url or "").strip()
+    if not url:
+        raise HTTPException(400, "Keine Adresse angegeben.")
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    return await feedfinder.suche(build_context(
+        SourceConfig(id="_suche", options={})).http, url)
 
 
 def _pruefe_frei(db: Session, source_id: str) -> None:
