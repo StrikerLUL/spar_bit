@@ -15,7 +15,7 @@ Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
 einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über neun
 Kanäle melden.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-359-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-363-22c55e)
 
 **Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS und Zertifikat:
 
@@ -753,37 +753,21 @@ Caddy setzt `X-Forwarded-Proto` von selbst und holt das Zertifikat automatisch.
 <details>
 <summary><strong>nginx auf dem Host</strong></summary>
 
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name spar-bit.example.de;
+Die fertige Datei liegt im Repo — nur die Domain eintragen:
 
-    # ssl_certificate … von certbot
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Live-Ticker: puffern aus, Verbindung offen lassen.
-    location /api/events {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Connection        "";
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 24h;
-    }
-}
+```bash
+sudo cp deploy/nginx-sparbit.conf /etc/nginx/sites-available/sparbit
+sudo sed -i 's/DEINE-DOMAIN/spar-bit.example.de/' /etc/nginx/sites-available/sparbit
+sudo ln -s /etc/nginx/sites-available/sparbit /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d spar-bit.example.de
 ```
 
-Zertifikat danach mit `certbot --nginx -d spar-bit.example.de`.
+`certbot --nginx` baut den Block selbst auf HTTPS um und richtet die
+Umleitung von Port 80 ein — deshalb steht in der Vorlage noch kein `ssl`.
+Sie bringt schon mit, was leicht vergessen wird: eigene Location für den
+SSE-Stream ohne Puffer, `X-Forwarded-Proto` für das `Secure`-Cookie und
+8 MB Upload-Grenze für den Backup-Import.
 </details>
 
 <details>
@@ -855,7 +839,7 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 359 Tests, ohne Netzwerk
+cd backend && pytest tests/ -q   # 363 Tests, ohne Netzwerk
 ```
 
 ### Eine neue Quelle hinzufügen
