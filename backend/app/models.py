@@ -198,6 +198,12 @@ class Deal(Base):
     erwachsen: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     erwachsen_grund: Mapped[str | None] = mapped_column(Text)
 
+    # Wann das Angebot endet, sofern es jemand sagt. Bei Gratis-Sachen ist
+    # das die wichtigste Angabe ueberhaupt - ein Spiel, das Donnerstag um
+    # 17 Uhr verschwindet, ist kein Rabatt, sondern ein Termin.
+    laeuft_ab: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True)
+    ablauf_gemeldet_am: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
     # Gegenprobe auf der Zielseite - siehe app/gratischeck.py.
     check_status: Mapped[str | None] = mapped_column(String(16), index=True)
     check_text: Mapped[str | None] = mapped_column(Text)
@@ -456,6 +462,25 @@ class Interaction(Base):
     art: Mapped[str] = mapped_column(String(16), index=True)
     ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow,
                                          index=True)
+
+
+class PushAbo(Base):
+    """Ein Browser, der Push-Meldungen bekommen will.
+
+    Nicht dasselbe wie ein Kanal: ein Kanal ist eine Adresse, die man
+    eintraegt. Ein Push-Abo entsteht im Browser und gilt genau fuer
+    dieses eine Geraet - darum stehen sie hier einzeln, und der Kanal
+    schickt an alle.
+    """
+    __tablename__ = "push_abos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    endpunkt: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(255))
+    auth: Mapped[str] = mapped_column(String(64))
+    geraet: Mapped[str | None] = mapped_column(String(255))
+    erstellt_am: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    zuletzt_ok: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    fehler_in_folge: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ApiToken(Base):

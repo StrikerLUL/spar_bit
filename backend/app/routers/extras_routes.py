@@ -6,7 +6,7 @@ import io
 import logging
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
@@ -282,6 +282,33 @@ def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="sparbit-{stamp}.csv"'},
     )
+
+
+# --- Kalender --------------------------------------------------------------
+
+kalender_router = APIRouter(prefix="/api", tags=["kalender"])
+
+
+@kalender_router.get("/kalender.ics")
+def kalender(token: str = Query(..., min_length=10),
+             nur_gratis: bool = False,
+             db: Session = Depends(get_db)) -> Response:
+    """Fristen als abonnierbarer Kalender.
+
+    Das Token steht in der Adresse und nicht im Header, weil eine
+    Kalender-App keinen mitschicken kann - sie holt die Datei stumpf per
+    GET. Darum ein API-Token, das sich einzeln zurueckziehen laesst,
+    statt des Sitzungs-Cookies.
+    """
+    from ..kalender import feed
+    from ..tokens import pruefe as pruefe_token
+
+    if pruefe_token(db, token) is None:
+        raise HTTPException(401, "Token ungültig oder zurückgezogen")
+    return Response(content=feed(db, nur_gratis),
+                    media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition":
+                             'inline; filename="sparbit.ics"'})
 
 
 # --- Gespeicherte Suchen ---------------------------------------------------

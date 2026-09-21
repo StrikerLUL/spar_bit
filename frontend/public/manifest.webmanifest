@@ -9,7 +9,31 @@
   "theme_color": "#0a0c10",
   "lang": "de",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Feed",
+      "url": "/feed"
+    },
+    {
+      "name": "Gratis",
+      "url": "/feed?gratis=true"
+    },
+    {
+      "name": "Preisfehler",
+      "url": "/preisfehler"
+    }
   ]
 }

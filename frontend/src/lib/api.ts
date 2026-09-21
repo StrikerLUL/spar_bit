@@ -480,6 +480,14 @@ export interface SavedSearch {
   filter: Record<string, unknown>;
 }
 
+export interface PushGeraet {
+  id: number;
+  geraet: string;
+  erstellt_am: string;
+  zuletzt_ok: string | null;
+  host: string;
+}
+
 export interface AppSettings {
   waehrungskurse: Record<string, number>;
   aktive_kurse: Record<string, number>;
@@ -777,6 +785,14 @@ export const api = {
     create: (name: string, filter: Record<string, unknown>) =>
       post<SavedSearch>("/searches", { name, filter }),
     remove: (id: number) => del<{ ok: boolean }>(`/searches/${id}`),
+  },
+  push: {
+    schluessel: () => get<{ verfuegbar: boolean; schluessel: string | null;
+                            grund?: string; geraete?: number }>("/push/schluessel"),
+    anmelden: (body: { endpunkt: string; p256dh: string; auth: string; geraet: string }) =>
+      post<{ ok: boolean; neu: boolean; id: number }>("/push/abo", body),
+    abos: () => get<PushGeraet[]>("/push/abos"),
+    entfernen: (id: number) => del<{ ok: boolean }>(`/push/abo/${id}`),
   },
   settings: {
     get: () => get<AppSettings>("/settings"),

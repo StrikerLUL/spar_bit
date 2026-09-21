@@ -185,11 +185,63 @@ def _schritt_004(conn: Connection) -> None:
         indizes_aus_modellen(conn, Base.metadata)
 
 
+def _schritt_005(conn: Connection) -> None:
+    """Ablaufdatum - und was in den Rohdaten schon lag, nachtragen.
+
+    Epic schickt endDate seit jeher mit; es landete unbenutzt im
+    Rohdatenfeld. Die Angabe war also die ganze Zeit da, nur nirgends
+    abgelegt - das laesst sich rueckwirkend holen.
+    """
+    import json
+
+    from .ablauf import aus_roh
+    from .models import Base
+
+    neu = spalte_ergaenzen(conn, "deals", "laeuft_ab", "DATETIME")
+    spalte_ergaenzen(conn, "deals", "ablauf_gemeldet_am", "DATETIME")
+    if not tabelle_existiert(conn, "deals"):
+        return
+    # Nie voraussetzen, dass eine Spalte da ist, nur weil das Modell sie
+    # kennt: eine Datenbank von vor drei Releases sieht anders aus.
+    if not spalte_existiert(conn, "deals", "roh"):
+        return
+
+    zeilen = conn.execute(text(
+        "SELECT id, roh FROM deals WHERE laeuft_ab IS NULL AND roh IS NOT NULL"
+    )).fetchall()
+    getroffen = 0
+    for deal_id, roh in zeilen:
+        if isinstance(roh, str):
+            try:
+                roh = json.loads(roh)
+            except (ValueError, TypeError):
+                continue
+        ende = aus_roh(roh)
+        if ende is None:
+            continue
+        conn.execute(text("UPDATE deals SET laeuft_ab = :e WHERE id = :i"),
+                     {"e": ende.isoformat(), "i": deal_id})
+        getroffen += 1
+    if getroffen:
+        log.info("Migration: Ablaufdatum fuer %d Deals aus den Rohdaten geholt",
+                 getroffen)
+    if neu:
+        indizes_aus_modellen(conn, Base.metadata)
+
+
+def _schritt_006(conn: Connection) -> None:
+    """Push-Abos - die Tabelle legt create_all an, der Index hier."""
+    from .models import Base
+    indizes_aus_modellen(conn, Base.metadata)
+
+
 SCHRITTE: list[Schritt] = [
     Schritt(1, "Spalten der Releases bis 1.0", _schritt_001),
     Schritt(2, "Fehlende Indizes nachziehen", _schritt_002),
     Schritt(3, "Zweiter Faktor (TOTP)", _schritt_003),
     Schritt(4, "Produktkennung je Deal, rueckwirkend gefuellt", _schritt_004),
+    Schritt(5, "Ablaufdatum, aus den Rohdaten nachgetragen", _schritt_005),
+    Schritt(6, "Push-Abos", _schritt_006),
 ]
 
 

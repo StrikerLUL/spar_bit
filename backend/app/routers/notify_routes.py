@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..auth import current_user
 from ..db import get_db, get_setting, set_setting
 from ..models import Channel as ChannelRow
-from ..models import NotificationLog
+from ..models import NotificationLog, PushAbo
 from ..notify import all_channels, get_channel
 from ..scheduler import get_http
 
@@ -160,3 +160,81 @@ def put_quiet(body: QuietHours, db: Session = Depends(get_db)) -> dict:
     set_setting(db, "quiet_hours", body.model_dump())
     db.commit()
     return body.model_dump()
+
+
+# --- Web Push: Geraete an- und abmelden -----------------------------------
+
+push_router = APIRouter(prefix="/api/push", tags=["push"],
+                        dependencies=[Depends(current_user)])
+
+
+class AboBody(BaseModel):
+    endpunkt: str = Field(min_length=10, max_length=2000)
+    p256dh: str = Field(min_length=10, max_length=255)
+    auth: str = Field(min_length=8, max_length=64)
+    geraet: str = Field(default="", max_length=255)
+
+
+@push_router.get("/schluessel")
+def push_schluessel(db: Session = Depends(get_db)) -> dict:
+    """Den oeffentlichen VAPID-Schluessel holen - der Browser braucht ihn
+    beim Anmelden.
+
+    Erzeugt wird das Paar beim ersten Aufruf. Einmal je Installation:
+    waere es je Geraet, muessten sich alle anderen neu anmelden, sobald
+    eines dazukommt.
+    """
+    from .. import webpush
+
+    if not webpush.verfuegbar():
+        return {"verfuegbar": False, "schluessel": None,
+                "grund": "Das Paket 'cryptography' fehlt."}
+
+    oeffentlich = get_setting(db, "vapid_oeffentlich")
+    if not oeffentlich:
+        paar = webpush.neues_paar()
+        set_setting(db, "vapid_privat", paar.privat)
+        set_setting(db, "vapid_oeffentlich", paar.oeffentlich)
+        db.commit()
+        oeffentlich = paar.oeffentlich
+    return {"verfuegbar": True, "schluessel": oeffentlich,
+            "geraete": db.query(PushAbo).count()}
+
+
+@push_router.post("/abo")
+def push_anmelden(body: AboBody, db: Session = Depends(get_db)) -> dict:
+    """Dieses Geraet anmelden. Derselbe Endpunkt zweimal ist kein Fehler -
+    der Browser erneuert ihn von sich aus."""
+    vorhanden = db.scalar(select(PushAbo).where(PushAbo.endpunkt == body.endpunkt))
+    if vorhanden:
+        vorhanden.p256dh = body.p256dh
+        vorhanden.auth = body.auth
+        vorhanden.geraet = body.geraet[:255] or vorhanden.geraet
+        vorhanden.fehler_in_folge = 0
+        db.commit()
+        return {"ok": True, "neu": False, "id": vorhanden.id}
+
+    abo = PushAbo(endpunkt=body.endpunkt, p256dh=body.p256dh, auth=body.auth,
+                  geraet=body.geraet[:255] or None)
+    db.add(abo)
+    db.commit()
+    db.refresh(abo)
+    return {"ok": True, "neu": True, "id": abo.id}
+
+
+@push_router.get("/abos")
+def push_liste(db: Session = Depends(get_db)) -> list[dict]:
+    return [{"id": a.id, "geraet": a.geraet or "unbekanntes Gerät",
+             "erstellt_am": a.erstellt_am, "zuletzt_ok": a.zuletzt_ok,
+             "host": a.endpunkt.split("/")[2] if "/" in a.endpunkt else ""}
+            for a in db.scalars(select(PushAbo).order_by(desc(PushAbo.erstellt_am)))]
+
+
+@push_router.delete("/abo/{abo_id}")
+def push_abmelden(abo_id: int, db: Session = Depends(get_db)) -> dict:
+    abo = db.get(PushAbo, abo_id)
+    if abo is None:
+        raise HTTPException(404, "Nicht gefunden")
+    db.delete(abo)
+    db.commit()
+    return {"ok": True}

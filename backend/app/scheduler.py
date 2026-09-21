@@ -27,6 +27,7 @@ from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, ut
 from .pipeline import (
     check_price_alarms,
     dispatch,
+    dispatch_ablauf,
     dispatch_alarms,
     dispatch_preisfehler,
     dispatch_watchdog,
@@ -523,6 +524,21 @@ def cleanup_job() -> None:
         log.error("Aufraeumen fehlgeschlagen: %s", exc)
 
 
+async def ablauf_job() -> None:
+    """Erinnern, was bald endet.
+
+    Laeuft alle 30 Minuten: haeufig genug, dass eine Frist von sechs
+    Stunden nicht durchrutscht, selten genug, um niemanden zu nerven.
+    """
+    try:
+        with session_scope() as db:
+            gesendet = await dispatch_ablauf(db, get_http())
+            if gesendet:
+                log.info("Fristmeldungen verschickt: %d", gesendet)
+    except Exception as exc:
+        log.error("Fristmeldung fehlgeschlagen: %s", exc)
+
+
 async def backup_job() -> None:
     """Taegliche Sicherung ins Datenverzeichnis, mit Rotation.
 
@@ -548,6 +564,8 @@ def start() -> None:
     sync_jobs()
     scheduler.add_job(digest_job, IntervalTrigger(hours=1), id="digest",
                       max_instances=1, coalesce=True)
+    scheduler.add_job(ablauf_job, IntervalTrigger(minutes=30), id="ablauf",
+                      replace_existing=True, max_instances=1)
     scheduler.add_job(backup_job, IntervalTrigger(hours=24), id="backup",
                       replace_existing=True, max_instances=1,
                       next_run_time=utcnow() + timedelta(minutes=5))

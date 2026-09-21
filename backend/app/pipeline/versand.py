@@ -255,6 +255,92 @@ async def dispatch_alarms(db: Session, deals: list[Deal], http) -> int:
     return sent
 
 
+# --- Auslaufende Angebote --------------------------------------------------
+
+# Wie kurz vor Schluss erinnert wird. Sechs Stunden: frueh genug, um noch
+# zu reagieren, spaet genug, dass es nicht wieder in Vergessenheit geraet.
+ABLAUF_VORLAUF_STUNDEN = 6
+
+
+def auslaufende(db: Session, vorlauf_stunden: int = ABLAUF_VORLAUF_STUNDEN) -> list[Deal]:
+    """Was bald endet und mich etwas angeht.
+
+    Nicht alles mit Frist - nur, was gemerkt, getroffen oder gratis ist.
+    Eine Erinnerung an jeden auslaufenden Rabatt waere in einer Woche
+    stummgeschaltet und danach wertlos.
+    """
+    from sqlalchemy import or_
+
+    from ..models import Match
+
+    jetzt = utcnow()
+    grenze = jetzt + timedelta(hours=vorlauf_stunden)
+    stmt = (select(Deal)
+            .where(Deal.laeuft_ab.is_not(None),
+                   Deal.laeuft_ab > jetzt,
+                   Deal.laeuft_ab <= grenze,
+                   Deal.ablauf_gemeldet_am.is_(None),
+                   Deal.duplicate_of.is_(None))
+            .where(or_(Deal.bookmarked.is_(True), Deal.ist_gratis.is_(True),
+                       Deal.alarm_preis.is_not(None),
+                       Deal.id.in_(select(Match.deal_id))))
+            .order_by(Deal.laeuft_ab.asc()).limit(25))
+    return list(db.scalars(stmt))
+
+
+async def dispatch_ablauf(db: Session, http,
+                          vorlauf_stunden: int = ABLAUF_VORLAUF_STUNDEN) -> int:
+    """"Laeuft in vier Stunden aus" - die Meldung, die bei Gratis-Sachen
+    mehr wert ist als die urspruengliche."""
+    deals = auslaufende(db, vorlauf_stunden)
+    if not deals:
+        return 0
+    channels = [c for c in db.scalars(select(Channel)) if c.enabled]
+    if not channels:
+        # Ohne Kanal keine Meldung - aber auch nicht als gemeldet
+        # vermerken, sonst faellt sie aus, sobald wieder einer da ist.
+        return 0
+
+    # Ruhezeit gilt: ein Angebot, das in sechs Stunden endet, rechtfertigt
+    # keinen Weckruf um drei Uhr nachts. Der Lauf kommt alle 30 Minuten
+    # wieder, und der Vorlauf ist so bemessen, dass danach noch Zeit ist.
+    if in_quiet_hours(db):
+        return 0
+
+    jetzt = utcnow()
+    gesendet = 0
+    for deal in deals:
+        rest = deal.laeuft_ab - jetzt
+        # Gerundet, nicht abgeschnitten: bei 3 Stunden 59 Minuten steht
+        # sonst "in etwa 3 h" - und wer danach geht, kommt zu spaet.
+        stunden = max(1, round(rest.total_seconds() / 3600))
+        was = "Gratis-Angebot" if deal.ist_gratis else "Angebot"
+        note = _note(deal, regel="Frist", prioritaet="SOFORT",
+                     titel=f"Läuft aus: {deal.titel}",
+                     beschreibung=f"Dieses {was} endet in etwa {stunden} h.")
+        for row in channels:
+            impl = get_channel(row.type)
+            if impl is None:
+                continue
+            try:
+                await impl.send(row.config or {}, note, http)
+                gesendet += 1
+                db.add(NotificationLog(channel_id=row.id, channel_type=row.type,
+                                       rule_name="Frist", deal_id=deal.id,
+                                       deal_titel=deal.titel[:500], ok=True))
+            except Exception as exc:
+                log.error("Fristmeldung ueber %s fehlgeschlagen: %s", row.type, exc)
+                db.add(NotificationLog(channel_id=row.id, channel_type=row.type,
+                                       rule_name="Frist", deal_id=deal.id,
+                                       deal_titel=deal.titel[:500], ok=False,
+                                       error=f"{type(exc).__name__}: {exc}"[:500]))
+        deal.ablauf_gemeldet_am = jetzt
+    db.commit()
+    if gesendet:
+        log.info("Fristmeldung: %d Deals an %d Kanaele", len(deals), len(channels))
+    return gesendet
+
+
 # --- Preisfehler-Waechter --------------------------------------------------
 #
 # Ein eigener Zustellweg neben den Regeln, und das mit Absicht: ein

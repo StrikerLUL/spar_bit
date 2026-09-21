@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import erwachsen as erwachsen_mod
+from ..ablauf import bestimme as ablauf_bestimmen
 from ..currency import to_eur
 from ..dedupe import normalize_title, titles_match, url_hash
 from ..events import broker
@@ -137,6 +138,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         titel=item.titel[:1000],
         titel_norm=titel_norm,
         produkt_id=kennung,
+        laeuft_ab=ablauf_bestimmen(item.titel, item.beschreibung, item.roh),
         beschreibung=item.beschreibung,
         url=item.url,
         bild=item.bild,

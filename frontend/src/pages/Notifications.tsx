@@ -1,12 +1,13 @@
 import {
-  Bell, CheckCircle2, Clock, Coins, Monitor, Pause, Play, Plus, Send, Trash2,
-  XCircle,
+  Bell, BellRing, CheckCircle2, Clock, Coins, Monitor, Pause, Play, Plus, Send,
+  Trash2, XCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
   api, type AppSettings, type Channel, type ChannelType,
-  type NotificationLogEntry, type OptionSpec, type QuietHours,
+  type NotificationLogEntry, type OptionSpec, type PushGeraet, type QuietHours,
 } from "@/lib/api";
+import { pushAbmelden, pushAnmelden, pushMoeglich } from "@/lib/push";
 import {
   desktopEnabled, desktopSupported, requestDesktopPermission, setDesktopEnabled,
   showDesktop,
@@ -197,6 +198,7 @@ export function Notifications() {
         </div>
 
         <div className="space-y-4 lg:space-y-6">
+          <PushCard />
           <DesktopCard />
           <QuietHoursCard />
           <EinstellungenCard />
@@ -509,6 +511,95 @@ function ChannelField({
 
 /** Desktop-Benachrichtigungen - der kuerzeste Weg, wenn SparBit auf dem
  *  eigenen Rechner laeuft. Kein Bot, kein Token. */
+/** Web Push: Meldungen auch dann, wenn SparBit zu ist.
+ *
+ *  Der Unterschied zur Karte darunter: Desktop-Meldungen brauchen einen
+ *  offenen Tab. Web Push nicht - die Meldung kommt aufs Handy, wenn der
+ *  Browser laengst geschlossen ist. */
+function PushCard() {
+  const toast = useToast();
+  const [laeuft, setLaeuft] = React.useState(false);
+  const { data: schluessel } = useAsync(() => api.push.schluessel(), []);
+  const { data: geraete, reload } = useAsync<PushGeraet[]>(
+    () => api.push.abos(), []);
+  const moeglich = pushMoeglich();
+
+  const anmelden = async () => {
+    setLaeuft(true);
+    try {
+      const { neu } = await pushAnmelden();
+      toast.push("success", neu ? "Gerät angemeldet" : "Gerät aufgefrischt",
+        "Ein Test über „Kanal testen“ zeigt, ob es ankommt.");
+      reload();
+    } catch (err) {
+      toast.push("error", "Anmelden fehlgeschlagen", (err as Error).message);
+    } finally {
+      setLaeuft(false);
+    }
+  };
+
+  return (
+    <Card className="h-fit">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <BellRing className="h-4 w-4 text-primary" />
+          Push aufs Gerät
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!moeglich || schluessel?.verfuegbar === false ? (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {schluessel?.grund
+              ?? "Dieser Browser kann kein Web Push. Auf dem iPhone muss SparBit "
+                 + "dafür zum Home-Bildschirm hinzugefügt sein."}
+          </p>
+        ) : (
+          <>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Meldungen direkt aufs Gerät — auch wenn SparBit gar nicht offen
+              ist. Kein Konto, kein fremder Dienst: der Inhalt ist verschlüsselt,
+              der Push-Dienst leitet ihn nur weiter.
+            </p>
+            <Button variant="outline" className="w-full" loading={laeuft}
+                    onClick={() => void anmelden()}>
+              <BellRing className="h-4 w-4" />
+              Dieses Gerät anmelden
+            </Button>
+            {!!geraete?.length && (
+              <ul className="space-y-1 border-t border-border pt-3">
+                {geraete.map((g) => (
+                  <li key={g.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate" title={g.host}>{g.geraet}</span>
+                    <span className="shrink-0 text-muted-foreground">
+                      {g.zuletzt_ok ? timeAgo(g.zuletzt_ok) : "noch nichts"}
+                    </span>
+                    <button
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      title="Abmelden"
+                      onClick={async () => {
+                        await api.push.entfernen(g.id);
+                        await pushAbmelden();
+                        reload();
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Damit etwas ankommt, muss außerdem ein Kanal vom Typ
+              <strong> Browser (Web Push)</strong> angelegt und aktiv sein.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
 function DesktopCard() {
   const toast = useToast();
   const [an, setAn] = React.useState(desktopEnabled());
