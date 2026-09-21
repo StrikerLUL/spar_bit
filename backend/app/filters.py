@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from . import kategorien
+
 # Ein "Deal-aehnliches" Objekt: DB-Model oder DealItem. Beides hat diese Felder.
 
 
@@ -61,6 +63,22 @@ class MatchResult:
 
     def __bool__(self) -> bool:
         return self.matched
+
+
+def _inhaltskategorien(deal: Any) -> set[str]:
+    """Die inhaltlichen Marken eines Deals ("speicher", "abo", ...).
+
+    Ein Deal aus der Datenbank traegt sie als "|speicher|computer|"; ein
+    frisch geparstes DealItem hat sie noch nicht - dort wird sie aus dem
+    Text bestimmt, damit die Regel-Vorschau im Editor dasselbe Ergebnis
+    zeigt wie der spaetere Lauf.
+    """
+    roh = getattr(deal, "kategorien", None)
+    if isinstance(roh, str):
+        return set(kategorien.aus_text(roh))
+    if isinstance(roh, (list, tuple, set)):
+        return {str(k).lower() for k in roh}
+    return set(kategorien.fuer_deal(deal).keys)
 
 
 def _haystack(deal: Any) -> str:
@@ -209,11 +227,20 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
 
     # --- Kategorie / Haendler ---
     if rule.kategorien:
-        kat = (getattr(deal, "kategorie", "") or "").lower()
-        if kat not in _norm_set(rule.kategorien):
-            failed.append(f"Kategorie '{kat or '-'}' nicht in Auswahl")
+        # Zwei Arten von Kategorie treffen sich hier. Die alte ist die der
+        # Quelle ("community", "gaming"), die neue die des Inhalts
+        # ("speicher", "abo"). Eine Regel darf beides nennen, und es genuegt,
+        # wenn eine davon passt - sonst wuerde eine bestehende Regel beim
+        # Umstieg stillschweigend aufhoeren zu treffen.
+        gewuenscht = _norm_set(rule.kategorien)
+        quelle_kat = (getattr(deal, "kategorie", "") or "").lower()
+        inhalt = _inhaltskategorien(deal)
+        treffer = ({quelle_kat} & gewuenscht) | (inhalt & gewuenscht)
+        if not treffer:
+            gehabt = ", ".join(sorted(filter(None, inhalt | {quelle_kat}))) or "-"
+            failed.append(f"Kategorie '{gehabt}' nicht in Auswahl")
         else:
-            reasons.append(f"Kategorie '{kat}'")
+            reasons.append(f"Kategorie '{sorted(treffer)[0]}'")
 
     if rule.haendler:
         h = (getattr(deal, "haendler", "") or "").lower()

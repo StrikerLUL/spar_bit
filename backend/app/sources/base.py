@@ -57,6 +57,15 @@ class DealItem(BaseModel):
     tags: list[str] = Field(default_factory=list)
     ist_gratis: bool = False
     kategorie: str | None = None
+    # Gilt der Preis je Zeitraum? "monat" | "jahr" | "woche". Ein Abo fuer
+    # 4,99 im Monat und ein Kopfhoerer fuer 4,99 sind zwei sehr
+    # verschiedene Angebote - ohne dieses Feld sehen sie gleich aus.
+    preis_zeitraum: str | None = None
+    # Was das Angebot pro Monat kostet. Erst das macht Abos vergleichbar:
+    # "1 EUR" fuer drei Monate ist guenstiger als "0,99 EUR" im Monat.
+    preis_monat: float | None = None
+    # Klartext fuer die Karte: "pro Monat", "für 3 Monate", "Stückpreis".
+    preis_hinweis: str | None = None
     roh: dict[str, Any] = Field(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:

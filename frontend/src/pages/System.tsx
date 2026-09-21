@@ -310,7 +310,10 @@ function GratisCheckCard() {
 
   if (!data) return <Skeleton className="h-32" />;
 
-  const setzen = async (body: { an?: boolean; max_pro_lauf?: number }) => {
+  const setzen = async (body: {
+    an?: boolean; max_pro_lauf?: number;
+    aktualitaet?: boolean; aktualitaet_max?: number;
+  }) => {
     try {
       await api.system.gratischeckSetzen(body);
       reload();
@@ -357,6 +360,46 @@ function GratisCheckCard() {
                 }}
               />
             </label>
+
+            <div className="space-y-2 border-t border-border pt-3">
+              <label className="flex items-start justify-between gap-3">
+                <span className="space-y-1">
+                  <span className="block text-xs font-medium">
+                    Auch normale Deals auf Aktualität prüfen
+                  </span>
+                  <span className="block text-[11px] leading-relaxed text-muted-foreground">
+                    Sieht der Reihe nach auf den Zielseiten nach, ob es den
+                    Deal noch gibt — gemerkte, billige und auffällige zuerst.
+                    Was die Seite als beendet führt, bekommt die Marke
+                    „abgelaufen“ und verschwindet aus dem Feed, solange dort
+                    „Abgelaufene ausblenden“ an ist. Das sind deutlich mehr
+                    Seitenaufrufe als die Gratis-Gegenprobe.
+                  </span>
+                </span>
+                <Switch checked={Boolean(data.aktualitaet)}
+                        onChange={(v) => setzen({ aktualitaet: v })}
+                        label="Aktualitätsprüfung ein-/ausschalten" />
+              </label>
+
+              {data.aktualitaet && (
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-muted-foreground">
+                    Höchstens Seitenaufrufe je Lauf (alle 30 Min.)
+                  </span>
+                  <Input
+                    type="number" min="0" max="120"
+                    defaultValue={data.aktualitaet_max}
+                    className="h-8 w-20 text-xs"
+                    onBlur={(e) => {
+                      const wert = Number(e.target.value);
+                      if (wert !== data.aktualitaet_max) {
+                        setzen({ aktualitaet_max: wert });
+                      }
+                    }}
+                  />
+                </label>
+              )}
+            </div>
 
             {woche.length > 0 && (
               <div className="flex flex-wrap gap-1.5 border-t border-border pt-3">

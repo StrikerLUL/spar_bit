@@ -24,6 +24,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from .. import feedfinder
+from .. import kategorien
 from ..http import RateLimited
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
@@ -321,9 +322,98 @@ class ErotikFeed(Source):
                 veroeffentlicht_am=entry_datetime(entry),
                 tags=entry_tags(entry),
                 ist_gratis=price.ist_gratis,
+                preis_zeitraum=price.zeitraum,
+                preis_monat=price.preis_pro_monat,
+                preis_hinweis=price.preis_hinweis,
                 kategorie=KATEGORIE,
             ))
         return out
+
+
+class ErotikAbo(ErotikFeed):
+    """Abos und Zugaenge fuer Seiten - das, was kein Paket verschickt.
+
+    Der Unterschied zu `erotik_feed` ist nicht die Technik, sondern der
+    Filter: hier bleibt nur, was ein laufendes Angebot ist. Erkannt wird
+    das an zwei Dingen, die beide aus dem Text kommen und keine Raterei
+    sind:
+
+    * am Preis - "9,99 EUR/Monat" oder "3 Monate fuer 1 EUR" traegt seinen
+      Zeitraum mit sich (siehe `app/priceparse.py`), und
+    * an den Kategorien - "Mitgliedschaft", "Premium-Zugang", "Flatrate"
+      (siehe `app/kategorien.py`).
+
+    Und weil "guenstig" bei einem Abo nicht am Preisschild abzulesen ist -
+    1 EUR fuer drei Monate ist billiger als 0,99 EUR im Monat -, filtert
+    die Quelle auf den **Monatspreis**. Das ist die einzige Zahl, mit der
+    sich zwei Abos vergleichen lassen.
+
+    Verifizierungsstand wie ueberall hier: UNVERIFIED. Vorbelegt ist nichts,
+    weil es fuer diesen Bereich keine Feed-Adresse gibt, die ich haette
+    pruefen koennen - die Anbieter, die einen Feed haben, kennst du besser
+    als ich. Was du eintraegst, darf die Angebotsseite sein; den Feed sucht
+    SparBit selbst (siehe `app/feedfinder.py`).
+    """
+
+    id = "erotik_abo"
+    display_name = "18+-Abos (Seiten-Zugänge)"
+    category = Category.ERWACHSEN
+    default_interval = 3600
+    min_interval = 900
+    verification = Verification.UNVERIFIED
+    beschreibung = ("Laufende Zugänge statt Ware: Mitgliedschaften, "
+                    "Premium-Zugänge, Flatrates. Gefiltert auf den Preis "
+                    "pro Monat.")
+
+    options_schema = [
+        OptionSpec("feeds", "Shop- oder Feed-Adressen", "list", [],
+                   help="Eine vollständige Adresse pro Zeile - die "
+                        "Angebotsseite genügt. Gut geeignet sind die "
+                        "Angebots- oder Blog-Seiten der Anbieter und "
+                        "Deal-Seiten, die Zugänge listen."),
+        OptionSpec("max_preis_monat", "Höchstpreis pro Monat (€)", "float", 0.0,
+                   help="0 = kein Limit. Gerechnet wird der Monatspreis: "
+                        "'3 Monate für 9 €' sind 3 € im Monat."),
+        OptionSpec("nur_abos", "Nur laufende Angebote", "bool", True,
+                   help="Aus: auch einmalige Käufe aus denselben Feeds "
+                        "übernehmen."),
+        OptionSpec("label", "Händler-Label", "string", "",
+                   help="Leer = Hostname der jeweiligen URL."),
+        OptionSpec("max_items", "Max. Einträge pro Feed", "int", 50),
+    ]
+
+    async def fetch(self, ctx: FetchContext) -> list[DealItem]:
+        # Gefiltert wird hier und nicht in parse(): die Quellen sind
+        # Einzelstuecke, die sich mehrere Laeufe teilen - Optionen an der
+        # Instanz zwischenzulegen waere eine Wette darauf, dass nie zwei
+        # gleichzeitig laufen.
+        items = await super().fetch(ctx)
+        nur_abos = bool(ctx.opt("nur_abos", True))
+        grenze = float(ctx.opt("max_preis_monat", 0) or 0)
+
+        raus: list[DealItem] = []
+        for item in items:
+            if nur_abos and not _ist_abo(item):
+                continue
+            if grenze > 0 and (item.preis_monat is None
+                               or item.preis_monat > grenze):
+                continue
+            raus.append(item)
+        return raus
+
+
+def _ist_abo(item: DealItem) -> bool:
+    """Laeuft dieses Angebot weiter - oder ist es ein einmaliger Kauf?
+
+    Zwei unabhaengige Belege, und einer genuegt: eine Preisangabe mit
+    Zeitraum ("9,99 EUR/Monat", "3 Monate fuer 1 EUR") oder ein Text, der
+    von Mitgliedschaft, Zugang oder Flatrate spricht.
+    """
+    if item.preis_zeitraum or item.preis_monat is not None:
+        return True
+    befund = kategorien.bestimme(item.titel, item.beschreibung,
+                                 item.tags, erwachsen=True)
+    return bool({"abo", "seiten18"} & set(befund.keys))
 
 
 register(MyDealzErotik())
@@ -332,3 +422,4 @@ register(DealabsErotik())
 register(HotUKDealsErwachsen())
 register(RedditErwachsen())
 register(ErotikFeed())
+register(ErotikAbo())

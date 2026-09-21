@@ -118,10 +118,23 @@ class Deal(Base):
     # Preis in EUR umgerechnet - CheapShark liefert USD, HotUKDeals GBP.
     # Regeln rechnen hiermit, damit "max 20 EUR" quellenuebergreifend stimmt.
     preis_eur: Mapped[float | None] = mapped_column(Float, index=True)
+    # Gilt der Preis je Zeitraum ("monat", "jahr", "woche")? Ohne diese
+    # Angabe steht ein Abo fuer 4,99 im Monat neben einem Kopfhoerer fuer
+    # 4,99, als waere es dasselbe Angebot.
+    preis_zeitraum: Mapped[str | None] = mapped_column(String(8), index=True)
+    # Was das Angebot pro Monat kostet - der einzige Wert, mit dem sich
+    # Abos untereinander vergleichen lassen.
+    preis_monat_eur: Mapped[float | None] = mapped_column(Float, index=True)
+    preis_hinweis: Mapped[str | None] = mapped_column(String(48))
     ist_gratis: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     haendler: Mapped[str | None] = mapped_column(String(128), index=True)
     kategorie: Mapped[str | None] = mapped_column(String(64))
+    # Worum es inhaltlich geht - siehe app/kategorien.py. Gespeichert als
+    # "|speicher|computer|", damit ein LIKE '%|ssd|%' nicht versehentlich
+    # in einem laengeren Schluessel landet. Mehrfach, weil ein
+    # Gaming-Notebook mit SSD zu Recht unter drei Marken auftaucht.
+    kategorien: Mapped[str | None] = mapped_column(Text, index=True)
     quelle: Mapped[str] = mapped_column(String(64), index=True)
     temperatur: Mapped[float | None] = mapped_column(Float)
     tags: Mapped[list] = mapped_column(JSON, default=list)

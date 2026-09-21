@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from ..auth import current_user
 from ..db import get_db
 from .. import erwachsen as erwachsen_mod
+from .. import kategorien as kategorien_mod
 from ..gratischeck import LABEL as CHECK_LABEL
+from ..gratischeck import WIDERSPRUCH as CHECK_WIDERSPRUCH
 from ..models import Deal, Match, Rule, SourceConfig, utcnow
 from ..learning import trainiere
 from ..search import fts_verfuegbar, match_bedingung
@@ -26,7 +28,15 @@ def _deal_dict(d: Deal) -> dict:
         "url": d.url, "bild": d.bild, "preis": d.preis,
         "originalpreis": d.originalpreis, "rabatt_prozent": d.rabatt_prozent,
         "waehrung": d.waehrung, "ist_gratis": d.ist_gratis,
+        # Der Zeitraum gehoert zum Preis: "4,99 €" und "4,99 €/Monat" sind
+        # zwei verschiedene Angebote.
+        "preis_zeitraum": d.preis_zeitraum,
+        "preis_monat_eur": d.preis_monat_eur,
+        "preis_hinweis": d.preis_hinweis,
         "haendler": d.haendler, "kategorie": d.kategorie, "quelle": d.quelle,
+        "kategorien": kategorien_mod.aus_text(d.kategorien),
+        "kategorien_labels": [kategorien_mod.label(k)
+                              for k in kategorien_mod.aus_text(d.kategorien)],
         "temperatur": d.temperatur, "tags": d.tags or [],
         "veroeffentlicht_am": d.veroeffentlicht_am, "first_seen": d.first_seen,
         "last_seen": d.last_seen, "seen_count": d.seen_count,
@@ -52,9 +62,12 @@ def _deal_dict(d: Deal) -> dict:
 def list_deals(
     q: str | None = None,
     quelle: str | None = None,
+    kategorie: str | None = None,
     nur_gratis: bool = False,
+    nur_gueltig: bool = False,
     min_rabatt: float | None = None,
     max_preis: float | None = None,
+    max_preis_monat: float | None = None,
     bookmarked: bool = False,
     urteil: str | None = None,
     preisfehler: str | None = None,
@@ -87,12 +100,30 @@ def list_deals(
                                   Deal.haendler.ilike(like)))
     if quelle:
         conditions.append(Deal.quelle == quelle)
+    if kategorie:
+        # Mehrere Kategorien sind ODER-verknuepft: wer "Speicher, Computer"
+        # waehlt, will beides sehen und nicht nur, was beides zugleich ist.
+        gewuenscht = [k.strip() for k in kategorie.split(",") if k.strip()]
+        if gewuenscht:
+            conditions.append(or_(*[Deal.kategorien.like(f"%|{k}|%")
+                                    for k in gewuenscht]))
     if nur_gratis:
         conditions.append(Deal.ist_gratis.is_(True))
+    if nur_gueltig:
+        # Was die Zielseite als vorbei oder als falschen Preis gemeldet hat,
+        # bleibt draussen. Ungeprueftes bleibt drin - aus dem Fehlen einer
+        # Aussage soll niemand eine ableiten.
+        conditions.append(or_(Deal.check_status.is_(None),
+                              Deal.check_status.notin_(CHECK_WIDERSPRUCH)))
     if min_rabatt is not None:
         conditions.append(Deal.rabatt_prozent >= min_rabatt)
     if max_preis is not None:
         conditions.append(and_(Deal.preis.isnot(None), Deal.preis <= max_preis))
+    if max_preis_monat is not None:
+        # Nur Abos: ohne Monatspreis ist die Frage "was kostet es im Monat"
+        # nicht beantwortbar, und ein einmaliger Kauf gehoert hier nicht hin.
+        conditions.append(and_(Deal.preis_monat_eur.isnot(None),
+                               Deal.preis_monat_eur <= max_preis_monat))
     if bookmarked:
         conditions.append(Deal.bookmarked.is_(True))
     if urteil:
@@ -113,8 +144,27 @@ def list_deals(
     if sortierung == "fuer_mich":
         return _fuer_mich(db, stmt, total, limit, offset)
 
-    rows = db.scalars(stmt.order_by(desc(Deal.first_seen)).limit(limit).offset(offset))
+    rows = db.scalars(stmt.order_by(*_reihenfolge(sortierung))
+                      .limit(limit).offset(offset))
     return {"total": total, "items": [_deal_dict(d) for d in rows]}
+
+
+def _reihenfolge(sortierung: str) -> list:
+    """Sortier-Ausdruck fuer die Deal-Liste.
+
+    "guenstig" rechnet mit dem Monatspreis, wo es einen gibt: ein Abo fuer
+    "1 €" ist nicht guenstiger als eines fuer "0,99 € im Monat", nur weil
+    die Zahl kleiner ist. Deals ohne Preis stehen hinten - sonst fuellt sich
+    die erste Seite mit Eintraegen, bei denen die Quelle keinen Preis
+    mitgeliefert hat.
+    """
+    if sortierung == "guenstig":
+        wert = func.coalesce(Deal.preis_monat_eur, Deal.preis_eur)
+        return [wert.is_(None), wert.asc(), desc(Deal.first_seen)]
+    if sortierung == "rabatt":
+        return [Deal.rabatt_prozent.is_(None), desc(Deal.rabatt_prozent),
+                desc(Deal.first_seen)]
+    return [desc(Deal.first_seen)]
 
 
 # Wie viele Deals der Empfehlung zur Auswahl stehen. Das Modell rechnet in
@@ -157,6 +207,35 @@ def _fuer_mich(db: Session, stmt, total: int, limit: int, offset: int) -> dict:
         items.append(eintrag)
     return {"total": min(total, len(kandidaten)), "items": items,
             "empfehlung_aktiv": True}
+
+
+@router.get("/kategorien")
+def list_kategorien(bereich: str = "normal", tage: int = 30,
+                    db: Session = Depends(get_db)) -> list[dict]:
+    """Welche Kategorien gibt es - und wie viel steht gerade darin?
+
+    Die Zahl ist der Punkt: eine Kategorie ohne Treffer ist ein Knopf, der
+    ins Leere fuehrt. Darum liefert die Liste mit, wie viele Deals der
+    letzten Wochen darunter fallen, und das UI kann Leeres ausgrauen.
+    """
+    erwachsen = bereich == "erwachsen"
+    if erwachsen and not erwachsen_mod.ist_aktiv(db):
+        raise HTTPException(403, "Der 18+-Bereich ist nicht freigeschaltet.")
+
+    seit = utcnow() - timedelta(days=max(1, min(tage, 365)))
+    raus = []
+    # Im 18+-Bereich stehen die eigenen Marken oben, danach die normalen -
+    # ein Toy ist auch ein Geschenk, aber gesucht wird dort zuerst nach Toys.
+    kategorien = (kategorien_mod.alle(erwachsen=True) + kategorien_mod.alle()
+                  if erwachsen else kategorien_mod.alle())
+    for kategorie in kategorien:
+        anzahl = db.scalar(
+            select(func.count()).select_from(Deal)
+            .where(Deal.erwachsen.is_(erwachsen),
+                   Deal.first_seen >= seit,
+                   Deal.kategorien.like(f"%|{kategorie.key}|%"))) or 0
+        raus.append({**kategorien_mod.als_dict(kategorie), "anzahl": anzahl})
+    return raus
 
 
 @router.post("/deals/{deal_id}/bookmark")

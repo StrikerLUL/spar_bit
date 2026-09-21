@@ -241,6 +241,7 @@ def set_alarm(deal_id: int, body: AlarmBody, db: Session = Depends(get_db)) -> d
 
 @router.get("/deals/export.csv")
 def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
+               kategorie: str | None = None, nur_gueltig: bool = False,
                limit: int = Query(5000, le=50000),
                db: Session = Depends(get_db)) -> StreamingResponse:
     # 18+ bleibt auch aus dem Export draussen - eine CSV wird weitergereicht.
@@ -250,20 +251,40 @@ def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
         stmt = stmt.where(Deal.ist_gratis.is_(True))
     if nur_gemerkt:
         stmt = stmt.where(Deal.bookmarked.is_(True))
+    if kategorie:
+        from sqlalchemy import or_
+        gewuenscht = [k.strip() for k in kategorie.split(",") if k.strip()]
+        if gewuenscht:
+            stmt = stmt.where(or_(*[Deal.kategorien.like(f"%|{k}|%")
+                                    for k in gewuenscht]))
+    if nur_gueltig:
+        from sqlalchemy import or_
+
+        from ..gratischeck import WIDERSPRUCH
+        stmt = stmt.where(or_(Deal.check_status.is_(None),
+                              Deal.check_status.notin_(WIDERSPRUCH)))
 
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";")     # Semikolon: Excel-DE-freundlich
-    writer.writerow(["Titel", "Preis", "Waehrung", "Preis EUR", "Originalpreis",
-                     "Rabatt %", "Gratis", "Haendler", "Quelle", "Temperatur",
-                     "Gefunden am", "URL"])
+    writer.writerow(["Titel", "Preis", "Zeitraum", "Waehrung", "Preis EUR",
+                     "Preis EUR/Monat", "Originalpreis", "Rabatt %", "Gratis",
+                     "Haendler", "Kategorien", "Quelle", "Temperatur",
+                     "Status", "Gefunden am", "URL"])
+    from ..kategorien import aus_text, label as kat_label
     for deal in db.scalars(stmt):
         writer.writerow([
-            deal.titel, deal.preis if deal.preis is not None else "", deal.waehrung,
+            deal.titel, deal.preis if deal.preis is not None else "",
+            deal.preis_zeitraum or "",
+            deal.waehrung,
             deal.preis_eur if deal.preis_eur is not None else "",
+            deal.preis_monat_eur if deal.preis_monat_eur is not None else "",
             deal.originalpreis if deal.originalpreis is not None else "",
             round(deal.rabatt_prozent) if deal.rabatt_prozent else "",
-            "ja" if deal.ist_gratis else "nein", deal.haendler or "", deal.quelle,
+            "ja" if deal.ist_gratis else "nein", deal.haendler or "",
+            ", ".join(kat_label(k) for k in aus_text(deal.kategorien)),
+            deal.quelle,
             round(deal.temperatur) if deal.temperatur else "",
+            deal.check_status or "",
             deal.first_seen.strftime("%Y-%m-%d %H:%M") if deal.first_seen else "",
             deal.url,
         ])

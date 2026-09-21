@@ -87,9 +87,12 @@ EINDEUTIG = [
     "lelo", "durex", "ritex", "billy boy", "amorelie", "beate uhse",
     "eis.de", "orion versand", "pjur", "tenga", "svakom", "arcwave",
     "fun factory", "nexus", "sinful", "lustpunkt",
-    # Medien und Plattformen
+    # Medien und Plattformen. Die Liste ist hier nicht, um irgendwohin zu
+    # verweisen, sondern damit so ein Fund den normalen Feed nicht erreicht.
     "pornhub", "porno", "pornofilm", "erotikfilm", "onlyfans", "fansly",
     "brazzers", "xhamster", "youporn", "stripchat", "chaturbate",
+    "visit-x", "visitx", "mydirtyhobby", "amateurcommunity", "big7",
+    "adulttime", "erotiklounge", "erotik-abo", "erotikflat",
     "hentai", "doujin", "doujinshi", "eroge", "nutaku", "dlsite",
     "mangagamer", "jast usa", "fanza",
     # Kennzeichnungen

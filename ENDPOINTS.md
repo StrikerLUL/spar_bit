@@ -273,6 +273,7 @@ Deal-Host; 44 von 44 Endpoints scheitern am Proxy. Alles unten sind darum
 | `hotukdeals_erwachsen` | RSS | `/rss/tag/adult` | UK, GBP → EUR, Slug geraten |
 | `reddit_erwachsen` | RSS | `NSFWdeals`, `AdultDeals` | **Namen geraten** — was 404 gibt, streicht SparBit selbst |
 | `erotik_feed` | RSS/Atom | leer | Shop-Seite *oder* Feed, siehe unten |
+| `erotik_abo` | RSS/Atom | leer | nur laufende Zugänge; filtert auf den Preis **pro Monat** |
 
 `SexToyDeals` stand hier bis zum Betriebsbericht mit in der Vorbelegung und
 ist mit `404 Not Found` widerlegt — deshalb draußen. Die beiden verbliebenen

@@ -62,6 +62,9 @@ class WordpressDealSource(Source):
                 veroeffentlicht_am=entry_datetime(entry),
                 tags=entry_tags(entry),
                 ist_gratis=price.ist_gratis,
+                preis_zeitraum=price.zeitraum,
+                preis_monat=price.preis_pro_monat,
+                preis_hinweis=price.preis_hinweis,
                 kategorie="community",
             ))
         return out

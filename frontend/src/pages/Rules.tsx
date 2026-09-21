@@ -4,8 +4,9 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import {
-  api, type Channel, type Hygiene, type HygieneBefund, type RegelVorschlag,
-  type Rule, type RuleDraft, type RulePreview, type PreviewSample, type Source,
+  api, type Channel, type Hygiene, type HygieneBefund, type Kategorie,
+  type RegelVorschlag, type Rule, type RuleDraft, type RulePreview,
+  type PreviewSample, type Source,
 } from "@/lib/api";
 import { urteilLabel } from "@/components/Urteil";
 import { useAsync } from "@/lib/useEvents";
@@ -306,6 +307,11 @@ function RuleEditor({
 
   const { data: sources } = useAsync<Source[]>(() => api.sources.list(), []);
   const { data: channels } = useAsync<Channel[]>(() => api.channels.list(), []);
+  // 18+-Kategorien stehen hier nur, wenn die Regel 18+ überhaupt sehen darf.
+  const { data: kategorien } = useAsync<Kategorie[]>(
+    () => api.kategorien.list(draft.erwachsen && erwachsenFrei
+      ? "erwachsen" : "normal"),
+    [draft.erwachsen, erwachsenFrei]);
 
   const set = <K extends keyof RuleDraft>(key: K, value: RuleDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
@@ -505,6 +511,39 @@ function RuleEditor({
                     )}
                   >
                     {source.display_name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Kategorien</Label>
+            <p className="text-xs text-muted-foreground">
+              Keine Auswahl = alle. Mehrere sind ODER-verknüpft — „Speicher“
+              und „Computer“ meldet beides, nicht nur die Schnittmenge.
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {kategorien?.map((kategorie) => {
+                const active = draft.kategorien.includes(kategorie.key);
+                return (
+                  <button
+                    key={kategorie.key}
+                    type="button"
+                    title={kategorie.hinweis}
+                    onClick={() =>
+                      set("kategorien", active
+                        ? draft.kategorien.filter((k) => k !== kategorie.key)
+                        : [...draft.kategorien, kategorie.key])
+                    }
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-xs transition-colors",
+                      active
+                        ? "border-primary/40 bg-primary/15 text-primary"
+                        : "border-border text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {kategorie.label}
                   </button>
                 );
               })}

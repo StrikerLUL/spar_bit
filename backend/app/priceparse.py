@@ -18,6 +18,23 @@ Darum bekommt hier jede gefundene Zahl ein Etikett - "davor stand statt" oder
 "davor stand nur" - und erst diese Etiketten entscheiden. Der frueher benutzte
 Positionsvergleich (was vor "statt" steht, ist der aktuelle Preis) liegt bei
 jedem Titel daneben, der mit "statt" anfaengt.
+
+Die zweite schwierige Stelle kam aus dem Betrieb hinterher: **nicht jeder
+Betrag in einem Deal-Text ist ein Preis.** In derselben Zeile stehen
+regelmaessig Betraege, die etwas voellig anderes bedeuten -
+
+    "Sony XM5 fuer 229 EUR, zzgl. 4,99 EUR Versand"   -> 4,99 ist Porto
+    "20 EUR Gutschein ab 100 EUR Bestellwert"          -> beides kein Preis
+    "6er-Pack fuer 23,94 EUR (je 3,99 EUR)"            -> 3,99 ist Stueckpreis
+    "Netflix 4,99 EUR pro Monat statt 12,99 EUR"       -> Preis, aber je Monat
+
+- und wer die fuer den Artikelpreis haelt, zeigt 4,99 EUR fuer Kopfhoerer an.
+Darum bekommt jede Zahl zusaetzlich einen **Zweck** aus ihrem Umfeld:
+Versand, Rabatt, Mindestbestellwert, Gebuehr, Stueckpreis, Zeitraum. Was
+nachweislich kein Artikelpreis ist, faellt bei der Auswahl raus; ein
+Zeitraum faellt nicht raus, sondern wird mitgefuehrt - "4,99 EUR" und
+"4,99 EUR/Monat" sind zwei verschiedene Angebote, und nur eines davon ist
+guenstig.
 """
 from __future__ import annotations
 
@@ -71,6 +88,123 @@ _BARE_RE = re.compile(r"(?<![\w.,])(\d{1,3}(?:[.\s]\d{3})*[.,]\d{2})(?![\w.,])")
 _MARKED_BARE_RE = re.compile(
     rf"\b(?P<wort>{_INSTEAD_WORDS}|{_NOW_WORDS})\b\s*(?P<num>{_NUM})",
     re.IGNORECASE)
+
+# --- Wozu gehoert ein Betrag? ---------------------------------------------
+#
+# Jede Regel ist ein Paar aus "was darf davor stehen" und "was darf danach
+# stehen". Geprueft wird nur ein kurzes Fenster um die Zahl herum
+# (ZWECK_WEITE) - was zehn Woerter weiter steht, gehoert nicht mehr dazu.
+
+ZWECK_WEITE = 28
+
+# Diese Zwecke sind kein Artikelpreis. Ein Betrag mit so einem Etikett
+# kommt fuer "was kostet das Ding" nicht mehr in Frage.
+KEIN_PREIS = ("versand", "rabatt", "mbw", "gebuehr")
+
+_V_WORT = r"versand\w*|porto\w*|lieferung|zustellung|shipping|delivery"
+_R_WORT = (r"rabatt\w*|gutschein\w*|coupon\w*|cashback|nachlass|ersparnis|"
+           r"sparen|spare|bonus|prämie|praemie|guthaben|erstattung|"
+           r"willkommensbonus|neukundenbonus")
+_M_WORT = (r"mbw|mindestbestellwert|bestellwert|einkaufswert|warenkorbwert|"
+           r"mindestumsatz")
+_G_WORT = (r"gebühr\w*|gebuehr\w*|anschlusspreis|bereitstellungspreis|"
+           r"servicepauschale|grundgebühr|grundgebuehr|pfand|kaution")
+_S_WORT = (r"stückpreis|stueckpreis|je\s+stück|pro\s+stück|je\s+einheit|"
+           r"pro\s+einheit|je\s+packung|pro\s+packung|pro\s+dose|"
+           r"pro\s+flasche|pro\s+kapsel|pro\s+liter|pro\s+100\s*g")
+
+# (Schluessel, Klartext, was DAVOR stehen darf, was DANACH stehen darf)
+_ZWECKE: list[tuple[str, str, str | None, str | None]] = [
+    ("versand", "Versandkosten",
+     rf"(?:{_V_WORT})\s*(?:kostet|von|ab|:)?\s*$"
+     r"|(?:zzgl\.?|zuzüglich|plus|\+)\s*$",
+     rf"\s*(?:€|eur|euro)?\s*(?:{_V_WORT})"),
+    ("rabatt", "Rabatt- oder Gutscheinbetrag",
+     rf"(?:{_R_WORT})\s*(?:in\s+höhe\s+von|im\s+wert\s+von|über|ueber|von|:)?\s*$",
+     rf"\s*(?:€|eur|euro)?\s*(?:{_R_WORT})"),
+    ("mbw", "Mindestbestellwert",
+     rf"(?:{_M_WORT})\s*(?:von|ab|:)?\s*$",
+     rf"\s*(?:€|eur|euro)?\s*(?:{_M_WORT})"),
+    ("gebuehr", "Gebühr, nicht der Artikelpreis",
+     rf"(?:{_G_WORT})\s*(?:von|:)?\s*$",
+     rf"\s*(?:€|eur|euro)?\s*(?:{_G_WORT})"),
+    ("stueck", "Stückpreis",
+     rf"(?:{_S_WORT})\s*(?:von|:|=)?\s*$|\b(?:je|à)\s*$",
+     rf"\s*(?:€|eur|euro)?\s*(?:{_S_WORT})|\s*(?:€|eur|euro)?\s*/\s*stück"),
+]
+
+_ZWECK_TEXT = {k: t for k, t, _, _ in _ZWECKE}
+_ZWECK_RE = [(k,
+              re.compile(d, re.IGNORECASE) if d else None,
+              re.compile(n, re.IGNORECASE) if n else None)
+             for k, _, d, n in _ZWECKE]
+
+# Zeitraeume. Kein Ausschluss, sondern eine Eigenschaft des Preises: was
+# 4,99 im Monat kostet, kostet im Jahr 59,88 - und steht auf der Karte
+# deshalb mit "/Monat" dran.
+_ZEITRAUM = [
+    ("monat", r"(?:/|pro|je|im|p\.?\s*m\.?)?\s*(?:monat\w*|mtl\.?)",
+     r"(?:monatlich|mtl\.?|pro\s+monat|im\s+monat|je\s+monat|monatsabo|"
+     r"monatspaket)\s*(?:nur|ab|für|fuer|schon|:)?\s*$"),
+    ("jahr", r"(?:/|pro|je|im|p\.?\s*a\.?)?\s*(?:jahr\w*|jährlich|jaehrlich)",
+     r"(?:jährlich|jaehrlich|pro\s+jahr|im\s+jahr|jahresabo|jahrespaket|"
+     r"jahreslizenz)\s*(?:nur|ab|für|fuer|:)?\s*$"),
+    ("woche", r"(?:/|pro|je|die)?\s*(?:woche|wöchentlich|woechentlich)",
+     r"(?:wöchentlich|woechentlich|pro\s+woche)\s*(?:nur|ab|für)?\s*$"),
+]
+# Vor der Zeitangabe darf Satzzeichen stehen: "59,88 € (jährlich)" ist
+# dieselbe Aussage wie "59,88 € jährlich", nur in Klammern.
+_ZEITRAUM_RE = [(k, re.compile(r"^[\s(\[,;–-]*" + n, re.IGNORECASE),
+                 re.compile(d, re.IGNORECASE))
+                for k, n, d in _ZEITRAUM]
+
+_ZEITRAUM_LABEL = {"monat": "Monat", "jahr": "Jahr", "woche": "Woche"}
+_MONATE_JE = {"monat": 1, "jahr": 12, "woche": 0.25}
+
+# "3 Monate fuer 1 EUR", "12 Monate ab 49 EUR" - der Betrag gilt fuer die
+# ganze Laufzeit, nicht je Monat. Fuer den Vergleich zaehlt, was er pro
+# Monat macht.
+_LAUFZEIT_RE = re.compile(
+    r"(\d{1,3})\s*(monate?n?|jahre?n?)\s*(?:lang\s*)?"
+    r"(?:für|fuer|zu|um|ab|nur|zum\s+preis\s+von|:)?\s*$",
+    re.IGNORECASE)
+
+
+def _zweck_fuer(norm: str, start: int, ende: int) -> str | None:
+    """Wofuer steht dieser Betrag - Ware, Porto, Gutschein?"""
+    davor = norm[max(0, start - ZWECK_WEITE):start].lower()
+    danach = norm[ende:ende + ZWECK_WEITE].lower()
+    for key, dre, nre in _ZWECK_RE:
+        if dre is not None and dre.search(davor):
+            return key
+        if nre is not None and nre.match(danach):
+            return key
+    return None
+
+
+def _zeitraum_fuer(norm: str, start: int, ende: int) -> str | None:
+    """Gilt der Betrag je Monat, je Jahr, je Woche?"""
+    davor = norm[max(0, start - ZWECK_WEITE):start]
+    danach = norm[ende:ende + ZWECK_WEITE]
+    for key, nre, dre in _ZEITRAUM_RE:
+        if nre.match(danach) or dre.search(davor):
+            return key
+    return None
+
+
+def _laufzeit_fuer(norm: str, start: int) -> float | None:
+    """'3 Monate fuer 1 EUR' - wie viele Monate deckt dieser Betrag ab?"""
+    treffer = _LAUFZEIT_RE.search(norm[max(0, start - 40):start])
+    if not treffer:
+        return None
+    try:
+        anzahl = int(treffer.group(1))
+    except ValueError:
+        return None
+    if anzahl <= 0 or anzahl > 120:
+        return None
+    return float(anzahl * (12 if treffer.group(2).lower().startswith("jahr") else 1))
+
 
 # Was hinter einer Zahl stehen kann, wenn sie kein Preis ist: "16 GB", "3 Stück".
 _EINHEIT = re.compile(
@@ -278,6 +412,16 @@ class Fund:
     waehrung: str | None = None
     marker: str | None = None      # "alt" | "neu" | None
     sicher: bool = True            # trug ein Waehrungszeichen
+    # Wofuer der Betrag steht: None = Ware, sonst "versand", "rabatt",
+    # "mbw", "gebuehr", "stueck".
+    zweck: str | None = None
+    zeitraum: str | None = None    # "monat" | "jahr" | "woche"
+    laufzeit: float | None = None  # Monate, die dieser Betrag abdeckt
+
+    @property
+    def ist_preis(self) -> bool:
+        """Kommt dieser Betrag als Artikelpreis ueberhaupt in Frage?"""
+        return self.zweck not in KEIN_PREIS
 
 
 # Wie weit ein Signalwort hoechstens vor der Zahl stehen darf, um noch
@@ -356,7 +500,31 @@ def finde(text: str) -> list[Fund]:
 
     funde.extend(_ergaenze_paar(norm, funde, belegt))
     funde.sort(key=lambda f: f.pos)
+
+    # Zweck und Zeitraum stehen im Umfeld der Zahl, nicht in ihr. Beides
+    # wird erst hier bestimmt, damit auch die in Stufe 3 nachgetragenen
+    # Betraege ihr Etikett bekommen.
+    for f in funde:
+        ende = _wortende(norm, f.pos)
+        f.zweck = _zweck_fuer(norm, f.pos, ende)
+        f.zeitraum = _zeitraum_fuer(norm, f.pos, ende)
+        f.laufzeit = _laufzeit_fuer(norm, f.pos)
     return funde
+
+
+_ZAHLENDE_RE = re.compile(rf"\s*(?:{_NUM})\s*(?:€|\$|£|eur|usd|gbp|chf|euro)?",
+                          re.IGNORECASE)
+
+
+def _wortende(norm: str, start: int) -> int:
+    """Wo hoert die Zahl auf, die an `start` beginnt (samt Waehrungszeichen)?
+
+    Fuer den Blick nach rechts ist das die entscheidende Stelle: "4,99 €
+    Versand" darf nicht am Euro-Zeichen haengenbleiben, sonst steht im
+    Fenster nur noch "Versan".
+    """
+    m = _ZAHLENDE_RE.match(norm, start)
+    return m.end() if m else start
 
 
 def _ergaenze_paar(norm: str, funde: list[Fund],
@@ -396,10 +564,12 @@ def find_prices(text: str) -> list[tuple[float, int, str | None]]:
 
 class ParsedPrice:
     __slots__ = ("preis", "originalpreis", "rabatt_prozent", "waehrung",
-                 "ist_gratis", "gratis_einschraenkung")
+                 "ist_gratis", "gratis_einschraenkung", "zeitraum",
+                 "laufzeit_monate", "preis_hinweis")
 
     def __init__(self, preis=None, originalpreis=None, rabatt_prozent=None,
-                 waehrung=None, ist_gratis=False, gratis_einschraenkung=None):
+                 waehrung=None, ist_gratis=False, gratis_einschraenkung=None,
+                 zeitraum=None, laufzeit_monate=None, preis_hinweis=None):
         self.preis = preis
         self.originalpreis = originalpreis
         self.rabatt_prozent = rabatt_prozent
@@ -408,6 +578,29 @@ class ParsedPrice:
         # Gesetzt, wenn im Text zwar ein Gratis-Wort stand, es sich aber auf
         # etwas anderes bezog - Klartext fuer die Oberflaeche.
         self.gratis_einschraenkung = gratis_einschraenkung
+        # "monat" | "jahr" | "woche": der Preis gilt je Zeitraum, nicht einmalig.
+        self.zeitraum = zeitraum
+        # Wie viele Monate ein einmaliger Betrag abdeckt ("3 Monate fuer 1 EUR").
+        self.laufzeit_monate = laufzeit_monate
+        # Klartext fuer die Karte: "pro Monat", "für 3 Monate", "Stückpreis".
+        self.preis_hinweis = preis_hinweis
+
+    @property
+    def preis_pro_monat(self) -> float | None:
+        """Was das Angebot im Monat kostet - oder None, wenn es kein Abo ist.
+
+        Der Punkt daran ist der Vergleich: "1 EUR" und "49 EUR" sagen
+        nichts, solange nicht dabeisteht, ob fuer einen Monat oder fuer
+        zwoelf. Erst diese Zahl macht aus zwei Abo-Angeboten eine Rangfolge.
+        """
+        if self.preis is None:
+            return None
+        if self.zeitraum:
+            je = _MONATE_JE.get(self.zeitraum)
+            return round(self.preis / je, 2) if je else None
+        if self.laufzeit_monate:
+            return round(self.preis / self.laufzeit_monate, 2)
+        return None
 
     def __repr__(self) -> str:
         return (f"ParsedPrice(preis={self.preis}, originalpreis={self.originalpreis}, "
@@ -417,8 +610,22 @@ class ParsedPrice:
         return {s: getattr(self, s) for s in self.__slots__}
 
 
+def _brauchbar(funde: list[Fund]) -> list[Fund]:
+    """Die Betraege, die als Artikelpreis ueberhaupt in Frage kommen.
+
+    Versand, Gutschein, Mindestbestellwert und Gebuehren fliegen immer
+    raus. Der Stueckpreis nur dann, wenn daneben ein Gesamtpreis steht -
+    bei "6er-Pack 23,94 EUR (je 3,99 EUR)" ist 23,94 der Preis, bei
+    "Kapseln je 0,29 EUR" ist 0,29 alles, was es gibt.
+    """
+    echte = [f for f in funde if f.ist_preis]
+    ohne_stueck = [f for f in echte if f.zweck != "stueck"]
+    return ohne_stueck or echte
+
+
 def _waehle(funde: list[Fund]) -> tuple[float | None, float | None]:
     """Aus allen Fundstellen aktuellen Preis und Originalpreis waehlen."""
+    funde = _brauchbar(funde)
     if not funde:
         return None, None
 
@@ -504,4 +711,34 @@ def parse_price_text(text: str) -> ParsedPrice:
         if hergeleitet > preis:
             orig = round(hergeleitet, 2)
 
-    return ParsedPrice(preis, orig, pct, waehrung, gratis, einschraenkung)
+    zeitraum, laufzeit, hinweis = _zeitangabe(funde, preis)
+    return ParsedPrice(preis, orig, pct, waehrung, gratis, einschraenkung,
+                       zeitraum, laufzeit, hinweis)
+
+
+def _zeitangabe(funde: list[Fund], preis: float | None
+                ) -> tuple[str | None, float | None, str | None]:
+    """Gilt der gewaehlte Preis je Monat - oder fuer eine ganze Laufzeit?
+
+    Gesucht wird die Fundstelle, aus der der Preis stammt; nur deren
+    Zeitangabe zaehlt. Sonst faerbt das "/Monat" eines danebenstehenden
+    Streichpreises auf den Artikelpreis ab.
+    """
+    if preis is None:
+        return None, None, None
+    passend = [f for f in _brauchbar(funde) if abs(f.wert - preis) < 0.005]
+    if not passend:
+        return None, None, None
+
+    zeitraum = next((f.zeitraum for f in passend if f.zeitraum), None)
+    if zeitraum:
+        return zeitraum, None, f"pro {_ZEITRAUM_LABEL.get(zeitraum, zeitraum)}"
+
+    laufzeit = next((f.laufzeit for f in passend if f.laufzeit), None)
+    if laufzeit:
+        monate = int(laufzeit) if float(laufzeit).is_integer() else laufzeit
+        return None, float(laufzeit), f"für {monate} Monate"
+
+    if all(f.zweck == "stueck" for f in passend):
+        return None, None, _ZWECK_TEXT["stueck"]
+    return None, None, None

@@ -251,3 +251,77 @@ async def test_zustellung_haelt_18plus_zurueck(tmp_path, monkeypatch):
         db.commit()
         await dispatch(db, [(regel, deal)], None)
         assert gesendet == ["Satisfyer Pro 2"]
+
+
+# --- Abos: laufende Zugaenge statt Ware -----------------------------------
+#
+# Der Wunsch dahinter: "im 18+ auch Abos anzeigen, die gerade guenstig
+# sind - also fuer Internetseiten". Das Schwierige daran ist nicht das
+# Einsammeln, sondern der Vergleich: 1 EUR fuer drei Monate ist guenstiger
+# als 0,99 EUR im Monat, obwohl die Zahl groesser ist.
+
+ABO_FEED = '''<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+<item><title>Premium-Zugang 3 Monate für 9 € statt 29,97 €</title>
+<link>https://a.test/1</link></item>
+<item><title>Satisfyer Pro 2 Vibrator für 24,99 €</title>
+<link>https://a.test/2</link></item>
+<item><title>Mitgliedschaft 14,99 €/Monat</title>
+<link>https://a.test/3</link></item>
+</channel></rss>'''
+
+
+class _AboHttp:
+    async def get_text(self, url, **kwargs):
+        return ABO_FEED
+
+
+def _abo_kontext(**optionen):
+    from app.sources.base import FetchContext
+    from app.sources.erwachsen import ErotikAbo
+
+    quelle = ErotikAbo()
+    opts = dict(quelle.default_options)
+    opts["feeds"] = ["https://a.test/feed"]
+    opts.update(optionen)
+    return quelle, FetchContext(http=_AboHttp(), options=opts)
+
+
+@pytest.mark.asyncio
+async def test_abo_quelle_nimmt_nur_laufende_angebote():
+    """Der Vibrator im selben Feed ist Ware, kein Zugang."""
+    quelle, ctx = _abo_kontext()
+    titel = [i.titel for i in await quelle.fetch(ctx)]
+    assert len(titel) == 2
+    assert not any("Vibrator" in t for t in titel)
+
+
+@pytest.mark.asyncio
+async def test_abo_quelle_rechnet_auf_den_monat():
+    quelle, ctx = _abo_kontext()
+    items = await quelle.fetch(ctx)
+    drei_monate = next(i for i in items if "3 Monate" in i.titel)
+    assert drei_monate.preis == 9.0 and drei_monate.preis_monat == 3.0
+    monatlich = next(i for i in items if "Mitgliedschaft" in i.titel)
+    assert monatlich.preis_zeitraum == "monat" and monatlich.preis_monat == 14.99
+
+
+@pytest.mark.asyncio
+async def test_abo_quelle_filtert_auf_den_monatspreis():
+    """'Günstig' ist beim Abo nicht am Preisschild abzulesen."""
+    quelle, ctx = _abo_kontext(max_preis_monat=5)
+    titel = [i.titel for i in await quelle.fetch(ctx)]
+    assert titel == ["Premium-Zugang 3 Monate für 9 € statt 29,97 €"]
+
+
+@pytest.mark.asyncio
+async def test_abo_funde_tragen_die_18er_marke():
+    """Wie jeder Fund aus einer 18+-Quelle - unabhaengig vom Titel."""
+    quelle, ctx = _abo_kontext()
+    assert {i.kategorie for i in await quelle.fetch(ctx)} == {"erwachsen"}
+
+
+@pytest.mark.asyncio
+async def test_abo_quelle_laesst_sich_abschalten():
+    """Ohne den Filter kommt alles durch, was in den Feeds steht."""
+    quelle, ctx = _abo_kontext(nur_abos=False)
+    assert len(await quelle.fetch(ctx)) == 3

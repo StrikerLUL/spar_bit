@@ -9,6 +9,7 @@ import {
   Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton, Switch,
 } from "@/components/ui";
 import { DealCard } from "@/components/DealCard";
+import { KategorieLeiste } from "@/components/Kategorien";
 import { DealDetailDialog } from "@/components/DealDetail";
 import { PageHeader } from "@/components/Layout";
 import { useToast } from "@/components/Toast";
@@ -20,8 +21,13 @@ export function Feed() {
   const [query, setQuery] = React.useState("");
   const [debounced, setDebounced] = React.useState("");
   const [quelle, setQuelle] = React.useState("");
+  const [kategorien, setKategorien] = React.useState<string[]>([]);
   const [nurGratis, setNurGratis] = React.useState(false);
   const [nurGemerkt, setNurGemerkt] = React.useState(false);
+  // Vorgabe an: abgelaufene Deals sind der häufigste Ärger im Feed, und
+  // ausgeblendet werden nur die, bei denen die Zielseite es selbst gesagt
+  // hat — Ungeprüftes bleibt sichtbar.
+  const [nurGueltig, setNurGueltig] = React.useState(true);
   const [minRabatt, setMinRabatt] = React.useState("");
   const [maxPreis, setMaxPreis] = React.useState("");
   const [urteil, setUrteil] = React.useState("");
@@ -45,15 +51,17 @@ export function Feed() {
     () => ({
       q: debounced || undefined,
       quelle: quelle || undefined,
+      kategorie: kategorien.length ? kategorien.join(",") : undefined,
       nur_gratis: nurGratis,
+      nur_gueltig: nurGueltig,
       bookmarked: nurGemerkt,
       min_rabatt: minRabatt ? Number(minRabatt) : undefined,
       max_preis: maxPreis ? Number(maxPreis) : undefined,
       urteil: urteil || undefined,
       sortierung,
     }),
-    [debounced, quelle, nurGratis, nurGemerkt, minRabatt, maxPreis, urteil,
-     sortierung],
+    [debounced, quelle, kategorien, nurGratis, nurGueltig, nurGemerkt,
+     minRabatt, maxPreis, urteil, sortierung],
   );
 
   // Filterwechsel setzt die Paginierung zurueck.
@@ -73,7 +81,21 @@ export function Feed() {
   }, [data, offset]);
 
   const activeFilters =
-    [quelle, nurGratis, nurGemerkt, minRabatt, maxPreis, urteil].filter(Boolean).length;
+    [quelle, nurGratis, nurGemerkt, minRabatt, maxPreis, urteil,
+     !nurGueltig].filter(Boolean).length + kategorien.length;
+
+  // Beim Öffnen eines Deals die Zielseite gegenprüfen und das Ergebnis in
+  // die Karte zurückschreiben. Fehler bleiben still: das ist eine
+  // Nebenbeschäftigung, kein Auftrag des Benutzers.
+  const pruefen = async (id: number) => {
+    try {
+      const ergebnis = await api.deals.pruefen(id);
+      setItems((current) =>
+        current.map((d) => (d.id === id ? { ...d, ...ergebnis.deal } : d)));
+    } catch {
+      /* egal - der Link ist längst offen */
+    }
+  };
 
   const bookmark = async (id: number) => {
     try {
@@ -91,8 +113,10 @@ export function Feed() {
 
   const resetFilters = () => {
     setQuelle("");
+    setKategorien([]);
     setNurGratis(false);
     setNurGemerkt(false);
+    setNurGueltig(true);
     setMinRabatt("");
     setMaxPreis("");
     setUrteil("");
@@ -104,7 +128,8 @@ export function Feed() {
     if (!name) return;
     try {
       await api.searches.create(name, {
-        q: query, quelle, nur_gratis: nurGratis, bookmarked: nurGemerkt,
+        q: query, quelle, kategorie: kategorien.join(","),
+        nur_gratis: nurGratis, bookmarked: nurGemerkt,
         min_rabatt: minRabatt, max_preis: maxPreis,
       });
       toast.push("success", "Suche gespeichert", name);
@@ -118,6 +143,7 @@ export function Feed() {
     const f = gespeichert.filter as Record<string, string | boolean>;
     setQuery(String(f.q ?? ""));
     setQuelle(String(f.quelle ?? ""));
+    setKategorien(String(f.kategorie ?? "").split(",").filter(Boolean));
     setNurGratis(Boolean(f.nur_gratis));
     setNurGemerkt(Boolean(f.bookmarked));
     setMinRabatt(String(f.min_rabatt ?? ""));
@@ -158,7 +184,8 @@ export function Feed() {
             )}
           </Button>
           <div className="flex gap-1 rounded-md bg-muted/40 p-1 text-xs">
-            {([["neu", "Neueste"], ["fuer_mich", "Für dich"]] as const).map(
+            {([["neu", "Neueste"], ["guenstig", "Günstigste"],
+               ["fuer_mich", "Für dich"]] as const).map(
               ([wert, label]) => (
                 <button
                   key={wert}
@@ -181,6 +208,10 @@ export function Feed() {
                     "_blank")}>
             <Download className="h-4 w-4" />
           </Button>
+        </div>
+
+        <div className="mt-3 border-t border-border pt-3">
+          <KategorieLeiste ausgewaehlt={kategorien} onChange={setKategorien} />
         </div>
 
         {(searches?.length || activeFilters > 0 || query) && (
@@ -265,6 +296,13 @@ export function Feed() {
                 <Switch checked={nurGemerkt} onChange={setNurGemerkt} label="Nur gemerkte" />
                 Nur gemerkte
               </label>
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm"
+                     title="Blendet aus, was die Zielseite selbst als abgelaufen
+oder als anderen Preis gemeldet hat. Ungeprüftes bleibt sichtbar.">
+                <Switch checked={nurGueltig} onChange={setNurGueltig}
+                        label="Abgelaufene ausblenden" />
+                Abgelaufene ausblenden
+              </label>
             </div>
             {activeFilters > 0 && (
               <Button variant="ghost" size="sm" onClick={resetFilters}
@@ -318,6 +356,7 @@ export function Feed() {
                 key={deal.id}
                 deal={deal}
                 onBookmark={bookmark}
+                onPrueft={pruefen}
                 onOpen={(id) => {
                   setDetailId(id);
                   void api.lernen.notiere(id, "geoeffnet").catch(() => undefined);

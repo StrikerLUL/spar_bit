@@ -56,6 +56,23 @@ export function eurHinweis(
   return `≈ ${formatAmount(preisEur, "EUR")}`;
 }
 
+/** Das Kürzel hinter dem Preis, wenn er nicht einmalig gilt: "/Monat".
+ *
+ *  Ohne das steht ein Abo für 4,99 € im Monat neben einem Kopfhörer für
+ *  4,99 € und sieht aus wie dasselbe Angebot. Genau das war gemeint mit
+ *  „viele Preise werden falsch angezeigt“ — die Zahl stimmte, die Aussage
+ *  nicht.
+ */
+export function zeitraumKuerzel(
+  zeitraum: string | null | undefined,
+): string | null {
+  if (!zeitraum) return null;
+  const namen: Record<string, string> = {
+    monat: "/Monat", jahr: "/Jahr", woche: "/Woche",
+  };
+  return namen[zeitraum] ?? null;
+}
+
 /** Ob ein Streichpreis überhaupt angezeigt werden darf.
  *
  *  Ein "Originalpreis" unter oder gleich dem aktuellen Preis ist immer ein

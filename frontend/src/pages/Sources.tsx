@@ -621,15 +621,17 @@ function OptionField({
     );
   }
 
+  // "float" ist wie "int", nur mit Nachkommastellen — ein Höchstpreis von
+  // 4,99 € im Monat wäre sonst nicht einzugeben.
+  const zahl = spec.type === "int" || spec.type === "float";
   return (
     <div className="space-y-1.5">
       <Label>{spec.label}</Label>
       <Input
-        type={spec.type === "int" ? "number" : "text"}
+        type={zahl ? "number" : "text"}
+        step={spec.type === "float" ? "0.01" : undefined}
         value={String(value ?? "")}
-        onChange={(e) =>
-          onChange(spec.type === "int" ? Number(e.target.value) : e.target.value)
-        }
+        onChange={(e) => onChange(zahl ? Number(e.target.value) : e.target.value)}
         className={spec.type === "string" ? "font-mono text-xs" : undefined}
         spellCheck={false}
       />

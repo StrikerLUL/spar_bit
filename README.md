@@ -40,7 +40,9 @@ python run.py
 · [Die ersten 10 Minuten](#die-ersten-10-minuten)
 · [Was SparBit sonst kann](#was-sparbit-sonst-kann)
 · [Benachrichtigungen](#benachrichtigungen-einrichten)
+· [Kategorien](#nach-kategorien-suchen)
 · [Stimmt „gratis" auch?](#stimmt-gratis-auch)
+· [Noch gültig?](#und-gibt-es-den-deal-überhaupt-noch)
 · [18+-Bereich](#18-bereich)
 · [Feed finden](#den-feed-finden-statt-ihn-zu-raten)
 · [Kommandozeile](#kommandozeile) · [API-Keys](#api-keys-optional)
@@ -407,6 +409,49 @@ eine einfache Suche nicht kann:
 | `ssd -gebraucht` | „gebraucht" ausschließen |
 | `kopfhör*` | Präfix, findet auch „Kopfhörern" |
 
+### Nach Kategorien suchen
+
+Bis hierher kannte SparBit nur die Kategorie der *Quelle* — „community",
+„reddit", „gaming". Das beantwortet die Frage, wo etwas herkommt, nicht die
+Frage, worum es geht. Jeder Fund bekommt deshalb zusätzlich **inhaltliche
+Marken**, aus Titel, Beschreibung und Tags:
+
+`Speicher & SSD` · `Computer` · `Handy & Tablet` · `Audio` · `TV, Foto & Video`
+· `Gaming` · `Software` · `Abo & Mitgliedschaft` · `Mobilfunk & Internet` ·
+`Haushalt` · `Küche` · `Möbel` · `Werkzeug` · `Garten` · `Drogerie` ·
+`Lebensmittel` · `Mode` · `Kinder & Spielzeug` · `Sport` · `Reise` · `Auto` ·
+`Bücher, Filme & Musik` · `Finanzen` · `Gutschein`
+
+Über dem Feed steht daraus eine Leiste: ein Klick auf **Speicher & SSD** zeigt
+nur noch SSDs, Festplatten und Speicherkarten. Die Zahl an jeder Kategorie
+sagt, wie viel gerade darunter liegt — ein Knopf, der zu null Treffern führt,
+steht hinten und ist ausgegraut, statt zu verschwinden.
+
+Drei Dinge, die dabei wichtig sind:
+
+* **Mehrfach statt Schublade.** Ein „Gaming-Notebook mit 1 TB SSD" trägt
+  *Speicher*, *Computer* und *Gaming* — wer nach Speicher filtert, will es
+  sehen. Höchstens drei Marken pro Deal, sonst wird die Karte zur Wortwolke.
+* **Zusammensetzungen zählen.** Deutsch klebt Wörter aneinander:
+  „SSD-Festplatte", „Gaming-Headset", „Monatsabo" werden gefunden. Kurze
+  Begriffe haben eine Bremse — sonst fände „abo" das englische „above".
+* **Überall dasselbe.** Die Kategorien filtern im Feed, im 18+-Bereich, im
+  CSV-Export und in der Kommandozeile, und eine **Regel** kann auf sie
+  gestellt werden: *„melde alles aus Speicher & SSD unter 60 €"*.
+
+```
+$ python cli.py kategorien
+  Schlüssel   Name                 Deals (30d)  Was drin ist
+  speicher    Speicher & SSD       214          SSDs, Festplatten, Speicherkarten, RAM
+  abo         Abo & Mitgliedschaft  37          Laufende Dienste: Streaming, VPN …
+  …
+$ python cli.py deals --kategorie speicher --gueltig
+```
+
+Der Altbestand wird beim ersten Start nachgetragen (in Häppchen, damit ein
+Start mit 50.000 Deals nicht hängt) — die Filter sind also sofort auch für
+alles Ältere brauchbar.
+
 ### Preise richtig lesen
 
 Alles oben steht und fällt damit, dass der Preis stimmt. Das Schwierige daran
@@ -433,6 +478,46 @@ Die letzten beiden Zeilen sind die Bremse: eine Zahl ohne Währungszeichen wird
 nur dann als Preis akzeptiert, wenn sie ein **Paar** vervollständigt — es gibt
 schon einen „alten" Preis und der neue liegt darunter. Ohne diese Regel meldet
 `3 für 2` einen Preis von 2 €.
+
+#### Nicht jeder Betrag ist ein Preis
+
+Nachgetragen, nachdem im Betrieb „viele Preise werden falsch angezeigt"
+gemeldet wurde. Die Zahlen waren richtig gelesen — es war nur die falsche
+Zahl. In einer Deal-Zeile stehen regelmäßig Beträge, die etwas anderes
+bedeuten als „so viel kostet es":
+
+| Titel | Preis | weil |
+|---|--:|---|
+| `Sony XM5 für 229 € zzgl. 4,99 € Versand` | 229 € | Porto ist kein Artikelpreis |
+| `Nintendo Switch 269 € — 20 € Gutschein` | 269 € | Gutschein ist ein Nachlass |
+| `Jetzt 399 € — Sie sparen 100 €` | 399 € | Ersparnis ist kein Preis |
+| `Pullover 19,99 € (ab 50 € Bestellwert)` | 19,99 € | Mindestbestellwert |
+| `6er-Pack für 23,94 € (je 3,99 €)` | 23,94 € | Stückpreis, nicht der Gesamtpreis |
+| `20 € Gutschein ab 100 € Bestellwert` | — | hier steht **kein** Artikelpreis |
+
+Jeder Betrag bekommt dafür neben seinem Etikett (`alt`/`neu`) einen **Zweck**
+aus den Wörtern direkt davor und dahinter: Versand, Rabatt, Gutschein,
+Mindestbestellwert, Gebühr, Stückpreis. Was nachweislich kein Artikelpreis
+ist, fällt bei der Auswahl raus. Die letzte Zeile ist dabei Absicht: lieber
+gar kein Preis als ein falscher.
+
+#### Abos: die Zahl allein sagt nichts
+
+„4,99 €" an einem Kopfhörer und „4,99 €" an einem Zugang sind zwei sehr
+verschiedene Angebote. Preisangaben mit Zeitraum werden deshalb als solche
+erkannt und auf der Karte mit `/Monat` angezeigt — und für den Vergleich auf
+den **Monatspreis** umgerechnet:
+
+| Titel | Anzeige | pro Monat |
+|---|---|--:|
+| `Netflix 4,99 € pro Monat statt 12,99 €` | 4,99 €/Monat | 4,99 € |
+| `Zugang für 59,88 € (jährlich)` | 59,88 €/Jahr | 4,99 € |
+| `Premium: 3 Monate für 9 €` | 9 € · „für 3 Monate" | 3,00 € |
+
+Erst diese Spalte macht aus zwei Abo-Angeboten eine Rangfolge: *1 € für drei
+Monate* ist günstiger als *0,99 € im Monat*, obwohl die Zahl größer ist. Im
+Feed sortiert **Günstigste zuerst** danach, im 18+-Bereich filtert
+*Max. €/Monat* darauf.
 
 Alle Beträge werden zusätzlich in **Euro umgerechnet**, damit „max. 20 €" auch
 bei USD- und GBP-Quellen greift; in der Oberfläche steht der Gegenwert daneben
@@ -506,6 +591,33 @@ Deals ruft **Nachsehen** sie von Hand auf.
 > verhalten, zeigt erst der Betrieb; die Zahlen dazu stehen in derselben
 > Karte.
 
+### Und gibt es den Deal überhaupt noch?
+
+Der zweite Ärger nach dem falschen Preis: die Karte steht noch da, man
+klickt, und die Aktion ist seit Tagen vorbei. Im Text ist das nicht zu
+erkennen — dafür muss jemand auf der Zielseite nachsehen. Der Gratis-Check
+oben tat das nur für Gratis-Funde; **alle anderen** nimmt sich jetzt eine
+zweite Nachschau vor, alle 30 Minuten und mit Deckel.
+
+Die Reihenfolge richtet sich danach, wo ein toter Link am meisten ärgert:
+
+1. **gemerkte** Deals zuerst — darauf kommt man zurück,
+2. dann **billige und geschenkte**,
+3. dann **auffällige** (Preisfehler-Verdacht, ab 70 % Rabatt),
+4. innerhalb dessen: noch nie geprüft vor „zuletzt vor langer Zeit".
+
+Was die Seite als beendet führt, bekommt die Marke `abgelaufen` — und
+verschwindet aus dem Feed, solange dort **Abgelaufene ausblenden** an ist
+(Vorgabe an). Ausgeblendet wird ausschließlich, was die Zielseite selbst
+gesagt hat; Ungeprüftes bleibt sichtbar. Und beim Klick auf **Zum Deal** sieht
+SparBit gleich nach: für diesen Klick kommt die Antwort zu spät, für den
+nächsten Blick auf den Feed nicht.
+
+Abschalten oder enger stellen: *Logs & System → Gratis-Gegenprobe →
+„Auch normale Deals auf Aktualität prüfen"*. Was dort an Seitenaufrufen
+steht, gilt je Lauf. Der 18+-Bereich wird nur nachgesehen, wenn er
+freigeschaltet ist — ist er aus, ruft SparBit dort auch keine Seite auf.
+
 ### 18+-Bereich
 
 Ein getrennter Bereich für Angebote ab 18 — **standardmäßig aus**.
@@ -541,10 +653,25 @@ noch einmal hereinkommt.
 Auf der Seite selbst lassen sich die Bilder verdecken (Vorgabe an) — der
 Schleier geht beim Darüberfahren weg, Titel und Preis bleiben immer lesbar.
 
-**Sechs Quellen** stehen bereit: die Erotik-Gruppen von `mydealz`,
+**Abos für Internetseiten** sind ein eigener Fall und haben deshalb eine
+eigene Quelle: `erotik_abo`. Sie sammelt aus den Feeds, die du einträgst, nur
+die *laufenden* Angebote — Mitgliedschaften, Premium-Zugänge, Flatrates — und
+erkennt sie an zwei Dingen, die beide im Text stehen: an einer Preisangabe
+mit Zeitraum („9,99 €/Monat", „3 Monate für 1 €") und an Wörtern wie
+*Mitgliedschaft*, *Zugang*, *Flatrate*. Gefiltert wird auf den **Preis pro
+Monat** — bei einem Abo ist „günstig" nicht am Preisschild abzulesen, und
+*1 € für drei Monate* schlägt *0,99 € im Monat*.
+
+Im 18+-Bereich selbst stehen dafür drei Dinge bereit, die es vorher nicht
+gab: die Kategorie-Leiste (mit `Seiten-Abo & Zugang`, `Toys`, `Dessous`,
+`Gleitgel & Pflege`), das Feld **Max. €/Monat** — es zeigt ausschließlich
+laufende Angebote und rechnet auf den Monat um — und die Sortierung
+**Günstigste zuerst**, die ebenfalls mit dem Monatspreis rechnet.
+
+**Sieben Quellen** stehen bereit: die Erotik-Gruppen von `mydealz`,
 `Preisjäger.at`, `Dealabs` (FR) und `HotUKDeals` (UK), dazu
-`reddit_erwachsen` (Subreddits) und `erotik_feed`, wo du die Adresse eines
-beliebigen Shops einträgst. Keine davon ist geprüft, und die vorbelegten
+`reddit_erwachsen` (Subreddits), `erotik_feed`, wo du die Adresse eines
+beliebigen Shops einträgst, und `erotik_abo` für Seiten-Zugänge. Keine davon ist geprüft, und die vorbelegten
 Gruppen-Pfade und Subreddit-Namen sind geraten — was SparBit damit macht,
 steht gleich unten unter [Den Feed finden](#den-feed-finden-statt-ihn-zu-raten).
 Welche Anbieter als Kandidaten taugen, steht vollständig in
@@ -870,6 +997,7 @@ python cli.py kanaele typen               # alle 9 Kanäle mit ihren Feldern
 python cli.py quellen liste
 python cli.py regeln liste
 python cli.py deals lego --anzahl 10
+python cli.py deals --kategorie speicher --gueltig
 ```
 
 | Bereich | Befehle |
@@ -882,7 +1010,8 @@ python cli.py deals lego --anzahl 10
 | `feed-suche` | `<adresse>` — welche Feeds gibt diese Seite an? |
 | `gratischeck` | `--an/--aus`, `--max-pro-lauf 12` |
 | `18plus` | `--an --ich-bin-volljaehrig`, `--aus`, `--melden an/aus` |
-| `deals` | `[suchbegriff] --gratis --urteil bestpreis --anzahl 20` |
+| `deals` | `[suchbegriff] --gratis --kategorie speicher,abo --gueltig --urteil bestpreis --anzahl 20` |
+| `kategorien` | `--tage 30 --18plus` — welche Kategorien es gibt und wie viel darunter liegt |
 
 Ein paar Beispiele:
 
@@ -1277,6 +1406,10 @@ sperrt, nützt dir nichts.
 | `KeinFeed: HTML-Seite geliefert, keinen Feed` | Der eingetragene Pfad ist kein Feed. SparBit probiert die üblichen Adressen selbst durch (siehe [Den Feed finden](#den-feed-finden-statt-ihn-zu-raten)); bleibt die Meldung, nennt sie, was probiert wurde — dann im Browser nachsehen und die Adresse eintragen. |
 | `r/…: HTTPStatusError: 404 Not Found` | Den Subreddit gibt es nicht. SparBit streicht ihn beim nächsten Lauf selbst und legt ihn unter *Automatisch entfernt* ab. |
 | `RateLimited: HTTP 429, retry after 58s` | Reddit drosselt diesen Server — typisch für VPS in Rechenzentrums-Netzen. Die Quelle macht eine Pause und beim nächsten Lauf dort weiter, wo sie stand. Bleibt es dabei: Intervall hochsetzen und *Subreddits pro Lauf* auf 1–2 stellen. |
+| Preis auf der Karte passt nicht zur Zielseite | Steht dort ein Zusatzbetrag (Versand, Gutschein, Stückpreis), wird er seit dem Umbau übersprungen — siehe [Preise richtig lesen](#preise-richtig-lesen). Bleibt es falsch: Deal öffnen → **Nachsehen**, das holt den ausgezeichneten Preis von der Seite. |
+| Deal ist beim Klicken schon abgelaufen | „Abgelaufene ausblenden" im Feed einschalten (Vorgabe an) und unter *Logs & System* die Aktualitätsprüfung anlassen. Was die Zielseite nicht selbst als beendet meldet, kann SparBit nicht wissen. |
+| Kategorie-Leiste zeigt überall 0 | Der Nachtrag für den Altbestand läuft beim Start und danach im Aufräum-Job (alle 6 Std.) in Häppchen. Bei sehr vielen Deals dauert das ein paar Durchgänge. |
+| Abo steht mit einmaligem Preis da | Nur was einen Zeitraum im Text nennt („/Monat", „3 Monate für"), kann als Abo erkannt werden. Fehlt die Angabe im Titel, fehlt sie auch SparBit. |
 | Quelle steht auf „gedrosselt bis …" | Kein Defekt und keine Stummschaltung, sondern die Pause, um die die Gegenseite gebeten hat. Danach läuft sie von selbst weiter. |
 | Telegram schweigt | Dem Bot einmal selbst `/start` senden. Dann „Test senden" im UI. |
 | Kanal schweigt, Test schlägt fehl | Der Verlauf unter *Benachrichtigungen* nennt den Fehler im Klartext. Auf der Konsole: `python cli.py kanaele testen`. |
@@ -1330,6 +1463,15 @@ Ehrlich benannt statt verschwiegen:
   mit 404 beantwortet, verschwindet von selbst aus der Liste. Erst testen,
   dann behalten; Kandidaten und Feed-Konventionen stehen in
   [ENDPOINTS.md](ENDPOINTS.md#18-bereich).
+* **Die Kategorien sind eine Wortliste, kein Modell.** Sie trifft, was
+  jemand aufgeschrieben hat — ein Produkt, dessen Gattungsbegriff im Titel
+  fehlt („Roborock S8 Pro Ultra" ohne das Wort *Saugroboter*), bleibt ohne
+  Marke. Dafür lässt sich jede Lücke in `backend/app/kategorien.py` in einer
+  Zeile schließen, und jeder Treffer erklärt sich selbst.
+* **Die Aktualitätsprüfung sieht nur, was ausgezeichnet ist.** Ein Shop, der
+  seinen beendeten Deal einfach weiter anzeigt, oder einer hinter
+  Cloudflare, bleibt „ungeprüft" — und ungeprüft heißt sichtbar. Gegen einen
+  Deal, der nirgends sagt, dass er vorbei ist, hilft nur der Klick.
 * **Auch die Muster-Suche hat eine Grenze.** Sie kennt Pepper, Shopify,
   WordPress und die üblichen `/feed`-Varianten — eine Seite, die ihren Feed
   weder auszeichnet noch an einer dieser Stellen hat, bleibt Handarbeit.

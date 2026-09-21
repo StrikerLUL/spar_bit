@@ -180,6 +180,11 @@ def erwachsen_optionen(body: ErwachsenOptionen,
 class GratisCheck(BaseModel):
     an: bool | None = None
     max_pro_lauf: int | None = None
+    # Zweiter, getrennter Schalter: auch normale Deals auf Aktualitaet
+    # nachsehen. Getrennt, weil es deutlich mehr Anfragen sind als die
+    # Gratis-Gegenprobe - wer sparsam bleiben will, laesst ihn aus.
+    aktualitaet: bool | None = None
+    aktualitaet_max: int | None = None
 
 
 @router.get("/gratischeck")
@@ -194,6 +199,11 @@ def gratischeck_status(db: Session = Depends(get_db)) -> dict:
         "an": bool(get_setting(db, gratischeck.SETTING_AN, True)),
         "max_pro_lauf": int(get_setting(db, gratischeck.SETTING_MAX,
                                         gratischeck.MAX_PRO_LAUF)),
+        "aktualitaet": bool(get_setting(db, gratischeck.SETTING_AKTUALITAET,
+                                        True)),
+        "aktualitaet_max": int(get_setting(
+            db, gratischeck.SETTING_AKTUALITAET_MAX,
+            gratischeck.MAX_AKTUALITAET_PRO_LAUF)),
         "woche": {status: anzahl for status, anzahl in zeilen if status},
         "label": gratischeck.LABEL,
     }
@@ -206,6 +216,11 @@ def gratischeck_setzen(body: GratisCheck, db: Session = Depends(get_db)) -> dict
     if body.max_pro_lauf is not None:
         set_setting(db, gratischeck.SETTING_MAX,
                     max(0, min(60, int(body.max_pro_lauf))))
+    if body.aktualitaet is not None:
+        set_setting(db, gratischeck.SETTING_AKTUALITAET, bool(body.aktualitaet))
+    if body.aktualitaet_max is not None:
+        set_setting(db, gratischeck.SETTING_AKTUALITAET_MAX,
+                    max(0, min(120, int(body.aktualitaet_max))))
     db.commit()
     return gratischeck_status(db)
 

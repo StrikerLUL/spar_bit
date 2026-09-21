@@ -2,7 +2,7 @@ import { Bookmark, ExternalLink, Flame, LineChart, Store } from "lucide-react";
 import type { Deal } from "@/lib/api";
 import {
   bildQuelle, cn, eurHinweis, formatAmount, formatPrice, sourceLabel, timeAgo,
-  zeigeStreichpreis,
+  zeigeStreichpreis, zeitraumKuerzel,
 } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui";
 import { UrteilBadge } from "@/components/Urteil";
@@ -21,18 +21,28 @@ export function DealCard({
   deal,
   onBookmark,
   onOpen,
+  onPrueft,
 }: {
   deal: Deal;
   onBookmark?: (id: number) => void;
   onOpen?: (id: number) => void;
+  /** Wird beim Öffnen des Deals gerufen — für die Gegenprobe der Zielseite. */
+  onPrueft?: (id: number) => void;
 }) {
   const rabatt = deal.rabatt_prozent;
   const streichpreis = zeigeStreichpreis(deal);
   const eur = eurHinweis(deal.preis_eur, deal.waehrung);
   const bild = bildQuelle(deal);
+  const kuerzel = zeitraumKuerzel(deal.preis_zeitraum);
+  // Abgelaufen heisst: die Zielseite hat es selbst gesagt. Die Karte
+  // bleibt stehen (sie erklärt, warum da nichts mehr kommt), tritt aber
+  // zurück — sonst klickt man wieder darauf.
+  const vorbei = deal.check_status === "abgelaufen"
+    || deal.check_status === "widerlegt";
 
   return (
-    <Card hover className="group flex flex-col overflow-hidden">
+    <Card hover className={cn("group flex flex-col overflow-hidden",
+                              vorbei && "opacity-60 saturate-50")}>
       <FehlerBalken stufe={deal.fehler_stufe} />
 
       <div className="relative aspect-[16/9] overflow-hidden border-b border-border bg-muted/50">
@@ -122,6 +132,11 @@ export function DealCard({
               )}
             >
               {deal.ist_gratis ? "gratis" : formatPrice(deal.preis, deal.waehrung)}
+              {kuerzel && !deal.ist_gratis && (
+                <span className="text-[13px] font-medium text-muted-foreground">
+                  {kuerzel}
+                </span>
+              )}
             </span>
             {streichpreis && (
               <span className="tabular text-xs text-muted-foreground line-through decoration-muted-foreground/60">
@@ -136,7 +151,30 @@ export function DealCard({
             )}
           </div>
 
+          {/* "für 3 Monate" bzw. "Stückpreis": ohne diese Zeile steht eine
+              Zahl da, die ohne ihren Bezug nichts aussagt. */}
+          {deal.preis_hinweis && !kuerzel && (
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {deal.preis_hinweis}
+              {deal.preis_monat_eur != null && (
+                <> — {formatAmount(deal.preis_monat_eur, "EUR")} im Monat</>
+              )}
+            </p>
+          )}
+
           <GratisHinweis deal={deal} />
+
+          {deal.kategorien_labels && deal.kategorien_labels.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {deal.kategorien_labels.map((name) => (
+                <span key={name}
+                      className="rounded-sm bg-muted/60 px-1.5 py-0.5 text-[10px]
+                                 font-medium text-muted-foreground">
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
 
           {deal.passt_weil && deal.passt_weil.length > 0 && (
             <p className="text-[11px] leading-relaxed text-primary/90"
@@ -174,7 +212,14 @@ export function DealCard({
               variant="outline"
               size="sm"
               className="flex-1"
-              onClick={() => window.open(deal.url, "_blank", "noopener,noreferrer")}
+              onClick={() => {
+                window.open(deal.url, "_blank", "noopener,noreferrer");
+                // Beim Öffnen gleich nachsehen, ob es den Deal noch gibt.
+                // Für diesen Klick kommt die Antwort zu spät — für den
+                // nächsten Blick auf den Feed nicht, und niemand sonst
+                // läuft danach in dieselbe tote Seite.
+                onPrueft?.(deal.id);
+              }}
             >
               <ExternalLink className="h-3.5 w-3.5" />
               Zum Deal

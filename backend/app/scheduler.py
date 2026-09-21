@@ -485,6 +485,40 @@ async def gratischeck_job() -> None:
         log.error("Gratis-Nachpruefung fehlgeschlagen: %s", exc)
 
 
+async def aktualitaet_job() -> None:
+    """Nachsehen, ob die Deals im Feed ueberhaupt noch gelten.
+
+    Der haeufigste Aerger nach dem falschen Preis ist der abgelaufene
+    Deal: die Karte steht noch da, man klickt, und die Aktion ist seit
+    Tagen vorbei. Dagegen half der Gratis-Check nicht - der sah sich nur
+    Gratis-Funde an.
+
+    Dieser Job nimmt sich die uebrigen vor, in der Reihenfolge, in der sie
+    aergern (gemerkt, billig, auffaellig zuerst), und mit einem Deckel pro
+    Lauf. Was die Zielseite als vorbei fuehrt, bekommt die Marke
+    'abgelaufen' - und faellt damit aus dem Feed, der sie ausblendet.
+    """
+    try:
+        with SessionLocal() as db:
+            if not get_setting(db, gratischeck.SETTING_AKTUALITAET, True):
+                return
+            grenze = int(get_setting(db, gratischeck.SETTING_AKTUALITAET_MAX,
+                                     gratischeck.MAX_AKTUALITAET_PRO_LAUF))
+            kandidaten = gratischeck.waehle_nachpruefung(
+                db, grenze=grenze,
+                erwachsen_erlaubt=erwachsen_mod.ist_aktiv(db))
+            if not kandidaten:
+                return
+            bilanz = await gratischeck.pruefe_deals(
+                db, get_http(), kandidaten, grenze=grenze, alle=True)
+            if bilanz["geprueft"]:
+                log.info("Aktualitaets-Pruefung: %d geprueft, %d korrigiert, "
+                         "%d nicht mehr gueltig", bilanz["geprueft"],
+                         bilanz["korrigiert"], len(bilanz["gesperrt"]))
+    except Exception as exc:
+        log.error("Aktualitaets-Pruefung fehlgeschlagen: %s", exc)
+
+
 async def digest_job() -> None:
     try:
         with SessionLocal() as db:
@@ -508,6 +542,12 @@ def cleanup_job() -> None:
             db.execute(delete(LogEntry).where(LogEntry.ts < log_cut))
             from .loginguard import aufraeumen as login_aufraeumen
             login_aufraeumen(db)
+            # Kategorien fuer den Altbestand: den Rest, den der Start nicht
+            # geschafft hat, in Haeppchen nachziehen.
+            from .kategorien import nachtragen as kategorien_nachtragen
+            nachgetragen = kategorien_nachtragen(db, grenze=5000)
+            if nachgetragen:
+                log.info("Kategorien nachgetragen: %d Deals", nachgetragen)
             if deals.rowcount:
                 log.info("Aufraeumen: %d alte Deals entfernt", deals.rowcount)
             db.flush()
@@ -535,6 +575,10 @@ def start() -> None:
     scheduler.add_job(gratischeck_job, IntervalTrigger(minutes=30),
                       id="gratischeck", max_instances=1, coalesce=True,
                       next_run_time=utcnow() + timedelta(minutes=3))
+    # Versetzt zum Gratis-Check, damit nicht beide gleichzeitig losziehen.
+    scheduler.add_job(aktualitaet_job, IntervalTrigger(minutes=30),
+                      id="aktualitaet", max_instances=1, coalesce=True,
+                      next_run_time=utcnow() + timedelta(minutes=8))
     # Erst nach ein paar Minuten anfangen: direkt nach dem Start hat noch
     # keine Quelle laufen koennen, da waere jede Meldung verfrueht.
     scheduler.add_job(watchdog_job, IntervalTrigger(minutes=15), id="watchdog",

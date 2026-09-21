@@ -8,6 +8,7 @@ import {
   Button, Card, EmptyState, Input, Label, Select, Skeleton, Switch,
 } from "@/components/ui";
 import { DealCard } from "@/components/DealCard";
+import { KategorieLeiste } from "@/components/Kategorien";
 import { DealDetailDialog } from "@/components/DealDetail";
 import { PageHeader } from "@/components/Layout";
 import { useToast } from "@/components/Toast";
@@ -73,9 +74,13 @@ function Liste({
   const [query, setQuery] = React.useState("");
   const [debounced, setDebounced] = React.useState("");
   const [quelle, setQuelle] = React.useState("");
+  const [kategorien, setKategorien] = React.useState<string[]>([]);
   const [nurGratis, setNurGratis] = React.useState(false);
   const [maxPreis, setMaxPreis] = React.useState("");
+  const [maxProMonat, setMaxProMonat] = React.useState("");
   const [minRabatt, setMinRabatt] = React.useState("");
+  const [sortierung, setSortierung] = React.useState("neu");
+  const [nurGueltig, setNurGueltig] = React.useState(true);
   const [offset, setOffset] = React.useState(0);
   const [items, setItems] = React.useState<Deal[]>([]);
   const [detailId, setDetailId] = React.useState<number | null>(null);
@@ -95,11 +100,18 @@ function Liste({
       bereich: "erwachsen",
       q: debounced || undefined,
       quelle: quelle || undefined,
+      kategorie: kategorien.length ? kategorien.join(",") : undefined,
       nur_gratis: nurGratis,
+      nur_gueltig: nurGueltig,
       max_preis: maxPreis ? Number(maxPreis) : undefined,
+      // Abos vergleichen sich über den Monatspreis, nicht über das
+      // Preisschild: "1 € für 3 Monate" ist günstiger als "0,99 € im Monat".
+      max_preis_monat: maxProMonat ? Number(maxProMonat) : undefined,
       min_rabatt: minRabatt ? Number(minRabatt) : undefined,
+      sortierung,
     }),
-    [debounced, quelle, nurGratis, maxPreis, minRabatt],
+    [debounced, quelle, kategorien, nurGratis, nurGueltig, maxPreis,
+     maxProMonat, minRabatt, sortierung],
   );
 
   React.useEffect(() => {
@@ -116,6 +128,16 @@ function Liste({
     if (!data) return;
     setItems((current) => (offset === 0 ? data.items : [...current, ...data.items]));
   }, [data, offset]);
+
+  const pruefen = async (id: number) => {
+    try {
+      const ergebnis = await api.deals.pruefen(id);
+      setItems((current) =>
+        current.map((d) => (d.id === id ? { ...d, ...ergebnis.deal } : d)));
+    } catch {
+      /* egal - der Link ist längst offen */
+    }
+  };
 
   const merken = async (id: number) => {
     try {
@@ -197,6 +219,23 @@ function Liste({
             <Input type="number" min="0" value={maxPreis}
                    onChange={(e) => setMaxPreis(e.target.value)} placeholder="—" />
           </div>
+          <div className="w-32">
+            <Label className="mb-1 block text-xs" title="Zeigt nur laufende
+Angebote — Abos, Mitgliedschaften, Zugänge — und rechnet den Preis auf den
+Monat um.">Max. €/Monat</Label>
+            <Input type="number" min="0" step="0.01" value={maxProMonat}
+                   onChange={(e) => setMaxProMonat(e.target.value)}
+                   placeholder="—" />
+          </div>
+          <div className="w-40">
+            <Label className="mb-1 block text-xs">Sortierung</Label>
+            <Select value={sortierung}
+                    onChange={(e) => setSortierung(e.target.value)}>
+              <option value="neu">Neueste zuerst</option>
+              <option value="guenstig">Günstigste zuerst</option>
+              <option value="rabatt">Höchster Rabatt</option>
+            </Select>
+          </div>
           <div className="w-28">
             <Label className="mb-1 block text-xs">Min. %</Label>
             <Input type="number" min="0" max="100" value={minRabatt}
@@ -206,6 +245,17 @@ function Liste({
             <Switch checked={nurGratis} onChange={setNurGratis} label="Nur gratis" />
             nur gratis
           </label>
+          <label className="flex cursor-pointer items-center gap-2.5 pb-2 text-sm"
+                 title="Blendet aus, was die Zielseite als abgelaufen meldet.">
+            <Switch checked={nurGueltig} onChange={setNurGueltig}
+                    label="Abgelaufene ausblenden" />
+            abgelaufene aus
+          </label>
+        </div>
+
+        <div className="mt-3 border-t border-border pt-3">
+          <KategorieLeiste bereich="erwachsen" ausgewaehlt={kategorien}
+                           onChange={setKategorien} />
         </div>
       </Card>
 
@@ -228,7 +278,7 @@ function Liste({
                              unscharf && "sparbit-verdeckt")}>
             {items.map((deal) => (
               <DealCard key={deal.id} deal={deal} onBookmark={merken}
-                        onOpen={setDetailId} />
+                        onPrueft={pruefen} onOpen={setDetailId} />
             ))}
           </div>
           {data && items.length < data.total && (

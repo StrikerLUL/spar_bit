@@ -68,6 +68,10 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("deals", "check_am", "DATETIME"),
     ("deals", "gratis_hinweis", "VARCHAR(64)"),
     ("rules", "erwachsen", "BOOLEAN DEFAULT 0"),
+    ("deals", "kategorien", "TEXT"),
+    ("deals", "preis_zeitraum", "VARCHAR(8)"),
+    ("deals", "preis_monat_eur", "FLOAT"),
+    ("deals", "preis_hinweis", "VARCHAR(48)"),
 ]
 
 
@@ -98,6 +102,17 @@ def init_db() -> None:
             set_setting(db, "secret_key", secrets.token_urlsafe(48))
             db.commit()
             log.info("Neuer secret_key erzeugt und in der DB abgelegt")
+
+        # Kategorien fuer den Altbestand nachtragen. In Haeppchen, damit ein
+        # Start mit 50.000 Deals nicht minutenlang haengt - den Rest holt
+        # der Aufraeum-Job nach.
+        from .kategorien import nachtragen as kategorien_nachtragen
+        try:
+            anzahl = kategorien_nachtragen(db, grenze=3000)
+            if anzahl:
+                log.info("Kategorien nachgetragen: %d Deals", anzahl)
+        except Exception as exc:                       # noqa: BLE001
+            log.warning("Kategorien-Nachtrag uebersprungen: %s", exc)
 
 
 @contextmanager

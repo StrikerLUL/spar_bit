@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import erwachsen as erwachsen_mod
+from . import kategorien
 from . import money
 from .currency import to_eur
 from .db import get_setting
@@ -114,6 +115,9 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
                                item.ist_gratis),
         waehrung=item.waehrung,
         preis_eur=to_eur(item.preis, item.waehrung),
+        preis_zeitraum=item.preis_zeitraum,
+        preis_monat_eur=to_eur(item.preis_monat, item.waehrung),
+        preis_hinweis=item.preis_hinweis,
         ist_gratis=item.ist_gratis,
         haendler=(item.haendler or None) and item.haendler[:128],
         kategorie=item.kategorie,
@@ -126,6 +130,9 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         roh=item.roh or {},
     )
     erwachsen_mod.markiere(deal, source_id=source_id)
+    # Erst nach der 18+-Marke: die entscheidet, ob die 18+-Kategorien
+    # ueberhaupt vergeben werden duerfen.
+    deal.kategorien = kategorien.fuer_deal(deal).text or ""
     db.add(deal)
     db.flush()
     _merke_angebot(db, deal, item, source_id)
@@ -230,6 +237,11 @@ def _apply_price(db: Session, deal: Deal, item: DealItem, source_id: str) -> Non
     deal.preis = item.preis
     deal.waehrung = item.waehrung
     deal.preis_eur = neu_eur
+    # Der Zeitraum gehoert zum Preis: wer den Preis ersetzt und die Angabe
+    # "pro Monat" stehenlaesst, macht aus einem einmaligen Kauf ein Abo.
+    deal.preis_zeitraum = item.preis_zeitraum
+    deal.preis_monat_eur = to_eur(item.preis_monat, item.waehrung)
+    deal.preis_hinweis = item.preis_hinweis
     deal.ist_gratis = deal.ist_gratis or item.ist_gratis
 
     # Streichpreis: der der neuen Quelle, sonst der alte - aber nur, solange

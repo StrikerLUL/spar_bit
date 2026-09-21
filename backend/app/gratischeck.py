@@ -347,6 +347,10 @@ async def pruefe(http, url: str, *, erwartet_gratis: bool = False,
 
 SETTING_AN = "gratis_pruefen"          # Schalter unter Logs & System
 SETTING_MAX = "gratis_pruefen_max"     # Deckel pro Lauf
+# Zweiter Schalter: auch normale Deals auf Aktualitaet pruefen, nicht nur
+# Gratis-Funde. Getrennt schaltbar, weil es deutlich mehr Anfragen sind.
+SETTING_AKTUALITAET = "aktualitaet_pruefen"
+SETTING_AKTUALITAET_MAX = "aktualitaet_max"
 
 MAX_PRO_LAUF = 12
 # Ab diesem Preis lohnt die Gegenprobe auch ohne Gratis-Marke: ein Fund
@@ -355,13 +359,30 @@ BILLIG_AB_EUR = 2.0
 # Wie lange ein Befund haelt, bevor erneut nachgesehen wird.
 FRISCH_STUNDEN = 12
 
+# --- Aktualitaet ----------------------------------------------------------
+#
+# Der zweite Aerger nach dem falschen Gratis-Schild ist der abgelaufene
+# Deal: die Karte steht noch da, man klickt, und die Aktion ist seit Tagen
+# vorbei. Dagegen half die bisherige Pruefung nicht - sie sah sich nur
+# Gratis-Funde an. Jetzt wird jeder Deal irgendwann nachgesehen, aber in
+# einer Reihenfolge, die sich nach dem Aerger richtet, und mit einem
+# Deckel pro Lauf.
+
+MAX_AKTUALITAET_PRO_LAUF = 25
+# Aelter als das wird nicht mehr nachgesehen - was so lange liegt, raeumt
+# der Aufraeum-Job ohnehin weg.
+AKTUALITAET_TAGE = 21
+# Ein bestaetigter Deal wird seltener nachgeprueft als ein ungepruefter.
+NACHSCHAU_STUNDEN = 24
+
 
 def ist_kandidat(deal) -> bool:
-    """Lohnt sich die Gegenprobe fuer diesen Deal?
+    """Lohnt sich die Gegenprobe fuer diesen Deal *sofort* beim Einsammeln?
 
     Nicht jeder Deal - das waere ein Request pro Fund und damit ein
-    Crawler. Nur die Faelle, in denen eine falsche Meldung wirklich aergert:
-    alles, was als geschenkt oder fast geschenkt gemeldet wurde.
+    Crawler. Beim Einsammeln nur die Faelle, in denen eine falsche Meldung
+    wirklich aergert: alles, was als geschenkt oder fast geschenkt gemeldet
+    wurde. Alles Weitere macht in Ruhe der Aktualitaets-Job.
     """
     if not deal.url:
         return False
@@ -374,6 +395,59 @@ def _veraltet(deal, jetzt) -> bool:
     from datetime import timedelta
     return (deal.check_am is None
             or deal.check_am < jetzt - timedelta(hours=FRISCH_STUNDEN))
+
+
+def waehle_nachpruefung(db, *, grenze: int = MAX_AKTUALITAET_PRO_LAUF,
+                        erwachsen_erlaubt: bool = False, jetzt=None) -> list:
+    """Welche Deals werden als Naechstes auf Aktualitaet nachgesehen?
+
+    Die Reihenfolge ist die ganze Kunst daran. Vorne steht, was noch nie
+    geprueft wurde und was am meisten Schaden anrichtet, wenn es falsch
+    ist - ein Deal, der jemanden auf eine tote Seite schickt, aergert mehr,
+    je frischer und je auffaelliger er ist. Was schon als abgelaufen
+    erkannt wurde, kommt gar nicht mehr dran: das Urteil aendert sich nicht
+    mehr, und die Karte ist ohnehin ausgeblendet.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from .models import Deal, utcnow
+
+    jetzt = jetzt or utcnow()
+    bedingungen = []
+    # Ist der 18+-Bereich zu, wird dort auch nichts nachgesehen: solange
+    # er aus ist, faesst SparBit diese Funde ueberhaupt nicht an - auch
+    # nicht, um ihre Zielseite aufzurufen.
+    if not erwachsen_erlaubt:
+        bedingungen.append(Deal.erwachsen.is_(False))
+    stmt = (
+        select(Deal)
+        .where(*bedingungen,
+               Deal.url.isnot(None),
+               Deal.duplicate_of.is_(None),
+               Deal.first_seen >= jetzt - timedelta(days=AKTUALITAET_TAGE),
+               Deal.check_status.notin_(WIDERSPRUCH) | Deal.check_status.is_(None),
+               Deal.check_am.is_(None)
+               | (Deal.check_am < jetzt - timedelta(hours=NACHSCHAU_STUNDEN)))
+        # Noch nie geprueft zuerst, danach das aelteste Urteil; bei
+        # Gleichstand der neuere Deal, denn den sieht man oben im Feed.
+        .order_by(Deal.check_am.is_(None).desc(), Deal.check_am,
+                  Deal.first_seen.desc())
+        .limit(max(1, grenze) * 4)
+    )
+    kandidaten = list(db.scalars(stmt))
+
+    def dringlichkeit(deal) -> tuple:
+        gemerkt = bool(deal.bookmarked)
+        billig = deal.ist_gratis or (deal.preis_eur is not None
+                                     and deal.preis_eur <= BILLIG_AB_EUR)
+        auffaellig = bool(deal.fehler_stufe) or (deal.rabatt_prozent or 0) >= 70
+        # Kleiner sortiert vor - darum negiert.
+        return (not gemerkt, not billig, not auffaellig)
+
+    kandidaten.sort(key=dringlichkeit)
+    return kandidaten[:max(1, grenze)]
 
 
 def uebernehme(deal, befund: Befund) -> bool:
@@ -407,8 +481,8 @@ def uebernehme(deal, befund: Befund) -> bool:
     return True
 
 
-async def pruefe_deals(db, http, deals: list, *, grenze: int | None = None
-                       ) -> dict:
+async def pruefe_deals(db, http, deals: list, *, grenze: int | None = None,
+                       alle: bool = False) -> dict:
     """Die Gegenprobe fuer eine Liste Deals. Wirft nie.
 
     Gibt eine kleine Bilanz zurueck sowie die IDs, die nicht mehr gemeldet
@@ -417,7 +491,11 @@ async def pruefe_deals(db, http, deals: list, *, grenze: int | None = None
     from .models import utcnow
 
     jetzt = utcnow()
-    kandidaten = [d for d in deals if ist_kandidat(d) and _veraltet(d, jetzt)]
+    # `alle=True` kommt vom Aktualitaets-Job: dort ist die Auswahl schon
+    # getroffen (waehle_nachpruefung), und sie soll hier nicht ein zweites
+    # Mal auf Gratis-Funde eingedampft werden.
+    kandidaten = [d for d in deals
+                  if (alle or ist_kandidat(d)) and _veraltet(d, jetzt)]
     if not kandidaten:
         return {"geprueft": 0, "korrigiert": 0, "gesperrt": []}
 

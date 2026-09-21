@@ -95,6 +95,9 @@ export interface ErwachsenStatus {
 export interface GratisCheckStatus {
   an: boolean;
   max_pro_lauf: number;
+  /** Zweiter Schalter: auch normale Deals auf Aktualität nachsehen. */
+  aktualitaet?: boolean;
+  aktualitaet_max?: number;
   woche: Record<string, number>;
   label: Record<string, string>;
 }
@@ -110,8 +113,18 @@ export interface Deal {
   rabatt_prozent: number | null;
   waehrung: string;
   ist_gratis: boolean;
+  /** "monat" | "jahr" | "woche" — der Preis gilt je Zeitraum, nicht einmalig. */
+  preis_zeitraum?: string | null;
+  /** Was das Angebot im Monat kostet. Erst damit sind Abos vergleichbar. */
+  preis_monat_eur?: number | null;
+  /** Klartext daneben: "pro Monat", "für 3 Monate", "Stückpreis". */
+  preis_hinweis?: string | null;
   haendler: string | null;
+  /** Kategorie der Quelle ("community", "reddit", …). */
   kategorie: string | null;
+  /** Worum es inhaltlich geht — siehe backend/app/kategorien.py. */
+  kategorien?: string[];
+  kategorien_labels?: string[];
   quelle: string;
   temperatur: number | null;
   tags: string[];
@@ -226,10 +239,19 @@ export interface Angebot {
   zuletzt_gesehen: string;
 }
 
+export interface Kategorie {
+  key: string;
+  label: string;
+  hinweis: string;
+  erwachsen: boolean;
+  /** Treffer der letzten Wochen — eine leere Kategorie ist ein toter Knopf. */
+  anzahl: number;
+}
+
 export interface OptionSpec {
   key: string;
   label: string;
-  type: "string" | "int" | "bool" | "list" | "select";
+  type: "string" | "int" | "float" | "bool" | "list" | "select";
   default: unknown;
   help: string;
   choices: string[];
@@ -647,6 +669,10 @@ export const api = {
       post<{ befund: GratisBefund; korrigiert: boolean; deal: Deal }>(
         `/deals/${id}/pruefen`),
   },
+  kategorien: {
+    list: (bereich: "normal" | "erwachsen" = "normal") =>
+      get<Kategorie[]>(`/kategorien?bereich=${bereich}`),
+  },
   stats: () => get<Stats>("/stats"),
   hygiene: () => get<Hygiene>("/hygiene"),
   preisfehler: {
@@ -709,7 +735,10 @@ export const api = {
     erwachsenOptionen: (body: { melden?: boolean; unscharf?: boolean }) =>
       put<ErwachsenStatus>("/system/erwachsen/optionen", body),
     gratischeck: () => get<GratisCheckStatus>("/system/gratischeck"),
-    gratischeckSetzen: (body: { an?: boolean; max_pro_lauf?: number }) =>
+    gratischeckSetzen: (body: {
+      an?: boolean; max_pro_lauf?: number;
+      aktualitaet?: boolean; aktualitaet_max?: number;
+    }) =>
       put<GratisCheckStatus>("/system/gratischeck", body),
     updateAuto: (auto: boolean) =>
       put<{ ok: boolean; auto: boolean }>("/system/update/auto", { auto }),

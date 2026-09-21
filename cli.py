@@ -1063,25 +1063,78 @@ def befehl_deals(args) -> int:
                                       Deal.beschreibung.ilike(like)))
         if args.gratis:
             stmt = stmt.where(Deal.ist_gratis.is_(True))
+        if getattr(args, "kategorie", None):
+            gewuenscht = [k.strip() for k in args.kategorie.split(",") if k.strip()]
+            if gewuenscht:
+                stmt = stmt.where(or_(*[Deal.kategorien.like(f"%|{k}|%")
+                                        for k in gewuenscht]))
+        if getattr(args, "gueltig", False):
+            from app.gratischeck import WIDERSPRUCH
+            stmt = stmt.where(or_(Deal.check_status.is_(None),
+                                  Deal.check_status.notin_(WIDERSPRUCH)))
         if args.urteil:
             from app.verdict import mindestens
             stmt = stmt.where(Deal.urteil.in_(mindestens(args.urteil)))
 
         zeilen = []
         for deal in db.scalars(stmt.order_by(desc(Deal.first_seen)).limit(args.anzahl)):
+            zeitraum = {"monat": "/Mon.", "jahr": "/Jahr",
+                        "woche": "/Wo."}.get(deal.preis_zeitraum or "", "")
             preis = (gruen("gratis") if deal.ist_gratis else
-                     f"{deal.preis:.2f} {deal.waehrung}" if deal.preis is not None
-                     else grau("—"))
+                     f"{deal.preis:.2f} {deal.waehrung}{zeitraum}"
+                     if deal.preis is not None else grau("—"))
             urteil = {"bestpreis": gruen("Bestpreis"),
                       "sehr_gut": gruen("sehr gut"),
                       "gut": "gut",
                       "teurer": gelb("war günstiger"),
                       "uvp_fragwuerdig": rot("UVP fragwürdig")}.get(
                           deal.urteil or "", grau("—"))
-            zeilen.append([deal.titel[:46], preis, urteil, deal.quelle])
+            from app.kategorien import aus_text, label as kat_label
+            marken = ", ".join(kat_label(k) for k in aus_text(deal.kategorien)[:2])
+            zeilen.append([deal.titel[:42], preis, urteil,
+                           marken or grau("—"), deal.quelle])
     print()
-    tabelle(["Titel", "Preis", "Urteil", "Quelle"], zeilen)
+    tabelle(["Titel", "Preis", "Urteil", "Kategorie", "Quelle"], zeilen)
     print()
+    return 0
+
+
+def befehl_kategorien(args) -> int:
+    """Welche Kategorien es gibt und wie viel gerade darunter liegt.
+
+    Die Zahl ist der eigentliche Wert dieser Liste: sie sagt, wonach zu
+    filtern sich lohnt - und welche Kategorie in der eigenen Sammlung
+    schlicht nicht vorkommt.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from app.db import SessionLocal
+    from app.kategorien import alle, als_dict
+    from app.models import Deal, utcnow
+
+    seit = utcnow() - timedelta(days=max(1, args.tage))
+    erwachsen = bool(getattr(args, "erwachsen", False))
+    zeilen = []
+    with SessionLocal() as db:
+        if erwachsen:
+            from app.erwachsen import ist_aktiv
+            if not ist_aktiv(db):
+                print(rot("\n  Der 18+-Bereich ist nicht freigeschaltet.\n"))
+                return 1
+        for kategorie in alle(erwachsen=erwachsen):
+            anzahl = db.scalar(
+                select(func.count()).select_from(Deal)
+                .where(Deal.erwachsen.is_(erwachsen), Deal.first_seen >= seit,
+                       Deal.kategorien.like(f"%|{kategorie.key}|%"))) or 0
+            zeilen.append([kategorie.key, kategorie.label,
+                           str(anzahl) if anzahl else grau("0"),
+                           als_dict(kategorie)["hinweis"][:40]])
+    print()
+    tabelle(["Schlüssel", "Name", f"Deals ({args.tage}d)", "Was drin ist"], zeilen)
+    print(grau(f"  Filtern: python cli.py deals --kategorie {zeilen[0][0]}\n")
+          if zeilen else "")
     return 0
 
 
@@ -1257,9 +1310,19 @@ def baue_parser() -> argparse.ArgumentParser:
     d = bereiche.add_parser("deals", help="gesammelte Deals ansehen")
     d.add_argument("suche", nargs="?", help='z. B. lego oder "nintendo switch"')
     d.add_argument("--gratis", action="store_true")
+    d.add_argument("--kategorie", help="z. B. speicher,abo - "
+                                       "'python cli.py kategorien' listet sie")
+    d.add_argument("--gueltig", action="store_true",
+                   help="abgelaufene Deals ausblenden")
     d.add_argument("--urteil", choices=["bestpreis", "sehr_gut", "gut", "normal"])
     d.add_argument("--anzahl", type=int, default=20)
     d.set_defaults(fn=befehl_deals)
+
+    k2 = bereiche.add_parser("kategorien", help="Kategorien mit Trefferzahl")
+    k2.add_argument("--tage", type=int, default=30)
+    k2.add_argument("--18plus", dest="erwachsen", action="store_true",
+                    help="die Kategorien des 18+-Bereichs")
+    k2.set_defaults(fn=befehl_kategorien)
 
     return p
 
