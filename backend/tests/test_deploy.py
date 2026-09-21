@@ -222,6 +222,7 @@ def test_manuelles_update_nutzt_dieselbe_sperre():
 def test_watchdog_laeuft_als_job():
     """Ohne den Job prüft sich SparBit nie selbst."""
     import inspect
+
     from app import scheduler
     quelle = inspect.getsource(scheduler.start)
     assert 'id="watchdog"' in quelle

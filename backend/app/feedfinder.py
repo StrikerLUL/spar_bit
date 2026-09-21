@@ -54,7 +54,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from urllib.parse import (parse_qsl, urlencode, urljoin, urlsplit, urlunsplit)
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 log = logging.getLogger(__name__)
 
@@ -373,7 +373,7 @@ async def _probiere(http, kandidaten: list[Feedlink], original: str,
         try:
             versuch = await http.get_text(kandidat.url,
                                           headers={"Accept": FEED_ACCEPT})
-        except Exception as exc:                       # noqa: BLE001
+        except Exception as exc:
             log.debug("Feed-Kandidat %s nicht erreichbar: %s", kandidat.url, exc)
             continue
         if ist_feed(versuch):
@@ -412,7 +412,7 @@ async def hole(http, url: str, *, cache_key: str | None = None,
     try:
         text = await http.get_text(url, cache_key=cache_key,
                                    headers={"Accept": FEED_ACCEPT})
-    except Exception as exc:                           # noqa: BLE001
+    except Exception as exc:
         # 404 auf einem geratenen Pfad heisst "hier nicht", nicht "nirgends".
         if mit_mustern and _ist_pfadfehler(exc) and not _pausiert(url):
             fund = await _muster_probieren(http, url)
@@ -456,7 +456,7 @@ async def hole(http, url: str, *, cache_key: str | None = None,
 def _begruendung(url: str, titel: str | None, kandidaten: list[Feedlink],
                  probiert: list[str] | None = None) -> str:
     wo = urlsplit(url).netloc or url
-    kopf = (f"Der Server hat eine HTML-Seite geliefert, keinen Feed"
+    kopf = ("Der Server hat eine HTML-Seite geliefert, keinen Feed"
             + (f" (Seitentitel: {titel!r})" if titel else "") + ".")
     if kandidaten:
         liste = ", ".join(k.url for k in kandidaten[:MAX_VERSUCHE])
@@ -483,7 +483,7 @@ async def suche(http, url: str) -> dict:
     """
     try:
         text = await http.get_text(url, headers={"Accept": FEED_ACCEPT})
-    except Exception as exc:                           # noqa: BLE001
+    except Exception as exc:
         if _ist_pfadfehler(exc):
             fund = await _muster_probieren(http, url)
             if fund is not None:
@@ -522,7 +522,7 @@ async def suche(http, url: str) -> dict:
     fund = await _muster_probieren(http, url)
     if fund is not None:
         return {"ok": True, "url": url, "ist_selbst_feed": False,
-                "detail": f"Kein Feed ausgezeichnet"
+                "detail": "Kein Feed ausgezeichnet"
                           + (f" (Seite: {titel!r})" if titel else "")
                           + f" - aber unter {fund.url} liegt einer.",
                 "feeds": [Feedlink(fund.url, seitentitel(fund.text), None,
@@ -530,7 +530,7 @@ async def suche(http, url: str) -> dict:
 
     versucht = muster(url)
     return {"ok": False, "url": url, "ist_selbst_feed": False,
-            "detail": (f"Kein Feed ausgezeichnet"
+            "detail": ("Kein Feed ausgezeichnet"
                        + (f" (Seite: {titel!r})" if titel else "") + "."
                        + (f" Auch die ueblichen Adressen ({', '.join(versucht)}) "
                           f"lieferten keinen." if versucht else "")),

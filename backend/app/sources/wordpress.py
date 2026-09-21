@@ -8,10 +8,8 @@ from __future__ import annotations
 
 from .. import feedfinder
 from ..priceparse import parse_price_text
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
-from .rssutil import (entry_body, entry_datetime, entry_tags, first_image,
-                      parse_feed, strip_html)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
+from .rssutil import entry_body, entry_datetime, entry_tags, first_image, parse_feed, strip_html
 
 
 class WordpressDealSource(Source):

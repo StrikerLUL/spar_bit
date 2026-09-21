@@ -6,7 +6,7 @@ Setup-Assistent.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -74,9 +74,9 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     try:
         data = _serializer().loads(token, max_age=settings.session_max_age)
     except SignatureExpired:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sitzung abgelaufen")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sitzung abgelaufen") from None
     except BadSignature:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Ungueltige Sitzung")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Ungueltige Sitzung") from None
 
     user = db.get(User, data.get("uid"))
     if not user:
@@ -104,6 +104,6 @@ def authenticate(db: Session, username: str, password: str) -> User:
                             "Benutzername oder Passwort falsch")
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(password)
-    user.last_login = datetime.now(timezone.utc)
+    user.last_login = datetime.now(UTC)
     db.commit()
     return user

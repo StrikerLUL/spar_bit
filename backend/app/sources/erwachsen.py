@@ -26,12 +26,10 @@ from urllib.parse import urlsplit
 from .. import feedfinder
 from ..http import RateLimited
 from ..priceparse import parse_price_text
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
 from .pepper import PepperSource
 from .reddit import Reddit
-from .rssutil import (entry_body, entry_datetime, entry_tags, first_image,
-                      parse_feed, strip_html)
+from .rssutil import entry_body, entry_datetime, entry_tags, first_image, parse_feed, strip_html
 
 KATEGORIE = "erwachsen"
 

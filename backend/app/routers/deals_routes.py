@@ -3,18 +3,19 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import String, and_, desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import Session
 
+from .. import erwachsen as erwachsen_mod
 from ..auth import current_user
 from ..db import get_db
-from .. import erwachsen as erwachsen_mod
 from ..gratischeck import LABEL as CHECK_LABEL
-from ..models import Deal, Match, Rule, SourceConfig, utcnow
 from ..learning import trainiere
+from ..models import Deal, Match, Rule, SourceConfig, utcnow
+from ..pricefehler import HEISS as PF_HEISS
+from ..pricefehler import VERDACHT as PF_VERDACHT
 from ..search import fts_verfuegbar, match_bedingung
 from ..verdict import mindestens
-from ..pricefehler import HEISS as PF_HEISS, VERDACHT as PF_VERDACHT
 
 router = APIRouter(prefix="/api", tags=["deals"],
                    dependencies=[Depends(current_user)])

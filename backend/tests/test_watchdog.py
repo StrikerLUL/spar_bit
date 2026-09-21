@@ -6,7 +6,6 @@ einer, der täglich klagt, wird stummgeschaltet und ist dann genauso nutzlos.
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
 
 from app import watchdog
 from app.db import get_setting

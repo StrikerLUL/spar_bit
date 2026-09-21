@@ -47,8 +47,7 @@ def welt(tmp_path, monkeypatch):
     lade_app_neu()
 
     from app.db import SessionLocal, init_db
-    from app.sources.base import (Category, DealItem, Source, Verification,
-                                  register)
+    from app.sources.base import Category, DealItem, Source, Verification, register
 
     init_db()
 
@@ -87,7 +86,7 @@ def welt(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_falsches_gratis_wird_vor_der_regel_korrigiert(welt):
-    SessionLocal, http = welt
+    SessionLocal, _http = welt
     from app.models import Channel, Deal, Match, Rule
     from app.scheduler import run_source
 

@@ -1,8 +1,13 @@
 """Preis-Parsing gegen die Formate, die in echten Feeds vorkommen."""
 import pytest
 
-from app.priceparse import (detect_currency, is_free_text, parse_number,
-                            parse_percent, parse_price_text)
+from app.priceparse import (
+    detect_currency,
+    is_free_text,
+    parse_number,
+    parse_percent,
+    parse_price_text,
+)
 
 
 @pytest.mark.parametrize("raw,expected", [

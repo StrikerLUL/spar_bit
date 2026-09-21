@@ -8,10 +8,10 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.models import (Base, Channel, Deal, Match, NotificationLog, Rule,
-                        Setting, utcnow)
-from app.notify.base import _CHANNELS, Channel as KanalBasis, Sammelmeldung
+from app.models import Base, Channel, Deal, Match, NotificationLog, Rule, Setting, utcnow
 from app.notify import Notification
+from app.notify.base import _CHANNELS, Sammelmeldung
+from app.notify.base import Channel as KanalBasis
 from app.pipeline import send_digest
 
 

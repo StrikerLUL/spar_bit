@@ -5,8 +5,16 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.loginguard import (SANFT_AB, SPERRE_AB, LoginGesperrt, aufraeumen,
-                            fehlversuch, pruefen, wartezeit, zuruecksetzen)
+from app.loginguard import (
+    SANFT_AB,
+    SPERRE_AB,
+    LoginGesperrt,
+    aufraeumen,
+    fehlversuch,
+    pruefen,
+    wartezeit,
+    zuruecksetzen,
+)
 from app.models import Base, LoginAttempt, utcnow
 
 

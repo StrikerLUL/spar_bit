@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hmac
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -79,7 +79,7 @@ def fordere_an(db: Session) -> dict:
     bericht = get_setting(db, STATUS) or {}
     if bericht.get("laeuft"):
         return {"ok": True, "hinweis": "Ein Update läuft bereits."}
-    set_setting(db, JETZT, datetime.now(timezone.utc).isoformat())
+    set_setting(db, JETZT, datetime.now(UTC).isoformat())
     db.commit()
     log.info("Update angefordert")
     return {"ok": True, "hinweis": "Das Update startet innerhalb einer Minute."}
@@ -137,7 +137,7 @@ def claimer_anfordern(db: Session) -> dict:
     bericht = get_setting(db, CLAIMER_STATUS) or {}
     if bericht.get("laeuft"):
         return {"ok": True, "hinweis": "Der Claimer läuft bereits."}
-    set_setting(db, CLAIMER, datetime.now(timezone.utc).isoformat())
+    set_setting(db, CLAIMER, datetime.now(UTC).isoformat())
     db.commit()
     log.info("Claimer-Lauf angefordert")
     return {"ok": True, "hinweis": "Startet innerhalb einer Minute."}

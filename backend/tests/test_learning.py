@@ -3,8 +3,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.learning import (MIN_POSITIV, Modell, merkmale, notiere, trainiere,
-                          vorschlaege)
+from app.learning import MIN_POSITIV, Modell, merkmale, notiere, trainiere, vorschlaege
 from app.models import Base, Deal, Interaction
 
 

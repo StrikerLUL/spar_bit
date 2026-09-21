@@ -248,8 +248,9 @@ macht dasselbe von Hand.
 
 ## Auf dem eigenen Rechner
 
-Du brauchst **Python 3.11 oder neuer**. Node.js ist optional — nur nötig, wenn
-du die Oberfläche selbst neu bauen willst.
+Du brauchst **Python 3.11 oder neuer**. Node.js ist optional: fehlt es, holt
+sich `run.py` die fertig gebaute Oberfläche aus dem letzten Release (mit
+Prüfsumme). Node brauchst du nur, wenn du sie selbst bauen oder ändern willst.
 
 **Windows:** `start.bat` doppelklicken.
 **macOS/Linux:** `./start.sh` oder `python3 run.py`.

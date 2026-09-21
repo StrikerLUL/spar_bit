@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import html
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import feedparser
@@ -44,7 +44,7 @@ def entry_datetime(entry: Any) -> datetime | None:
         tm = entry.get(key)
         if tm:
             try:
-                return datetime(*tm[:6], tzinfo=timezone.utc)
+                return datetime(*tm[:6], tzinfo=UTC)
             except (TypeError, ValueError):
                 continue
     return None

@@ -1,8 +1,6 @@
 """Filter-Engine gegen synthetische Deals - kein Netzwerk, keine DB."""
 from types import SimpleNamespace
 
-import pytest
-
 from app.filters import RuleSpec, evaluate, preview
 
 

@@ -1,9 +1,13 @@
 """Preis aus Produktseiten lesen - gegen echte Markup-Formen, ohne Netzwerk."""
 import pytest
 
-from app.pricewatch import (Fund, NichtGefunden, aus_jsonld, aus_opengraph,
-                            preis_aus_seite, soll_melden)
 from app.models import WatchItem
+from app.pricewatch import (
+    Fund,
+    NichtGefunden,
+    preis_aus_seite,
+    soll_melden,
+)
 
 # --- Beispielseiten in den Formen, die Shops wirklich ausliefern -----------
 

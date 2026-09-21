@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import (JSON, Boolean, DateTime, Float, ForeignKey, Index,
-                        Integer, String, Text, TypeDecorator, UniqueConstraint)
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class UTCDateTime(TypeDecorator):
@@ -31,12 +42,12 @@ class UTCDateTime(TypeDecorator):
 
     def process_bind_param(self, value: datetime | None, dialect):
         if value is not None and value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
         return value
 
     def process_result_value(self, value: datetime | None, dialect):
         if value is not None and value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
         return value
 
 
@@ -241,7 +252,7 @@ class Match(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime,
                                                  default=utcnow, index=True)
     notified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    deal: Mapped["Deal"] = relationship(lazy="joined")
+    deal: Mapped[Deal] = relationship(lazy="joined")
 
 
 class Channel(Base):

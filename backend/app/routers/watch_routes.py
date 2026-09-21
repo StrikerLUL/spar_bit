@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -13,9 +13,11 @@ from ..auth import current_user
 from ..db import get_db
 from ..learning import notiere, trainiere, vorschlaege
 from ..models import ApiToken, Deal, WatchItem, WatchPrice, utcnow
-from ..pricewatch import NichtGefunden, preis_aus_seite, pruefe as pruefe_eintrag
+from ..pricewatch import NichtGefunden, preis_aus_seite
+from ..pricewatch import pruefe as pruefe_eintrag
 from ..scheduler import get_http
-from ..tokens import erzeuge, pruefe as pruefe_token, token_aus_header
+from ..tokens import erzeuge, token_aus_header
+from ..tokens import pruefe as pruefe_token
 from ..verdict import LABEL, RANGFOLGE, bewerte_deal
 
 log = logging.getLogger(__name__)

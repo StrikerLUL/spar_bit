@@ -6,19 +6,24 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 from .config import settings
 from .currency import set_rates
 from .db import get_setting, init_db, session_scope
 from .events import broker
 from .logging_setup import setup_logging
-from .routers import (auth_routes, deals_routes, extras_routes, notify_routes,
-                      rules_routes, sources_routes, system_routes,
-                      watch_routes)
+from .routers import (
+    auth_routes,
+    deals_routes,
+    extras_routes,
+    notify_routes,
+    rules_routes,
+    sources_routes,
+    system_routes,
+    watch_routes,
+)
 
 setup_logging()
 log = logging.getLogger("sparbit")

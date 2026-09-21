@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import logging
-from collections import defaultdict
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -15,15 +13,26 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from ..auth import current_user
-from ..images import aufraeumen as bilder_aufraeumen
-from ..images import bild_verzeichnis, statistik as bild_statistik
 from ..currency import DEFAULT_RATES, get_rates, set_rates, to_eur
 from ..db import get_db, get_setting, set_setting
 from ..gratischeck import LABEL as GRATIS_LABEL
-from ..models import (Channel, Deal, DealOffer, Match, PriceHistory, Rule,
-                      SavedSearch, SourceConfig, utcnow)
-from ..pricefehler import (HEISS as PF_HEISS, SCHWELLE_HEISS,
-                           VERDACHT as PF_VERDACHT, bewerte_deal)
+from ..images import aufraeumen as bilder_aufraeumen
+from ..images import bild_verzeichnis
+from ..images import statistik as bild_statistik
+from ..models import (
+    Channel,
+    Deal,
+    DealOffer,
+    Match,
+    PriceHistory,
+    Rule,
+    SavedSearch,
+    SourceConfig,
+    utcnow,
+)
+from ..pricefehler import HEISS as PF_HEISS
+from ..pricefehler import SCHWELLE_HEISS, bewerte_deal
+from ..pricefehler import VERDACHT as PF_VERDACHT
 
 log = logging.getLogger(__name__)
 

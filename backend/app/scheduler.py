@@ -15,21 +15,27 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, desc, select
 
 from . import erwachsen as erwachsen_mod
-from . import gratischeck
+from . import gratischeck, pricefehler
 from .config import settings
 from .db import SessionLocal, get_setting, session_scope
 from .events import broker
 from .http import NotModified, PoliteClient, RateLimited
 from .images import aufraeumen as bilder_aufraeumen
 from .images import hole_fuer_deals
-from .verdict import aktualisiere as urteile_aktualisieren
 from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
-from .pipeline import (check_price_alarms, dispatch, dispatch_alarms,
-                       dispatch_watchdog,
-                       dispatch_preisfehler, ingest, match_rules, send_digest)
-from . import pricefehler
+from .pipeline import (
+    check_price_alarms,
+    dispatch,
+    dispatch_alarms,
+    dispatch_preisfehler,
+    dispatch_watchdog,
+    ingest,
+    match_rules,
+    send_digest,
+)
 from .sources import all_sources, get_source
 from .sources.base import FetchContext
+from .verdict import aktualisiere as urteile_aktualisieren
 
 log = logging.getLogger(__name__)
 
@@ -326,7 +332,7 @@ def _erwachsen_frei() -> bool:
     try:
         with SessionLocal() as db:
             return erwachsen_mod.ist_aktiv(db)
-    except Exception:                       # noqa: BLE001 - im Zweifel zu
+    except Exception:
         return False
 
 

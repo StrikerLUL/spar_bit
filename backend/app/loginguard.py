@@ -15,7 +15,7 @@ Sperre nicht aufheben, sonst waere sie wertlos.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from fastapi import Request
 from sqlalchemy import delete, func, select
@@ -85,8 +85,7 @@ def pruefen(db: Session, ip: str) -> None:
         return
 
     if letzter.tzinfo is None:
-        from datetime import timezone
-        letzter = letzter.replace(tzinfo=timezone.utc)
+        letzter = letzter.replace(tzinfo=UTC)
 
     vergangen = (utcnow() - letzter).total_seconds()
     if vergangen < noetig:

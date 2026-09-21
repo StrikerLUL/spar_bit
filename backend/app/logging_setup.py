@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .config import settings
@@ -16,7 +16,7 @@ _RING: deque[dict[str, Any]] = deque(maxlen=settings.max_log_lines)
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "ts": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "ts": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),
@@ -35,7 +35,7 @@ class RingHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             entry = {
-                "ts": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+                "ts": datetime.fromtimestamp(record.created, UTC).isoformat(),
                 "level": record.levelname,
                 "logger": record.name,
                 "message": record.getMessage()[:2000],

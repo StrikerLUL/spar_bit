@@ -172,7 +172,6 @@ async def test_drosselung_bricht_ab_statt_anzurennen():
 async def test_nach_der_drosselung_geht_es_dort_weiter():
     """Sonst verbrauchen immer dieselben ersten Namen das Kontingent."""
     from app.sources.reddit import Reddit
-    from app.sources.reddit import Reddit
     quelle = Reddit()
     erste = "https://www.reddit.com/r/Eins/new/.rss"
     zweite = "https://www.reddit.com/r/Zwei/new/.rss"

@@ -218,7 +218,8 @@ async def test_zustellung_haelt_18plus_zurueck(tmp_path, monkeypatch):
     from app.db import SessionLocal, init_db, set_setting
     init_db()                       # sonst gibt es die Tabellen noch nicht
     from app.erwachsen import AKTIV, MELDEN
-    from app.models import Channel, Deal as D, Rule
+    from app.models import Channel, Rule
+    from app.models import Deal as D
     from app.pipeline import dispatch
 
     gesendet = []

@@ -10,7 +10,6 @@ import pytest
 
 from app.pricefehler import HEISS, KEIN, VERDACHT, bewerte
 
-
 # --- Was ein Preisfehler ist ----------------------------------------------
 
 def test_ausdrueckliche_nennung_plus_beleg():

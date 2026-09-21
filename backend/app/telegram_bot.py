@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import desc, func, select
@@ -96,7 +96,7 @@ class TelegramBot:
     async def _sleep(self, seconds: float) -> None:
         try:
             await asyncio.wait_for(self._stop.wait(), timeout=seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     async def _poll(self, client: httpx.AsyncClient, token: str) -> list[dict]:
@@ -211,7 +211,7 @@ class TelegramBot:
 
     def _cmd_status(self) -> str:
         with SessionLocal() as db:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             heute = now - timedelta(hours=24)
             cfgs = list(db.scalars(select(SourceConfig)))
             aktiv = sum(1 for c in cfgs if c.enabled)

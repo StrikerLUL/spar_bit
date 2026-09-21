@@ -4,7 +4,6 @@ Als Unterprozess, weil genau das der Benutzer tut - inklusive Exit-Codes,
 Datenbank-Anlage und Ausgabe. Ohne Netz: alles, was hier geprueft wird,
 arbeitet nur auf der lokalen Datei.
 """
-import json
 import os
 import subprocess
 import sys

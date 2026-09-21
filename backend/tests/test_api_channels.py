@@ -71,6 +71,7 @@ def test_leeres_feld_behaelt_das_gespeicherte_geheimnis(client):
         "config": {**angelegt["config"], "chat_id": "43"}})
 
     from sqlalchemy import select
+
     from app.db import SessionLocal
     from app.models import Channel
     with SessionLocal() as db:

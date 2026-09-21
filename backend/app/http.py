@@ -202,7 +202,7 @@ class PoliteClient:
     async def get_json(self, url: str, **kwargs: Any) -> Any:
         resp = await self.get(url, **kwargs)
         ctype = resp.headers.get("content-type", "")
-        if "json" not in ctype and not resp.text.lstrip()[:1] in ("{", "["):
+        if "json" not in ctype and resp.text.lstrip()[:1] not in ("{", "["):
             raise ValueError(
                 f"Erwartet JSON, bekommen '{ctype or 'unbekannt'}' "
                 f"({len(resp.content)} Bytes). Endpoint liefert vermutlich HTML "

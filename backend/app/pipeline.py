@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,11 +11,19 @@ from . import erwachsen as erwachsen_mod
 from . import money
 from .currency import to_eur
 from .db import get_setting
-from .dedupe import canonical_url, normalize_title, titles_match, url_hash
+from .dedupe import normalize_title, titles_match, url_hash
 from .events import broker
 from .filters import RuleSpec, evaluate
-from .models import (Channel, Deal, DealOffer, Match, NotificationLog,
-                     PriceHistory, Rule, SourceConfig, utcnow)
+from .models import (
+    Channel,
+    Deal,
+    DealOffer,
+    Match,
+    NotificationLog,
+    PriceHistory,
+    Rule,
+    utcnow,
+)
 from .notify import Notification, Sammelmeldung, get_channel
 from .sources.base import DealItem
 
@@ -351,7 +359,7 @@ def in_quiet_hours(db: Session, now: datetime | None = None) -> bool:
     cfg = get_setting(db, "quiet_hours") or {}
     if not cfg.get("enabled"):
         return False
-    now = (now or datetime.now(timezone.utc)).astimezone(
+    now = (now or datetime.now(UTC)).astimezone(
         timezone(timedelta(hours=float(cfg.get("utc_offset", 2)))))
     start = _parse_hhmm(cfg.get("start", "23:00"), time(23, 0))
     end = _parse_hhmm(cfg.get("end", "07:00"), time(7, 0))
@@ -511,7 +519,7 @@ def _zeitraum(seit: datetime | None) -> str:
     stunden = (utcnow() - seit).total_seconds() / 3600
     if stunden >= 6:
         return "über Nacht" if stunden >= 10 else "in den letzten Stunden"
-    return f"seit {seit.astimezone(timezone.utc).strftime('%H:%M')} UTC"
+    return f"seit {seit.astimezone(UTC).strftime('%H:%M')} UTC"
 
 
 async def send_digest(db: Session, http) -> int:

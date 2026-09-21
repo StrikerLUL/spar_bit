@@ -9,9 +9,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Deal, Setting, utcnow
-from app.pricefehler import (ECHT, FEHLALARM, MIN_RUECKMELDUNGEN,
-                             SCHWELLE_HEISS, bewerte, bewerte_rueckmeldungen,
-                             notiere_rueckmeldung)
+from app.pricefehler import (
+    ECHT,
+    FEHLALARM,
+    MIN_RUECKMELDUNGEN,
+    bewerte,
+    bewerte_rueckmeldungen,
+    notiere_rueckmeldung,
+)
 
 
 @pytest.fixture

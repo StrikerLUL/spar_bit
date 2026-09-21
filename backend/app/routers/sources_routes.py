@@ -8,10 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from ..auth import current_user
 from .. import erwachsen as erwachsen_mod
+from ..auth import current_user
 from ..db import get_db
-from ..models import SourceConfig, SourceRun, User, utcnow
+from ..models import SourceConfig, SourceRun, utcnow
 from ..scheduler import build_context, run_source, schedule_source
 from ..sources import all_sources, get_source
 

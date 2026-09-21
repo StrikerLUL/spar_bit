@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
 
 _APP_URL = "https://store.steampowered.com/app/{appid}/"
 

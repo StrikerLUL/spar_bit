@@ -8,9 +8,17 @@ urteilen soll.
 """
 import pytest
 
-from app.gratischeck import (ABGELAUFEN, BESTAETIGT, UNERREICHBAR, UNKLAR,
-                             WIDERLEGT, analysiere, ist_kandidat, pruefe,
-                             pruefe_deals, uebernehme)
+from app.gratischeck import (
+    ABGELAUFEN,
+    BESTAETIGT,
+    UNKLAR,
+    WIDERLEGT,
+    analysiere,
+    ist_kandidat,
+    pruefe,
+    pruefe_deals,
+    uebernehme,
+)
 from app.models import Deal
 
 JSONLD = """<html><head><script type="application/ld+json">

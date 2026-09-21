@@ -31,8 +31,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any
 
 from .currency import to_eur
 from .priceparse import parse_number
@@ -325,7 +326,7 @@ async def pruefe(http, url: str, *, erwartet_gratis: bool = False,
         resp = await http.get(url, headers={
             "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
         })
-    except Exception as exc:                       # noqa: BLE001 - bewusst breit
+    except Exception as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status in (404, 410):
             return Befund(ABGELAUFEN, f"Seite gibt HTTP {status} zurück.")
@@ -431,7 +432,7 @@ async def pruefe_deals(db, http, deals: list, *, grenze: int | None = None
             befund = await pruefe(http, deal.url,
                                   erwartet_gratis=bool(deal.ist_gratis),
                                   erwartet_eur=deal.preis_eur)
-        except Exception as exc:                   # noqa: BLE001
+        except Exception as exc:
             log.debug("Gratis-Pruefung fehlgeschlagen (%s): %s", deal.url, exc)
             continue
         if uebernehme(deal, befund):

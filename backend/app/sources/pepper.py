@@ -27,10 +27,8 @@ import re
 from .. import feedfinder
 from ..http import RateLimited
 from ..priceparse import parse_price_text
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
-from .rssutil import (entry_body, entry_datetime, entry_tags, first_image,
-                      parse_feed, strip_html)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
+from .rssutil import entry_body, entry_datetime, entry_tags, first_image, parse_feed, strip_html
 
 # mydealz nennt die Deal-Temperatur im Titel oder Body als "123°".
 _TEMP_RE = re.compile(r"(-?\d{1,4})\s*°")

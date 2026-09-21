@@ -31,10 +31,10 @@ sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("SPARBIT_DATA_DIR", "/tmp/sparbit-verify")
 
-from app.config import settings                            # noqa: E402
+from app.config import settings  # noqa: E402
 from app.http import NotModified, PoliteClient, RateLimited  # noqa: E402
-from app.sources import all_sources, get_source            # noqa: E402
-from app.sources.base import FetchContext                  # noqa: E402
+from app.sources import all_sources  # noqa: E402
+from app.sources.base import FetchContext  # noqa: E402
 
 RESET, BOLD = "\033[0m", "\033[1m"
 GREEN, RED, YELLOW, GREY = "\033[32m", "\033[31m", "\033[33m", "\033[90m"
@@ -117,7 +117,7 @@ async def check_one(src, api_key: str | None, http: PoliteClient,
 
     if fixture_dir is not None and captured:
         fixture_dir.mkdir(parents=True, exist_ok=True)
-        for idx, (url, body, ctype) in enumerate(captured):
+        for idx, (_url, body, ctype) in enumerate(captured):
             ext = "json" if "json" in ctype else "xml"
             name = f"{src.id}" + (f"_{idx}" if idx else "") + f".{ext}"
             (fixture_dir / name).write_bytes(body)

@@ -4,31 +4,36 @@ import asyncio
 import json
 import platform
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import (APIRouter, Depends, Header, HTTPException, Query,
-                     Request)
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import claimer as claimer_mod
+from .. import erwachsen as erwachsen_mod
+from .. import gratischeck, updater
 from ..auth import current_user
 from ..config import settings
-from .. import erwachsen as erwachsen_mod
-from .. import gratischeck
 from ..db import get_db, get_setting, set_setting
 from ..events import broker
 from ..logging_setup import recent_logs
-from .. import updater
-from ..models import (Channel, ClaimEvent, Deal, Match, NotificationLog, Rule,
-                      SourceConfig, SourceRun)
-from .. import claimer as claimer_mod
+from ..models import (
+    Channel,
+    ClaimEvent,
+    Deal,
+    Match,
+    Rule,
+    SourceConfig,
+    SourceRun,
+)
 
 router = APIRouter(prefix="/api/system", tags=["system"],
                    dependencies=[Depends(current_user)])
 
-STARTED_AT = datetime.now(timezone.utc)
+STARTED_AT = datetime.now(UTC)
 
 
 @router.get("/info")
@@ -42,7 +47,7 @@ def info(db: Session = Depends(get_db)) -> dict:
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "gestartet": STARTED_AT,
-        "laufzeit_sekunden": int((datetime.now(timezone.utc) - STARTED_AT).total_seconds()),
+        "laufzeit_sekunden": int((datetime.now(UTC) - STARTED_AT).total_seconds()),
         "db_pfad": str(settings.db_path),
         "db_groesse_bytes": db_bytes,
         "db_groesse_mb": round(db_bytes / 1024 / 1024, 2),
@@ -72,7 +77,7 @@ def backup(db: Session = Depends(get_db)) -> JSONResponse:
         return [{f: getattr(r, f) for f in fields} for r in db.scalars(select(model))]
 
     data = {
-        "exportiert_am": datetime.now(timezone.utc).isoformat(),
+        "exportiert_am": datetime.now(UTC).isoformat(),
         "version": "1.0.0",
         "regeln": rows(Rule, ["id", "name", "enabled", "priority", "keywords",
                               "required_keywords", "blacklist", "max_preis",
@@ -86,7 +91,7 @@ def backup(db: Session = Depends(get_db)) -> JSONResponse:
                              "haendler", "quelle", "first_seen", "bookmarked"]),
         "claims": rows(ClaimEvent, ["platform", "titel", "status", "seen_at"]),
     }
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
     return JSONResponse(
         content=json.loads(json.dumps(data, default=str)),
         headers={"Content-Disposition": f'attachment; filename="sparbit-backup-{stamp}.json"'},
@@ -186,7 +191,7 @@ class GratisCheck(BaseModel):
 def gratischeck_status(db: Session = Depends(get_db)) -> dict:
     from datetime import timedelta
 
-    seit = datetime.now(timezone.utc) - timedelta(days=7)
+    seit = datetime.now(UTC) - timedelta(days=7)
     zeilen = db.execute(
         select(Deal.check_status, func.count(Deal.id))
         .where(Deal.check_am >= seit).group_by(Deal.check_status)).all()
@@ -283,7 +288,7 @@ async def events(request: Request, _user=Depends(current_user)) -> StreamingResp
                     break
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=20.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": heartbeat\n\n"
                     continue
                 event = json.loads(payload)

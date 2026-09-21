@@ -405,7 +405,7 @@ async def test_discord_baut_ein_embed_mit_einem_feld_je_fund():
     aufrufe = await sende_sammel(
         "discord", {"url": "https://discord.com/api/webhooks/1/x"})
     embed = aufrufe[0]["json"]["embeds"][0]
-    assert "5 Funde seit 07:00" == embed["title"]
+    assert embed["title"] == "5 Funde seit 07:00"
     assert len(embed["fields"]) == 5
     # Der Preisfehler steht oben.
     assert embed["fields"][0]["name"].startswith("‼")

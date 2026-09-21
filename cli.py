@@ -101,9 +101,9 @@ def tabelle(kopf: list[str], zeilen: list[list[str]]) -> None:
         return
     breiten = [max(len(str(kopf[i])), *(len(str(z[i])) for z in zeilen))
                for i in range(len(kopf))]
-    print("  " + fett("  ".join(str(k).ljust(b) for k, b in zip(kopf, breiten))))
+    print("  " + fett("  ".join(str(k).ljust(b) for k, b in zip(kopf, breiten, strict=True))))
     for zeile in zeilen:
-        print("  " + "  ".join(str(z).ljust(b) for z, b in zip(zeile, breiten)))
+        print("  " + "  ".join(str(z).ljust(b) for z, b in zip(zeile, breiten, strict=True)))
 
 
 def beschnitten(text: str, laenge: int) -> str:
@@ -149,6 +149,7 @@ def paare(werte: list[str] | None) -> dict:
 def unbekannte_quelle(quellen_id: str) -> int:
     """Fehlermeldung mit Vorschlag - 'epic_free' statt 'epic' passiert schnell."""
     import difflib
+
     from app.sources import all_sources
 
     namen = sorted(q.id for q in all_sources())
@@ -164,11 +165,12 @@ def unbekannte_quelle(quellen_id: str) -> int:
 # --- status ----------------------------------------------------------------
 
 def befehl_status(args) -> int:
-    from sqlalchemy import func, select
-    from app.db import SessionLocal
-    from app.models import (Channel, Deal, Match, Rule, SourceConfig, WatchItem,
-                            utcnow)
     from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from app.db import SessionLocal
+    from app.models import Channel, Deal, Match, Rule, SourceConfig, WatchItem, utcnow
 
     with SessionLocal() as db:
         heute = utcnow() - timedelta(hours=24)
@@ -199,7 +201,9 @@ def befehl_status(args) -> int:
 def _preisfehler_zaehler(db) -> str:
     """Belegte Preisfehler der letzten drei Tage, rot wenn es welche gibt."""
     from datetime import timedelta
+
     from sqlalchemy import func, select
+
     from app.models import Deal, utcnow
     from app.pricefehler import HEISS
 
@@ -215,7 +219,9 @@ def _preisfehler_zaehler(db) -> str:
 def befehl_preisfehler(args) -> int:
     """Die Funde auflisten, mit Begruendung."""
     from datetime import timedelta
+
     from sqlalchemy import desc, select
+
     from app.db import SessionLocal
     from app.models import Deal, utcnow
     from app.money import betrag
@@ -252,10 +258,12 @@ def befehl_preisfehler(args) -> int:
 def befehl_preisfehler_pruefen(args) -> int:
     """Alle jungen Deals neu bewerten - nach einem Kurs- oder Schwellenwechsel."""
     from datetime import timedelta
+
     from sqlalchemy import desc, select
+
+    from app import pricefehler
     from app.db import SessionLocal
     from app.models import Deal, utcnow
-    from app import pricefehler
 
     with SessionLocal() as db:
         kandidaten = list(db.scalars(
@@ -347,10 +355,11 @@ def befehl_feed_suche(args) -> int:
 
 def befehl_erwachsen(args) -> int:
     """Den 18+-Bereich schalten - mit derselben Huerde wie im Web."""
-    from app.db import SessionLocal, set_setting
-    from app import erwachsen as erw
-    from app.models import Deal
     from sqlalchemy import func, select
+
+    from app import erwachsen as erw
+    from app.db import SessionLocal, set_setting
+    from app.models import Deal
 
     with SessionLocal() as db:
         if args.an:
@@ -464,6 +473,7 @@ def befehl_kanal_typen(args) -> int:
 
 def befehl_kanal_liste(args) -> int:
     from sqlalchemy import select
+
     from app.db import SessionLocal
     from app.models import Channel
 
@@ -600,11 +610,11 @@ def befehl_kanal_testen(args) -> int:
 
 def befehl_quellen_liste(args) -> int:
     from sqlalchemy import select
+
+    from app import erwachsen as erw
     from app.db import SessionLocal
     from app.models import SourceConfig, utcnow
     from app.sources import all_sources
-
-    from app import erwachsen as erw
 
     with SessionLocal() as db:
         cfgs = {c.id: c for c in db.scalars(select(SourceConfig))}
@@ -640,10 +650,9 @@ def befehl_quellen_liste(args) -> int:
 
 
 def _quelle_schalten(quellen_id: str, an: bool) -> int:
+    from app import erwachsen as erw
     from app.db import SessionLocal
     from app.models import SourceConfig
-
-    from app import erwachsen as erw
 
     with SessionLocal() as db:
         cfg = db.get(SourceConfig, quellen_id)
@@ -768,6 +777,7 @@ def befehl_quelle_jetzt(args) -> int:
 
 def befehl_regeln_liste(args) -> int:
     from sqlalchemy import select
+
     from app.db import SessionLocal
     from app.models import Rule
 
@@ -893,6 +903,7 @@ def befehl_regel_loeschen(args) -> int:
 def befehl_regel_testen(args) -> int:
     """Zeigt, wie viele der letzten Deals eine Regel getroffen haette."""
     from sqlalchemy import desc, select
+
     from app.db import SessionLocal
     from app.filters import RuleSpec, preview
     from app.models import Deal, Rule
@@ -925,6 +936,7 @@ def befehl_regel_testen(args) -> int:
 
 def befehl_watch_liste(args) -> int:
     from sqlalchemy import select
+
     from app.db import SessionLocal
     from app.models import WatchItem
 
@@ -1008,6 +1020,7 @@ def befehl_watch_entfernen(args) -> int:
 
 def befehl_watch_pruefen(args) -> int:
     from sqlalchemy import select
+
     from app.db import SessionLocal
     from app.http import PoliteClient
     from app.models import WatchItem
@@ -1046,6 +1059,7 @@ def befehl_watch_pruefen(args) -> int:
 
 def befehl_deals(args) -> int:
     from sqlalchemy import desc, or_, select
+
     from app.db import SessionLocal
     from app.models import Deal
     from app.search import fts_verfuegbar, match_bedingung

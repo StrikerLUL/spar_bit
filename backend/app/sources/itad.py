@@ -7,8 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
 
 
 def _dt(raw):

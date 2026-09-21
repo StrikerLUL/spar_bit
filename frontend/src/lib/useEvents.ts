@@ -7,8 +7,14 @@ export function useEventStream(
 ) {
   const [connected, setConnected] = React.useState(false);
   // In einer Ref halten, damit ein Handler-Wechsel den Stream nicht neu aufbaut.
+  // Die Zuweisung gehoert in einen Layout-Effekt, nicht in den Render-Durchlauf:
+  // waehrend des Renderns etwas zu veraendern ist mit nebenlaeufigem Rendern
+  // nicht vertraeglich. Layout-Effekte laufen vor allen passiven Effekten -
+  // der Stream unten sieht also nie eine veraltete Ref.
   const handlersRef = React.useRef(handlers);
-  handlersRef.current = handlers;
+  React.useLayoutEffect(() => {
+    handlersRef.current = handlers;
+  });
 
   React.useEffect(() => {
     if (!enabled) return;
@@ -70,7 +76,9 @@ export function useAsync<T>(
   const [loading, setLoading] = React.useState(true);
   const [tick, setTick] = React.useState(0);
   const loaderRef = React.useRef(loader);
-  loaderRef.current = loader;
+  React.useLayoutEffect(() => {
+    loaderRef.current = loader;
+  });
 
   React.useEffect(() => {
     let cancelled = false;

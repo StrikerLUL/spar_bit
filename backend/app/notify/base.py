@@ -106,9 +106,7 @@ class Notification:
         else:
             base = money.preiszeile(self.preis, self.waehrung, eur=self.preis_eur)
         if (self.originalpreis and self.preis is not None
-                and self.originalpreis > self.preis and not self.ist_gratis):
-            base += f"  (statt {money.betrag(self.originalpreis, self.waehrung)})"
-        elif self.ist_gratis and self.originalpreis:
+                and self.originalpreis > self.preis and not self.ist_gratis) or (self.ist_gratis and self.originalpreis):
             base += f"  (statt {money.betrag(self.originalpreis, self.waehrung)})"
         if self.rabatt_prozent and not self.ist_gratis:
             base += f"  {money.rabatt_text(self.rabatt_prozent)}"

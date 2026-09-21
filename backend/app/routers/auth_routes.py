@@ -5,11 +5,9 @@ from fastapi import status as http_status  # 'status' ist hier eine Route
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..auth import (authenticate, clear_session, create_user, current_user,
-                    issue_session, setup_done)
+from ..auth import authenticate, clear_session, create_user, current_user, issue_session, setup_done
 from ..db import get_db
-from ..loginguard import (SANFT_AB, LoginGesperrt, client_ip, fehlversuch,
-                          pruefen, zuruecksetzen)
+from ..loginguard import SANFT_AB, LoginGesperrt, client_ip, fehlversuch, pruefen, zuruecksetzen
 from ..models import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
