@@ -24,6 +24,7 @@ from .routers import (
     system_routes,
     watch_routes,
 )
+from .sicherheitsheader import SicherheitsHeader
 
 setup_logging()
 log = logging.getLogger("sparbit")
@@ -58,6 +59,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="SparBit", version="1.0.0",
               description="Selbstgehostete Deal- & Freebie-Zentrale",
               lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+app.add_middleware(SicherheitsHeader)
 
 if settings.cors_origins:
     app.add_middleware(

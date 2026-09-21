@@ -146,9 +146,17 @@ def _schritt_002(conn: Connection) -> None:
         log.info("Migration: %d fehlende Indizes nachgezogen", anzahl)
 
 
+def _schritt_003(conn: Connection) -> None:
+    """Zweiter Faktor je Benutzer."""
+    spalte_ergaenzen(conn, "users", "totp_geheimnis", "VARCHAR(64)")
+    spalte_ergaenzen(conn, "users", "totp_aktiv", "BOOLEAN DEFAULT 0")
+    spalte_ergaenzen(conn, "users", "totp_ersatz", "JSON")
+
+
 SCHRITTE: list[Schritt] = [
     Schritt(1, "Spalten der Releases bis 1.0", _schritt_001),
     Schritt(2, "Fehlende Indizes nachziehen", _schritt_002),
+    Schritt(3, "Zweiter Faktor (TOTP)", _schritt_003),
 ]
 
 

@@ -51,6 +51,12 @@ const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
 
 // --- Typen ---------------------------------------------------------------
 
+export interface ZweiFaktorStatus {
+  aktiv: boolean;
+  vorbereitet: boolean;
+  ersatzcodes_uebrig: number;
+}
+
 export interface AuthStatus {
   setup_done: boolean;
   logged_in: boolean;
@@ -642,11 +648,18 @@ export const api = {
     status: () => get<AuthStatus>("/auth/status"),
     setup: (username: string, password: string) =>
       post<{ ok: boolean }>("/auth/setup", { username, password }),
-    login: (username: string, password: string) =>
-      post<{ ok: boolean }>("/auth/login", { username, password }),
+    login: (username: string, password: string, code?: string) =>
+      post<{ ok: boolean }>("/auth/login", { username, password, code }),
     logout: () => post<{ ok: boolean }>("/auth/logout"),
     changePassword: (old_password: string, new_password: string) =>
       post<{ ok: boolean }>("/auth/password", { old_password, new_password }),
+    zweifaktor: () => get<ZweiFaktorStatus>("/auth/zweifaktor"),
+    zweifaktorStart: () =>
+      post<{ geheimnis: string; otpauth: string }>("/auth/zweifaktor/start"),
+    zweifaktorBestaetigen: (code: string) =>
+      post<{ ok: boolean; ersatzcodes: string[] }>("/auth/zweifaktor/bestaetigen", { code }),
+    zweifaktorAus: (password: string) =>
+      post<{ ok: boolean }>("/auth/zweifaktor/aus", { password }),
   },
   deals: {
     list: (params: Record<string, string | number | boolean | undefined>) => {

@@ -69,6 +69,15 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     last_login: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
+    # Zweiter Faktor (TOTP). Das Geheimnis steht hier im Klartext - es
+    # muss zur Pruefung jedes Codes wieder lesbar sein, ein Hash ginge
+    # nicht. Wer die Datenbank lesen kann, ist ohnehin schon drin.
+    totp_geheimnis: Mapped[str | None] = mapped_column(String(64))
+    totp_aktiv: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Ersatzcodes fuer den Tag, an dem das Handy weg ist - als Hash,
+    # jeder genau einmal gueltig.
+    totp_ersatz: Mapped[list] = mapped_column(JSON, default=list)
+
 
 class SourceConfig(Base):
     """Laufzeit-Konfiguration + Health einer Quelle. id == Source.id."""

@@ -7,7 +7,7 @@ import * as React from "react";
 import {
   api, type ApiTokenInfo, type AppSettings, type BackupListe, type BilderStatus,
   type ErwachsenStatus, type GratisCheckStatus, type LogLine,
-  type ProblemStatus, type SystemInfo, type UpdateStatus,
+  type ProblemStatus, type SystemInfo, type UpdateStatus, type ZweiFaktorStatus,
 } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { useToast } from "@/components/Toast";
@@ -154,6 +154,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
               )}
             </CardContent>
           </Card>
+
+          <ZweiFaktorCard />
 
           <BackupCard />
 
@@ -632,6 +634,145 @@ const Row = ({ label, value }: { label: string; value: string }) => (
     <span className="truncate text-right font-medium" title={value}>{value}</span>
   </div>
 );
+
+
+/** Zweiter Faktor per Authenticator-App.
+ *
+ *  Scharf wird er erst, wenn ein Code aus der App wirklich stimmt -
+ *  sonst sperrt sich aus, wessen App das Geheimnis nie bekommen hat. */
+function ZweiFaktorCard() {
+  const toast = useToast();
+  const { data, reload } = useAsync<ZweiFaktorStatus>(
+    () => api.auth.zweifaktor(), []);
+  const [einrichtung, setEinrichtung] = React.useState<
+    { geheimnis: string; otpauth: string } | null>(null);
+  const [code, setCode] = React.useState("");
+  const [ersatz, setErsatz] = React.useState<string[] | null>(null);
+
+  if (!data) return <Skeleton className="h-40" />;
+
+  const starten = async () => {
+    try {
+      setEinrichtung(await api.auth.zweifaktorStart());
+    } catch (err) {
+      toast.push("error", "Einrichten fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  const bestaetigen = async () => {
+    try {
+      const antwort = await api.auth.zweifaktorBestaetigen(code);
+      setErsatz(antwort.ersatzcodes);
+      setEinrichtung(null);
+      setCode("");
+      reload();
+    } catch (err) {
+      toast.push("error", "Code stimmt nicht", (err as Error).message);
+    }
+  };
+
+  const abschalten = async () => {
+    const passwort = window.prompt("Zum Abschalten dein Passwort:");
+    if (!passwort) return;
+    try {
+      await api.auth.zweifaktorAus(passwort);
+      setErsatz(null);
+      reload();
+      toast.push("success", "Zweiter Faktor aus");
+    } catch (err) {
+      toast.push("error", "Abschalten fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className={cn("h-4 w-4", data.aktiv ? "text-success" : "text-muted-foreground")} />
+          Zweiter Faktor
+          {data.aktiv && <Badge variant="success">aktiv</Badge>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!data.aktiv && !einrichtung && (
+          <>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Ein Passwort schützt so gut, wie es geheim bleibt. Steht SparBit
+              unter einer Domain im Netz, reicht ein wiederverwendetes Passwort
+              aus einem fremden Datenleck — dagegen hilft keine Anmeldebremse.
+            </p>
+            <Button variant="outline" className="w-full" onClick={() => void starten()}>
+              <Lock className="h-4 w-4" />
+              Einrichten
+            </Button>
+          </>
+        )}
+
+        {einrichtung && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              In der Authenticator-App hinzufügen — Adresse scannen oder den
+              Schlüssel von Hand eintippen:
+            </p>
+            <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]">
+              {einrichtung.geheimnis}
+            </code>
+            <a href={einrichtung.otpauth}
+               className="block truncate text-xs text-primary hover:underline"
+               title={einrichtung.otpauth}>
+              Direkt in der App öffnen
+            </a>
+            <Input
+              value={code}
+              inputMode="numeric"
+              placeholder="Code aus der App"
+              onChange={(e) => setCode(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button className="flex-1" disabled={code.length < 6}
+                      onClick={() => void bestaetigen()}>
+                Bestätigen
+              </Button>
+              <Button variant="ghost" onClick={() => setEinrichtung(null)}>
+                Abbrechen
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {ersatz && (
+          <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3">
+            <p className="text-xs font-medium text-warning">
+              Ersatzcodes — jetzt aufschreiben. Sie werden nie wieder angezeigt.
+            </p>
+            <div className="grid grid-cols-2 gap-1 font-mono text-xs">
+              {ersatz.map((c) => <span key={c}>{c}</span>)}
+            </div>
+            <Button variant="ghost" size="sm" className="w-full"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(ersatz.join("\n"));
+                      toast.push("success", "Kopiert");
+                    }}>
+              <Copy className="h-3.5 w-3.5" />
+              Kopieren
+            </Button>
+          </div>
+        )}
+
+        {data.aktiv && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Aktiv. Noch {data.ersatzcodes_uebrig} Ersatzcodes übrig.
+            </p>
+            <Button variant="ghost" className="w-full" onClick={() => void abschalten()}>
+              Abschalten
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 
 /** Sicherung: herunterladen, einspielen, automatische Laeufe ansehen.

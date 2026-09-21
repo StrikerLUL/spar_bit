@@ -27,8 +27,15 @@ def client(tmp_path, monkeypatch):
 def fuelle(client):
     """Eine Installation, wie sie nach ein paar Wochen aussieht."""
     from app.db import SessionLocal
-    from app.models import (Deal, Interaction, PriceHistory, SavedSearch,
-                            WatchItem, WatchPrice, utcnow)
+    from app.models import (
+        Deal,
+        Interaction,
+        PriceHistory,
+        SavedSearch,
+        WatchItem,
+        WatchPrice,
+        utcnow,
+    )
 
     with SessionLocal() as db:
         deal = Deal(url_hash="hash-eins", titel="LEGO Technic",

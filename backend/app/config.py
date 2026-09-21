@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     # Claimer-Log (vom claimer-Container gemountet bzw. lokal daneben)
     claimer_log_dir: Path = _default_claimer_dir()
 
+    # SparBit ruft von sich aus nichts im eigenen Netz ab (siehe
+    # netzschutz.py). Wer bewusst einen Feed oder Shop aus dem Heimnetz
+    # beobachten will, schaltet die Pruefung hiermit aus.
+    erlaube_private_ziele: bool = False
+
     cors_origins: str = ""
     log_level: str = "INFO"
     # Lokal ist lesbarer Text angenehmer, im Container maschinenlesbares JSON.
