@@ -153,10 +153,43 @@ def _schritt_003(conn: Connection) -> None:
     spalte_ergaenzen(conn, "users", "totp_ersatz", "JSON")
 
 
+def _schritt_004(conn: Connection) -> None:
+    """Produktkennung - und sie fuer alles nachtragen, was schon da ist.
+
+    Der Schritt, den die alte Spaltenliste nicht gekonnt haette: eine
+    leere Spalte nuetzt nichts, wenn die 20.000 Deals darunter sie nie
+    bekommen. Die Kennung steht in der Adresse, also laesst sie sich
+    rueckwirkend lesen.
+    """
+    from .models import Base
+    from .produktid import aus_url
+
+    neu = spalte_ergaenzen(conn, "deals", "produkt_id", "VARCHAR(64)")
+    if not tabelle_existiert(conn, "deals"):
+        return
+
+    zeilen = conn.execute(text(
+        "SELECT id, url FROM deals WHERE produkt_id IS NULL")).fetchall()
+    getroffen = 0
+    for deal_id, url in zeilen:
+        kennung = aus_url(url or "")
+        if not kennung:
+            continue
+        conn.execute(text("UPDATE deals SET produkt_id = :k WHERE id = :i"),
+                     {"k": kennung, "i": deal_id})
+        getroffen += 1
+    if getroffen:
+        log.info("Migration: Produktkennung fuer %d von %d Deals nachgetragen",
+                 getroffen, len(zeilen))
+    if neu:
+        indizes_aus_modellen(conn, Base.metadata)
+
+
 SCHRITTE: list[Schritt] = [
     Schritt(1, "Spalten der Releases bis 1.0", _schritt_001),
     Schritt(2, "Fehlende Indizes nachziehen", _schritt_002),
     Schritt(3, "Zweiter Faktor (TOTP)", _schritt_003),
+    Schritt(4, "Produktkennung je Deal, rueckwirkend gefuellt", _schritt_004),
 ]
 
 

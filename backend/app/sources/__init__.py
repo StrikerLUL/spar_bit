@@ -8,6 +8,7 @@ Mehr nicht.
 from . import (  # noqa: F401
                cheapshark,
                customfeed,
+               customjson,
                epic,
                erwachsen,
                ggdeals,

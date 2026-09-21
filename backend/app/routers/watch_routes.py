@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from .. import steamwunsch
 from ..auth import current_user
 from ..db import get_db
 from ..learning import notiere, trainiere, vorschlaege
@@ -168,6 +169,78 @@ async def sammel_anlegen(body: SammelBody,
             "fehler": fehler,
             "zusammenfassung": {
                 "gelesen": len(kandidaten), "neu": len(angelegt) + len(fehler),
+                "mit_preis": len(angelegt), "ohne_preis": len(fehler),
+                "doppelt": len(uebersprungen)}}
+
+
+class SteamImportBody(BaseModel):
+    profil: str = Field(min_length=2, max_length=300)
+    ziel_preis: float | None = Field(None, ge=0)
+    intervall_minuten: int = Field(360, ge=30, le=10080)
+    # Standardmaessig nur eintragen, nicht sofort abfragen: dreissig Spiele
+    # einzeln zu pruefen dauert Minuten, und der Scheduler macht es ohnehin.
+    gleich_pruefen: bool = False
+
+
+@router.post("/watch/steam")
+async def steam_import(body: SteamImportBody,
+                       db: Session = Depends(get_db)) -> dict:
+    """Steam-Wunschliste uebernehmen.
+
+    Wer Spiele beobachtet, hat sie meistens schon dort stehen. Von Hand
+    heisst das bei dreissig Eintraegen dreissig Mal kopieren - die
+    meisten lassen es dann.
+    """
+    http = get_http()
+    try:
+        eintraege = await steamwunsch.hole(http, body.profil)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    except Exception as exc:
+        log.warning("Steam-Import fehlgeschlagen: %s", exc)
+        raise HTTPException(502, f"Steam antwortet nicht wie erwartet: {exc}") from None
+
+    if not eintraege:
+        return {"angelegt": [], "uebersprungen": [], "fehler": [],
+                "zusammenfassung": {"gelesen": 0, "neu": 0, "mit_preis": 0,
+                                    "ohne_preis": 0, "doppelt": 0}}
+
+    vorhanden = {e.url for e in db.scalars(select(WatchItem))}
+    angelegt, uebersprungen, fehler = [], [], []
+
+    for spiel in eintraege[:SAMMEL_MAX]:
+        if spiel.url in vorhanden:
+            uebersprungen.append({"url": spiel.url, "grund": "steht schon drin"})
+            continue
+        eintrag = WatchItem(name=spiel.titel, url=spiel.url,
+                            ziel_preis=body.ziel_preis, bild=spiel.bild,
+                            haendler="steam",
+                            intervall_minuten=body.intervall_minuten, aktiv=True)
+        db.add(eintrag)
+        db.commit()
+        db.refresh(eintrag)
+        vorhanden.add(spiel.url)
+
+        if not body.gleich_pruefen:
+            angelegt.append(_watch_dict(eintrag))
+            continue
+
+        try:
+            fund = await pruefe_eintrag(db, eintrag, http)
+        except Exception as exc:
+            log.warning("Steam-Import: %s: %s", spiel.url, exc)
+            fund = None
+        db.refresh(eintrag)
+        if fund:
+            angelegt.append(_watch_dict(eintrag))
+        else:
+            fehler.append({"url": spiel.url, "id": eintrag.id,
+                           "name": eintrag.name,
+                           "grund": eintrag.letzter_fehler or "kein Preis gefunden"})
+
+    return {"angelegt": angelegt, "uebersprungen": uebersprungen, "fehler": fehler,
+            "zusammenfassung": {
+                "gelesen": len(eintraege), "neu": len(angelegt) + len(fehler),
                 "mit_preis": len(angelegt), "ohne_preis": len(fehler),
                 "doppelt": len(uebersprungen)}}
 

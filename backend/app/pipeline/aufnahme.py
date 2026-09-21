@@ -16,6 +16,7 @@ from ..currency import to_eur
 from ..dedupe import normalize_title, titles_match, url_hash
 from ..events import broker
 from ..models import Deal, DealOffer, PriceHistory, utcnow
+from ..produktid import fuer_deal
 from ..sources.base import DealItem
 from .gemeinsam import _deal_payload
 
@@ -78,9 +79,39 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         return None
 
     titel_norm = normalize_title(item.titel)
+    kennung = fuer_deal(item.url, item.roh)
 
-    # 2) Fuzzy-Duplikat ueber Quellen hinweg.
+    # 2) Gleiche Produktkennung -> derselbe Artikel, ohne Raten.
+    #
+    # Steht vor dem Titelvergleich, weil sie ihn schlaegt: "Sony
+    # WH-1000XM5 Schwarz" und "Sony Kopfhoerer WH1000XM5, schwarz" sind
+    # fuer jeden Schwellenwert ein Grenzfall - fuer dieselbe ASIN nicht.
+    # Und sie gilt ohne Zeitfenster: die Kandidatenliste reicht 72 Stunden
+    # zurueck, eine Kennung findet den Artikel auch danach noch.
+    if kennung:
+        treffer = db.scalar(
+            select(Deal).where(Deal.produkt_id == kennung,
+                               Deal.duplicate_of.is_(None))
+            .order_by(Deal.first_seen.desc()).limit(1))
+        if treffer is not None:
+            treffer.last_seen = utcnow()
+            treffer.seen_count += 1
+            erwachsen_mod.markiere(treffer, source_id=source_id)
+            if source_id not in (treffer.also_from or []) and source_id != treffer.quelle:
+                treffer.also_from = list(treffer.also_from or []) + [source_id]
+            _merke_angebot(db, treffer, item, source_id)
+            _apply_price(db, treffer, item, source_id)
+            log.debug("Produktkennung %s: '%s' (%s) gehoert zu '%s'",
+                      kennung, item.titel[:50], source_id, treffer.titel[:50])
+            return None
+
+    # 3) Fuzzy-Duplikat ueber Quellen hinweg.
     for cand in recent:
+        # Zwei verschiedene Kennungen heissen: verschiedene Artikel. Dann
+        # braucht der Titel gar nicht erst befragt zu werden - "iPhone 15
+        # 128 GB" und "iPhone 15 256 GB" heissen fast gleich.
+        if kennung and cand.produkt_id and cand.produkt_id != kennung:
+            continue
         if cand.titel_norm and titles_match(item.titel, cand.titel):
             # Gleicher Titel, andere URL -> derselbe Deal aus anderer Quelle.
             cand.last_seen = utcnow()
@@ -105,6 +136,7 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         url_hash=uhash,
         titel=item.titel[:1000],
         titel_norm=titel_norm,
+        produkt_id=kennung,
         beschreibung=item.beschreibung,
         url=item.url,
         bild=item.bild,

@@ -796,6 +796,8 @@ export const api = {
     remove: (id: number) => del<{ ok: boolean }>(`/watch/${id}`),
     pruefen: (id: number) => post<WatchTest>(`/watch/${id}/pruefen`),
     testen: (url: string) => post<WatchTest>("/watch-test", { url }),
+    steam: (profil: string, ziel_preis?: number | null, gleich_pruefen = false) =>
+      post<SammelErgebnis>("/watch/steam", { profil, ziel_preis, gleich_pruefen }),
     sammel: (urls: string, ziel_preis?: number | null, intervall_minuten?: number) =>
       post<SammelErgebnis>("/watch/sammel",
         { urls, ziel_preis: ziel_preis ?? null,

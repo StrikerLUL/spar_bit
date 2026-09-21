@@ -127,6 +127,10 @@ class Deal(Base):
 
     titel: Mapped[str] = mapped_column(Text)
     titel_norm: Mapped[str] = mapped_column(Text, index=True)
+    # Produktkennung mit Herkunft: "asin:B07H8MJ2BF", "steam:1091500",
+    # "gtin:0000012345678". Wo sie da ist, muss nicht geraten werden,
+    # ob zwei Angebote derselbe Artikel sind.
+    produkt_id: Mapped[str | None] = mapped_column(String(64), index=True)
     beschreibung: Mapped[str | None] = mapped_column(Text)
     url: Mapped[str] = mapped_column(Text)
     bild: Mapped[str | None] = mapped_column(Text)

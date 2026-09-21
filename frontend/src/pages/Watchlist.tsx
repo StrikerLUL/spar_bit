@@ -411,6 +411,7 @@ function SammelDialog({ onClose, onFertig }: {
   const toast = useToast();
   const [urls, setUrls] = React.useState("");
   const [ziel, setZiel] = React.useState("");
+  const [steam, setSteam] = React.useState("");
   const [laeuft, setLaeuft] = React.useState(false);
   const [ergebnis, setErgebnis] = React.useState<SammelErgebnis | null>(null);
 
@@ -422,7 +423,9 @@ function SammelDialog({ onClose, onFertig }: {
   const starten = async () => {
     setLaeuft(true);
     try {
-      const raus = await api.watch.sammel(urls, ziel ? Number(ziel) : null);
+      const raus = steam.trim()
+        ? await api.watch.steam(steam.trim(), ziel ? Number(ziel) : null)
+        : await api.watch.sammel(urls, ziel ? Number(ziel) : null);
       setErgebnis(raus);
       onFertig();
     } catch (err) {
@@ -484,8 +487,10 @@ function SammelDialog({ onClose, onFertig }: {
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
-          <Button onClick={starten} loading={laeuft} disabled={anzahl === 0}>
-            {anzahl > 0 ? `${anzahl} aufnehmen` : "Aufnehmen"}
+          <Button onClick={starten} loading={laeuft}
+                  disabled={anzahl === 0 && !steam.trim()}>
+            {steam.trim() ? "Von Steam holen"
+              : anzahl > 0 ? `${anzahl} aufnehmen` : "Aufnehmen"}
           </Button>
         </>
       }
@@ -518,9 +523,25 @@ function SammelDialog({ onClose, onFertig }: {
           </p>
         </div>
 
+        <div className="space-y-1.5 border-t border-border pt-4">
+          <Label htmlFor="steam-profil">…oder Steam-Wunschliste übernehmen</Label>
+          <Input
+            id="steam-profil"
+            value={steam}
+            placeholder="Profilname, Steam-ID oder Adresse der Wunschliste"
+            onChange={(e) => setSteam(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Braucht keinen API-Schlüssel. Unter <em>Profil → Privatsphäre</em> muss
+            „Spieledetails" auf <em>öffentlich</em> stehen.
+          </p>
+        </div>
+
         {laeuft && (
           <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Jede Seite wird einzeln geholt — das dauert ein paar Sekunden.
+            {steam.trim()
+              ? "Wunschliste wird gelesen …"
+              : "Jede Seite wird einzeln geholt — das dauert ein paar Sekunden."}
           </p>
         )}
       </div>
