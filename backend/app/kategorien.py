@@ -37,6 +37,18 @@ from dataclasses import dataclass, field
 # Wie viele Marken ein Deal hoechstens bekommt.
 MAX_PRO_DEAL = 3
 
+# Stand der Wortliste. **Diese Zahl hochzaehlen, sobald sich unten etwas
+# aendert** - dann stuft SparBit den Bestand beim naechsten Start neu ein.
+#
+# Ohne das waere jede Verbesserung an der Liste wirkungslos fuer alles, was
+# schon in der Datenbank liegt: ein neu aufgenommener Begriff wuerde nur
+# noch kuenftige Funde treffen, und der Filter bliebe fuer den halben
+# Bestand leer. Genau das ist beim ersten Umbau passiert.
+VERSION = 2
+
+# Wo der Neu-Durchlauf steht: {"version": int, "cursor": letzte Deal-ID}.
+SCHLUESSEL_STAND = "kategorien_stand"
+
 # Bis zu dieser Laenge braucht ein Begriff eine Bremse nach hinten.
 KURZ_BIS = 4
 
@@ -58,6 +70,8 @@ KATEGORIEN: tuple[Kategorie, ...] = (
         "microsd", "sd-karte", "sdxc", "usb-stick", "usb stick", "nas",
         "arbeitsspeicher", "ram-kit", "ddr4", "ddr5", "externe festplatte",
         "ssd-festplatte", "flash", "cf-express",
+        "crucial", "sandisk", "kingston", "seagate", "wd blue", "wd black",
+        "wd red", "samsung 990", "samsung 980", "synology",
     ), hinweis="SSDs, Festplatten, Speicherkarten, RAM"),
     Kategorie("computer", "Computer & Zubehör", (
         "notebook", "laptop", "ultrabook", "macbook", "desktop-pc", "gaming-pc",
@@ -66,27 +80,36 @@ KATEGORIEN: tuple[Kategorie, ...] = (
         "mainboard", "netzteil", "gehäuse-lüfter", "drucker", "scanner",
         "router", "fritz!box", "fritzbox", "repeater", "switch-hub", "docking",
         "webcam", "usb-hub", "thunderbolt",
+        "thinkpad", "ideapad", "zenbook", "vivobook", "surface laptop",
+        "surface pro", "imac", "mac mini", "rtx", "intel arc",
     ), hinweis="Notebooks, PCs, Monitore, Peripherie"),
     Kategorie("handy", "Handy & Tablet", (
         "smartphone", "iphone", "galaxy s", "pixel ", "handy", "tablet",
         "ipad", "smartwatch", "fitness-tracker", "powerbank", "ladegerät",
         "ladekabel", "handyhülle", "displayschutz", "xiaomi", "oneplus",
+        "fairphone", "nothing phone", "redmi", "poco ", "garmin",
+        "fitbit", "apple watch",
     ), hinweis="Smartphones, Tablets, Wearables, Zubehör"),
     Kategorie("audio", "Audio & Kopfhörer", (
         "kopfhörer", "headset", "earbuds", "in-ear", "over-ear", "airpods",
         "lautsprecher", "soundbar", "bluetooth-box", "hifi", "verstärker",
         "plattenspieler", "subwoofer", "mikrofon", "sonos", "bose", "jbl",
+        "sennheiser", "beyerdynamic", "marshall", "teufel", "soundcore",
+        "nothing ear", "bluetooth-kopfhörer",
     ), hinweis="Kopfhörer, Boxen, HiFi"),
     Kategorie("tv_foto", "TV, Foto & Video", (
-        "fernseher", "oled", "qled", "led-tv", "smart-tv", "beamer",
+        "fernseher", "oled-tv", "oled tv", "oled fernseher", "oled evo",
+        "lg oled", "qled", "led-tv", "smart-tv", "beamer",
         "projektor", "kamera", "spiegelreflex", "systemkamera", "objektiv",
         "gopro", "action-cam", "drohne", "stativ", "blitzgerät",
+        "bravia", "canon eos", "nikon z", "sony alpha", "fujifilm", "dji ",
     ), hinweis="Fernseher, Kameras, Beamer"),
     Kategorie("gaming", "Gaming", (
         "playstation", "ps5", "ps4", "xbox", "nintendo", "switch-spiel",
         "konsole", "controller", "gamepad", "steam", "epic games", "gog",
         "gaming", "videospiel", "spiele-key", "game-key", "season pass",
         "battle pass", "dlc", "vr-brille", "quest 3",
+        "steam deck", "rog ally", "legion go", "switch oled", "switch lite",
     ), hinweis="Konsolen, Spiele, Zubehör"),
     Kategorie("software", "Software & Lizenzen", (
         "software", "lizenz", "windows 1", "office 2", "microsoft 365",
@@ -113,17 +136,23 @@ KATEGORIEN: tuple[Kategorie, ...] = (
         "geschirrspüler", "kühlschrank", "gefrierschrank", "mikrowelle",
         "luftreiniger", "luftentfeuchter", "ventilator", "heizlüfter",
         "bügeleisen", "nähmaschine", "wäschetrockner",
+        "roborock", "ecovacs", "dreame", "dyson", "vorwerk", "akkusauger",
+        "wischroboter", "fenstersauger",
     ), hinweis="Grossgeräte, Reinigung, Klima"),
     Kategorie("kueche", "Küche", (
         "kaffeemaschine", "kaffeevollautomat", "espressomaschine", "siebträger",
         "airfryer", "heißluftfritteuse", "pfanne", "kochtopf", "topfset",
         "messerset", "küchenmaschine", "standmixer", "thermomix", "wasserkocher",
         "toaster", "backofen", "geschirrset", "kapseln",
+        "delonghi", "de'longhi", "jura ", "nespresso", "dolce gusto",
+        "kitchenaid", "ninja foodi", "tefal",
     ), hinweis="Kochen, Kaffee, Geschirr"),
     Kategorie("moebel", "Möbel & Wohnen", (
         "sofa", "couch", "matratze", "bettgestell", "schreibtisch",
         "bürostuhl", "gamingstuhl", "regal", "kommode", "kleiderschrank",
         "teppich", "lampe", "leuchte", "vorhang", "bettwäsche",
+        "philips hue", "hue bridge", "hue white", "nanoleaf", "govee",
+        "tradfri", "stehleuchte", "deckenleuchte",
     ), hinweis="Möbel, Licht, Textilien"),
     Kategorie("werkzeug", "Werkzeug & Baumarkt", (
         "akkuschrauber", "bohrmaschine", "schlagbohrer", "stichsäge",
@@ -134,17 +163,21 @@ KATEGORIEN: tuple[Kategorie, ...] = (
         "rasenmäher", "vertikutierer", "heckenschere", "hochdruckreiniger",
         "gartenmöbel", "grill", "gasgrill", "kugelgrill", "pizzaofen",
         "hochbeet", "pflanzkübel", "sonnenschirm", "pool",
+        "kärcher", "gardena", "laubbläser", "rasentrimmer",
     ), hinweis="Garten, Grill, Aussenbereich"),
     Kategorie("drogerie", "Drogerie & Pflege", (
         "shampoo", "duschgel", "zahnpasta", "zahnbürste", "rasierer",
         "rasierklingen", "windeln", "waschmittel", "spülmittel", "parfum",
         "eau de toilette", "gesichtscreme", "bodylotion", "sonnencreme",
-        "nahrungsergänzung", "vitamin",
+        "nahrungsergänzung", "vitamin", "body lotion",
+        "oral-b", "gillette", "nivea", "l'oréal", "braun series", "philips series",
+        "elektrische zahnbürste",
     ), hinweis="Pflege, Hygiene, Reinigung"),
     Kategorie("lebensmittel", "Lebensmittel & Getränke", (
         "kaffeebohnen", "schokolade", "süßigkeiten", "nudeln", "lebensmittel",
         "getränke", "mineralwasser", "bier", "wein", "whisky", "gin ",
         "energydrink", "proteinpulver", "müsli", "tiefkühl",
+        "lindt", "haribo", "ritter sport", "milka", "kelloggs",
     ), hinweis="Essen und Trinken"),
     Kategorie("mode", "Mode & Schuhe", (
         "sneaker", "laufschuh", "turnschuh", "stiefel", "jacke", "mantel",
@@ -160,6 +193,7 @@ KATEGORIEN: tuple[Kategorie, ...] = (
         "hantel", "kurzhantel", "laufband", "heimtrainer", "ergometer",
         "fitness", "yogamatte", "fahrrad", "e-bike", "pedelec", "fahrradhelm",
         "zelt", "schlafsack", "wanderschuh", "skier", "snowboard",
+        "wahoo", "hometrainer", "rudergerät", "klimmzugstange",
     ), hinweis="Fitness, Rad, Outdoor"),
     Kategorie("reise", "Reise & Hotel", (
         "hotel", "hotelgutschein", "übernachtung", "ferienwohnung", "flug",
@@ -170,6 +204,7 @@ KATEGORIEN: tuple[Kategorie, ...] = (
         "reifen", "winterreifen", "sommerreifen", "motoröl", "autobatterie",
         "dashcam", "dachbox", "anhängerkupplung", "scheibenwischer",
         "kindersitz auto", "motorrad", "roller", "e-scooter",
+        "michelin", "goodyear", "bridgestone", "hankook", "aerotwin",
     ), hinweis="Auto, Motorrad, Zubehör"),
     Kategorie("medien", "Bücher, Filme & Musik", (
         "buch", "bücher", "ebook", "e-book", "hörbuch", "hörspiel", "roman",
@@ -193,7 +228,7 @@ KATEGORIEN: tuple[Kategorie, ...] = (
         "auflege", "klitoris", "we-vibe", "fleshlight", "liebeskugeln",
     ), erwachsen=True, hinweis="Spielzeug"),
     Kategorie("waesche18", "Dessous & Wäsche", (
-        "dessous", "reizwäsche", "straps", "korsett", "body ", "negligé",
+        "dessous", "reizwäsche", "straps", "korsett", "negligé",
         "negligee", "strapse", "ouvert", "bodystocking", "latex-",
     ), erwachsen=True, hinweis="Wäsche und Kleidung"),
     Kategorie("pflege18", "Gleitgel & Pflege", (
@@ -336,25 +371,53 @@ def fuer_deal(deal) -> Befund:
 
 
 def nachtragen(db, grenze: int = 2000) -> int:
-    """Kategorien fuer Deals nachtragen, die noch keine haben.
+    """Kategorien nachtragen - fuer neue Deals und nach einer Listenaenderung.
 
-    Beim Einschalten dieser Funktion liegt die halbe Datenbank ohne Marken
-    da; ohne Nachtrag waeren die Filter fuer alles Aeltere leer und wirkten
-    kaputt. Der Nachtrag laeuft in Haeppchen - beim Start und danach im
-    Aufraeum-Job - und ist idempotent: er fasst nur an, was noch nichts hat.
+    Zwei Betriebsarten, und die zweite ist der eigentliche Grund:
+
+    1. **Luecken fuellen.** Deals ohne Marken bekommen welche. Das betrifft
+       den Bestand von vor dieser Funktion und alles, was auf anderem Weg
+       in die Tabelle kam.
+    2. **Neu einstufen.** Steht in `VERSION` eine andere Zahl als in der
+       Datenbank, hat sich die Wortliste geaendert - dann wird der ganze
+       Bestand noch einmal durchgesehen. Ohne diesen Durchlauf waere jede
+       Korrektur an der Liste fuer alles Alte wirkungslos.
+
+    Beides laeuft in Haeppchen (beim Start und im Aufraeum-Job) und merkt
+    sich, wo es stand: ein Neustart mitten im Durchlauf verliert nichts.
     """
     from sqlalchemy import select
 
+    from .db import get_setting, set_setting
     from .models import Deal
 
+    stand = get_setting(db, SCHLUESSEL_STAND) or {}
+    if not isinstance(stand, dict):
+        stand = {}
+    grenze = max(1, grenze)
+
+    if stand.get("version") != VERSION:
+        cursor = int(stand.get("cursor") or 0)
+        offen = list(db.scalars(
+            select(Deal).where(Deal.id > cursor).order_by(Deal.id).limit(grenze)))
+        for deal in offen:
+            deal.kategorien = fuer_deal(deal).text or ""
+        if len(offen) < grenze:
+            # Durch - ab jetzt wieder der guenstige Luecken-Modus.
+            set_setting(db, SCHLUESSEL_STAND, {"version": VERSION, "cursor": 0})
+        else:
+            set_setting(db, SCHLUESSEL_STAND,
+                        {"version": stand.get("version"), "cursor": offen[-1].id})
+        db.commit()
+        return len(offen)
+
     offen = list(db.scalars(
-        select(Deal).where(Deal.kategorien.is_(None)).limit(max(1, grenze))))
+        select(Deal).where(Deal.kategorien.is_(None)).limit(grenze)))
     if not offen:
         return 0
     for deal in offen:
-        befund = fuer_deal(deal)
         # Leerstring statt None: sonst faende der naechste Lauf denselben
         # Deal wieder und liefe endlos im Kreis.
-        deal.kategorien = befund.text or ""
+        deal.kategorien = fuer_deal(deal).text or ""
     db.commit()
     return len(offen)

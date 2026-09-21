@@ -122,7 +122,8 @@ Messungen — der Test auf deinem Server hat das letzte Wort.
   statt der üblichen 1. Kommt trotzdem 429: die Quelle pausiert so lange, wie
   Reddit sagt, und arbeitet die Subreddits über mehrere Läufe ab, statt bei
   denselben ersten hängenzubleiben. Mit *Subreddits pro Lauf* lässt sich das
-  zusätzlich begrenzen.
+  zusätzlich begrenzen. Ein 404 streicht den Namen erst beim zweiten Mal in
+  Folge — eine vorübergehende Sperre soll keine Einstellung löschen.
 * **Steam drosselt `appdetails` hart** (grob ~200 Requests/5 Min. pro IP).
   Darum sind die Detailabfragen pro Lauf gedeckelt (Vorgabe 15) und mit einer
   Pause versehen.

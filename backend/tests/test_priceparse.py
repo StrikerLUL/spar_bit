@@ -193,3 +193,36 @@ def test_zeitraum_des_streichpreises_faerbt_nicht_ab():
     p = parse_price_text("Einmalig 49 € statt 9,99 € pro Monat")
     assert p.preis == 49.0
     assert p.zeitraum is None
+
+
+# --- Verneinungen: "versandkostenfrei" ist keine Versandkostenangabe ------
+#
+# Gemessen nach dem ersten Umbau: "Kopfhörer 229 € versandkostenfrei" verlor
+# seinen Preis komplett, weil hinter der Zahl ein Wort mit "versand" stand.
+# Die Wendung steht in jedem zweiten deutschen Deal-Titel.
+
+@pytest.mark.parametrize("text,preis", [
+    ("Kopfhörer 229 € versandkostenfrei", 229.0),
+    ("Shirt 12,99 € portofrei", 12.99),
+    ("Buch 9,99 € - Versand gratis", 9.99),
+    ("Sony XM5 229 €, kostenloser Versand", 229.0),
+    ("Rucksack 39 € inkl. Versand", 39.0),
+])
+def test_gratis_versand_kostet_den_preis_nicht(text, preis):
+    assert parse_price_text(text).preis == preis
+
+
+def test_versandschwelle_bleibt_trotzdem_draussen():
+    """Die Zahl hinter 'gratis Versand ab' ist eine Schwelle, kein Preis."""
+    assert parse_price_text("Shirt 12,99 € - gratis Versand ab 20 €").preis == 12.99
+
+
+@pytest.mark.parametrize("text,preis", [
+    ("Sony WH-1000XM5 229 €", 229.0),
+    ("Samsung 990 Pro 2TB 129 €", 129.0),
+    ("Fritz!Box 7590 199 €", 199.0),
+])
+def test_modellnummer_klebt_nicht_an_der_zahl(text, preis):
+    """Alter Fehler: aus 'XM5 229 €' wurde 5.229 € - die Ziffer der
+    Modellnummer wurde als Tausendergruppe gelesen."""
+    assert parse_price_text(text).preis == preis

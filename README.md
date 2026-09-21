@@ -450,7 +450,12 @@ $ python cli.py deals --kategorie speicher --gueltig
 
 Der Altbestand wird beim ersten Start nachgetragen (in Häppchen, damit ein
 Start mit 50.000 Deals nicht hängt) — die Filter sind also sofort auch für
-alles Ältere brauchbar.
+alles Ältere brauchbar. **Und das gilt auch nach einer Änderung der
+Wortliste:** in `backend/app/kategorien.py` steht eine `VERSION`; wird sie
+hochgezählt, stuft SparBit den Bestand noch einmal neu ein. Ohne das wäre
+jede Korrektur an der Liste für alles Alte wirkungslos gewesen — ein Fehler,
+der erst Wochen später aufgefallen wäre. Dasselbe gilt, wenn ein Deal erst
+später als 18+ erkannt wird: seine Marken werden dann mitgezogen.
 
 ### Preise richtig lesen
 
@@ -501,6 +506,17 @@ Mindestbestellwert, Gebühr, Stückpreis. Was nachweislich kein Artikelpreis
 ist, fällt bei der Auswahl raus. Die letzte Zeile ist dabei Absicht: lieber
 gar kein Preis als ein falscher.
 
+Zwei Feinheiten, die beide aus einem Fehlschlag gelernt sind:
+
+* **Verneinungen zählen umgekehrt.** `Kopfhörer 229 € versandkostenfrei`
+  nennt keine Versandkosten, sondern sagt, dass keine anfallen — die erste
+  Fassung warf hier den Preis weg. Steht das Versandwort dagegen *vor* der
+  Zahl, bleibt sie draußen: `Versand 3,95 €` ist Porto, und
+  `gratis Versand ab 20 €` ist die Schwelle dafür, beides kein Artikelpreis.
+* **Modellnummern kleben nicht an Preisen.** `Sony WH-1000XM5 229 €` wurde
+  als **5.229 €** gelesen — die letzte Ziffer der Modellnummer ging als
+  Tausendergruppe durch. Eine Zahl muss jetzt an einer Wortgrenze beginnen.
+
 #### Abos: die Zahl allein sagt nichts
 
 „4,99 €" an einem Kopfhörer und „4,99 €" an einem Zugang sind zwei sehr
@@ -518,6 +534,13 @@ Erst diese Spalte macht aus zwei Abo-Angeboten eine Rangfolge: *1 € für drei
 Monate* ist günstiger als *0,99 € im Monat*, obwohl die Zahl größer ist. Im
 Feed sortiert **Günstigste zuerst** danach, im 18+-Bereich filtert
 *Max. €/Monat* darauf.
+
+Angezeigt wird immer das **günstigste Angebot, das gerade gilt**: kommt
+derselbe Artikel aus mehreren Quellen, gewinnt die billigste — aber nur,
+solange sie ihn auch noch listet (drei Tage). Wird er teurer, kommt das an.
+Die frühere Regel „nur günstiger zählt" hatte hier einen blinden Fleck:
+meldete dieselbe Quelle den Artikel später teurer, blieb der alte, niedrige
+Preis für immer auf der Karte stehen — man klickte und zahlte mehr.
 
 Alle Beträge werden zusätzlich in **Euro umgerechnet**, damit „max. 20 €" auch
 bei USD- und GBP-Quellen greift; in der Oberfläche steht der Gegenwert daneben
@@ -608,10 +631,21 @@ Die Reihenfolge richtet sich danach, wo ein toter Link am meisten ärgert:
 
 Was die Seite als beendet führt, bekommt die Marke `abgelaufen` — und
 verschwindet aus dem Feed, solange dort **Abgelaufene ausblenden** an ist
-(Vorgabe an). Ausgeblendet wird ausschließlich, was die Zielseite selbst
-gesagt hat; Ungeprüftes bleibt sichtbar. Und beim Klick auf **Zum Deal** sieht
-SparBit gleich nach: für diesen Klick kommt die Antwort zu spät, für den
-nächsten Blick auf den Feed nicht.
+(Vorgabe an). Ausgeblendet wird ausschließlich, was die Zielseite selbst als
+beendet meldet; Ungeprüftes bleibt sichtbar, und ein Deal mit der Marke
+*stimmt nicht* ebenfalls — dort wurde nur der Preis korrigiert, das Angebot
+gibt es noch. Beim Klick auf **Zum Deal** sieht SparBit gleich nach: für
+diesen Klick kommt die Antwort zu spät, für den nächsten Blick auf den Feed
+nicht. Damit daraus kein Dauerfeuer wird, gilt dabei eine halbe Stunde
+Schonfrist je Deal; **Nachsehen** in der Detailansicht kommt immer durch.
+
+Zwei Grenzen sind bewusst gesetzt: nachgesehen wird bis 50 Tage zurück (die
+Aufbewahrung liegt bei 60), nach 21 Tagen aber nur noch bei gemerkten,
+geschenkten oder auffälligen Deals — der Altbestand soll nicht das
+Kontingent der frischen Funde verbrauchen. Und eine Seite, auf der nichts
+Auswertbares stand, kommt erst nach der vierfachen Wartezeit wieder dran:
+sie wird beim nächsten Mal mit hoher Wahrscheinlichkeit wieder nichts
+hergeben.
 
 Abschalten oder enger stellen: *Logs & System → Gratis-Gegenprobe →
 „Auch normale Deals auf Aktualität prüfen"*. Was dort an Seitenaufrufen
@@ -689,9 +723,12 @@ https://www.mydealz.de/gruppe/erotik-rss: KeinFeed: HTML-Seite statt Feed
 Das sind drei verschiedene Probleme, die vorher gleich aussahen — *„Quelle
 liefert nichts"* — und bei jedem Lauf gleich wiederkamen. Jetzt gilt:
 
-* **404 bei Reddit** heißt, den Subreddit gibt es nicht. Der Name wird aus
-  der Liste gestrichen und landet im Feld *Automatisch entfernt*; vorbelegt
-  ist `r/SexToyDeals` deshalb nicht mehr.
+* **404 bei Reddit** heißt, den Subreddit gibt es nicht. Gestrichen wird er
+  aber erst beim **zweiten** 404 in Folge — ein einzelner kann auch eine
+  Sperre sein, die wieder aufgeht, und einen selbst eingetragenen Namen
+  löscht man nicht wegen einer einzigen Absage. Ein erfolgreicher Abruf
+  setzt den Zähler zurück. Gestrichene stehen im Feld *Automatisch
+  entfernt*; vorbelegt ist `r/SexToyDeals` nicht mehr.
 * **429** heißt, Reddit drosselt diesen Server — häufig, wenn der VPS in
   einem Rechenzentrums-Netz steht. Das ist kein Defekt: die Quelle bricht
   den Durchlauf ab, macht beim nächsten Lauf **dort weiter, wo sie stand**,
@@ -1464,10 +1501,11 @@ Ehrlich benannt statt verschwiegen:
   dann behalten; Kandidaten und Feed-Konventionen stehen in
   [ENDPOINTS.md](ENDPOINTS.md#18-bereich).
 * **Die Kategorien sind eine Wortliste, kein Modell.** Sie trifft, was
-  jemand aufgeschrieben hat — ein Produkt, dessen Gattungsbegriff im Titel
-  fehlt („Roborock S8 Pro Ultra" ohne das Wort *Saugroboter*), bleibt ohne
-  Marke. Dafür lässt sich jede Lücke in `backend/app/kategorien.py` in einer
-  Zeile schließen, und jeder Treffer erklärt sich selbst.
+  jemand aufgeschrieben hat. Die häufigsten Markennamen stehen inzwischen
+  drin (Roborock, Dyson, Philips Hue, Crucial, Sennheiser …), aber ein
+  Produkt, dessen Gattungsbegriff *und* Marke fehlen, bleibt ohne Marke.
+  Jede Lücke ist in `backend/app/kategorien.py` eine Zeile — `VERSION`
+  danach hochzählen, dann wird der Bestand neu eingestuft.
 * **Die Aktualitätsprüfung sieht nur, was ausgezeichnet ist.** Ein Shop, der
   seinen beendeten Deal einfach weiter anzeigt, oder einer hinter
   Cloudflare, bleibt „ungeprüft" — und ungeprüft heißt sichtbar. Gegen einen

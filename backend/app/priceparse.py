@@ -61,7 +61,10 @@ _NUM = r"\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?"
 
 _PRICE_RE = re.compile(
     rf"(?P<pre>[€$£]|EUR|USD|GBP|CHF)?\s*"
-    rf"(?P<num>{_NUM})"
+    # Die Zahl muss am Anfang stehen duerfen: ohne diese Bremse frisst der
+    # Tausendertrenner die letzte Ziffer einer Modellnummer mit.
+    # "Sony WH-1000XM5 229 EUR" wurde so zu 5.229 EUR - echt gemessen.
+    rf"(?<![\w.,])(?P<num>{_NUM})"
     rf"\s*(?P<post>[€$£]|EUR|USD|GBP|CHF|Euro)?",
     re.IGNORECASE,
 )
@@ -102,6 +105,20 @@ ZWECK_WEITE = 28
 KEIN_PREIS = ("versand", "rabatt", "mbw", "gebuehr")
 
 _V_WORT = r"versand\w*|porto\w*|lieferung|zustellung|shipping|delivery"
+
+# ... aber "versandkostenfrei" ist das Gegenteil von Versandkosten.
+#
+# Aus dem Betrieb gemessen: "Kopfhoerer 229 EUR versandkostenfrei" verlor
+# seinen Preis, weil hinter der Zahl ein Wort mit "versand" stand. Genau
+# diese Wendung steht in jedem zweiten deutschen Deal-Titel - und sie sagt,
+# dass eben KEIN Porto dazukommt. Wo so eine Verneinung steht, ist der
+# Betrag daneben der Artikelpreis und nicht das Porto.
+_VERSAND_GRATIS = re.compile(
+    r"(?:versand|porto|liefer\w*?|zustell\w*?)(?:kosten)?(?:frei|los)"
+    r"|(?:gratis|kostenlos\w*|kostenfrei\w*|frei\w*|inklusive|inkl\.?)"
+    r"\s*[-–]?\s*(?:versand\w*|porto\w*|lieferung|zustellung|shipping)"
+    r"|(?:versand\w*|porto\w*|lieferung)\s*(?:ist\s+)?(?:gratis|kostenlos|frei|inklusive|inkl\.?)",
+    re.IGNORECASE)
 _R_WORT = (r"rabatt\w*|gutschein\w*|coupon\w*|cashback|nachlass|ersparnis|"
            r"sparen|spare|bonus|prämie|praemie|guthaben|erstattung|"
            r"willkommensbonus|neukundenbonus")
@@ -176,8 +193,16 @@ def _zweck_fuer(norm: str, start: int, ende: int) -> str | None:
     danach = norm[ende:ende + ZWECK_WEITE].lower()
     for key, dre, nre in _ZWECK_RE:
         if dre is not None and dre.search(davor):
+            # Steht das Versandwort VOR der Zahl, ist sie in beiden
+            # Lesarten kein Artikelpreis: "Versand 3,95 EUR" ist das Porto,
+            # "gratis Versand ab 20 EUR" die Schwelle dafuer.
             return key
         if nre is not None and nre.match(danach):
+            # Dahinter dagegen entscheidet die Verneinung: "229 EUR
+            # versandkostenfrei" nennt keine Versandkosten, sondern sagt,
+            # dass keine anfallen. Der Betrag bleibt der Artikelpreis.
+            if key == "versand" and _VERSAND_GRATIS.search(danach):
+                continue
             return key
     return None
 

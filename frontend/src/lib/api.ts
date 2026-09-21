@@ -434,6 +434,8 @@ export interface Stats {
   quellen_ampel: { gruen: number; gelb: number; rot: number; aus: number };
   aktive_regeln: number;
   top_quellen: Array<{ quelle: string; anzahl: number }>;
+  /** Wovon kam diese Woche am meisten — siehe backend/app/kategorien.py. */
+  top_kategorien?: Array<{ key: string; label: string; anzahl: number }>;
 }
 
 export interface TimelinePoint {
@@ -664,14 +666,23 @@ export const api = {
     },
     bookmark: (id: number) =>
       post<{ id: number; bookmarked: boolean }>(`/deals/${id}/bookmark`),
-    /** Zielseite jetzt aufrufen und den gemeldeten Preis gegenprüfen. */
-    pruefen: (id: number) =>
-      post<{ befund: GratisBefund; korrigiert: boolean; deal: Deal }>(
-        `/deals/${id}/pruefen`),
+    /** Zielseite jetzt aufrufen und den gemeldeten Preis gegenprüfen.
+     *
+     *  Ohne `force` hält sich der Server an eine Schonfrist: ein Befund,
+     *  der keine halbe Stunde alt ist, wird zurückgegeben statt neu geholt.
+     *  Das hält den Klick auf „Zum Deal" billig — wer ausdrücklich
+     *  „Nachsehen" drückt, will dagegen jetzt eine frische Antwort. */
+    pruefen: (id: number, force = false) =>
+      post<{
+        befund: GratisBefund; korrigiert: boolean; deal: Deal;
+        uebersprungen?: boolean;
+      }>(`/deals/${id}/pruefen${force ? "?force=true" : ""}`),
   },
   kategorien: {
-    list: (bereich: "normal" | "erwachsen" = "normal") =>
-      get<Kategorie[]>(`/kategorien?bereich=${bereich}`),
+    list: (bereich: "normal" | "erwachsen" = "normal", tage = 30,
+           nurGueltig = false) =>
+      get<Kategorie[]>(`/kategorien?bereich=${bereich}&tage=${tage}`
+        + (nurGueltig ? "&nur_gueltig=true" : "")),
   },
   stats: () => get<Stats>("/stats"),
   hygiene: () => get<Hygiene>("/hygiene"),

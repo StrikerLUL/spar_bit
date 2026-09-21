@@ -1069,9 +1069,9 @@ def befehl_deals(args) -> int:
                 stmt = stmt.where(or_(*[Deal.kategorien.like(f"%|{k}|%")
                                         for k in gewuenscht]))
         if getattr(args, "gueltig", False):
-            from app.gratischeck import WIDERSPRUCH
+            from app.gratischeck import VORBEI
             stmt = stmt.where(or_(Deal.check_status.is_(None),
-                                  Deal.check_status.notin_(WIDERSPRUCH)))
+                                  Deal.check_status.notin_(VORBEI)))
         if args.urteil:
             from app.verdict import mindestens
             stmt = stmt.where(Deal.urteil.in_(mindestens(args.urteil)))

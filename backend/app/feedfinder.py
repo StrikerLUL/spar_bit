@@ -341,13 +341,20 @@ def _pausieren(url: str) -> None:
             _muster_pause.pop(schluessel, None)
 
 
-def pause_zuruecksetzen() -> None:
+def pause_zuruecksetzen(praefix: str | None = None) -> None:
     """Sperrfristen vergessen - fuer 'Jetzt testen' und fuer Tests.
 
     Wer im UI auf den Knopf drueckt, will jetzt eine Antwort und nicht die
-    von vor einer Stunde.
+    von vor einer Stunde. Mit `praefix` gilt das nur fuer die Adressen
+    einer Seite: eine Quelle zu testen ist kein Grund, die Schonfrist aller
+    anderen Hosts aufzuheben - die haben davon nichts als zusaetzliche
+    Anfragen.
     """
-    _muster_pause.clear()
+    if not praefix:
+        _muster_pause.clear()
+        return
+    for schluessel in [k for k in _muster_pause if k.startswith(praefix)]:
+        _muster_pause.pop(schluessel, None)
 
 
 def _status(exc: Exception) -> int | None:

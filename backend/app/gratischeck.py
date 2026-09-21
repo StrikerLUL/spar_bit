@@ -59,6 +59,16 @@ LABEL = {
 # `unerreichbar` sind ausdruecklich folgenlos.
 WIDERSPRUCH = (WIDERLEGT, ABGELAUFEN)
 
+# Und nur DIESE eine Stufe heisst "gibt es nicht mehr".
+#
+# Der Unterschied ist wichtiger, als er aussieht: `widerlegt` bedeutet, dass
+# der Preis von der Zielseite korrigiert wurde - das Angebot existiert also
+# weiterhin, es ist nur teurer als gemeldet. Es aus dem Feed zu werfen waere
+# falsch; gemeldet wird es trotzdem nicht mehr (dafuer steht WIDERSPRUCH).
+# Der Schalter "Abgelaufene ausblenden" darf sich nur hierauf beziehen,
+# sonst versteckt er etwas anderes, als er verspricht.
+VORBEI = (ABGELAUFEN,)
+
 # Wie weit der Seitenpreis ueber dem gemeldeten liegen darf, ohne als
 # Widerspruch zu gelten. Cent-Differenzen entstehen durch Rundung und
 # Waehrungsumrechnung, nicht durch einen falschen Deal.
@@ -369,11 +379,21 @@ FRISCH_STUNDEN = 12
 # Deckel pro Lauf.
 
 MAX_AKTUALITAET_PRO_LAUF = 25
-# Aelter als das wird nicht mehr nachgesehen - was so lange liegt, raeumt
-# der Aufraeum-Job ohnehin weg.
-AKTUALITAET_TAGE = 21
+# Aelter als das wird gar nicht mehr nachgesehen. Der Wert orientiert sich
+# an der Aufbewahrungsfrist (Vorgabe 60 Tage): waere er wie anfangs bei 21,
+# stuenden Deals zwischen 21 und 60 Tagen ungeprueft im Feed, und genau die
+# sind am ehesten tot.
+AKTUALITAET_TAGE = 50
+# Bis hierher wird alles nachgesehen. Was aelter ist, kommt nur noch dran,
+# wenn jemand es sich gemerkt hat oder es auffaellig ist - sonst verbraucht
+# der Altbestand das Kontingent, das die frischen Deals brauchen.
+AKTUALITAET_FRISCH_TAGE = 21
 # Ein bestaetigter Deal wird seltener nachgeprueft als ein ungepruefter.
 NACHSCHAU_STUNDEN = 24
+# Und eine Seite, auf der nichts Auswertbares stand, noch seltener: sie
+# wird beim naechsten Mal mit hoher Wahrscheinlichkeit wieder nichts
+# hergeben. Das spart genau die Anfragen, die ohnehin "unklar" ergeben.
+UNKLAR_FAKTOR = 4
 
 
 def ist_kandidat(deal) -> bool:
@@ -410,7 +430,7 @@ def waehle_nachpruefung(db, *, grenze: int = MAX_AKTUALITAET_PRO_LAUF,
     """
     from datetime import timedelta
 
-    from sqlalchemy import select
+    from sqlalchemy import and_, or_, select
 
     from .models import Deal, utcnow
 
@@ -421,15 +441,29 @@ def waehle_nachpruefung(db, *, grenze: int = MAX_AKTUALITAET_PRO_LAUF,
     # nicht, um ihre Zielseite aufzurufen.
     if not erwachsen_erlaubt:
         bedingungen.append(Deal.erwachsen.is_(False))
+    # Aeltere Deals nur noch, wenn sie jemanden interessieren.
+    alt_erlaubt = or_(Deal.bookmarked.is_(True), Deal.ist_gratis.is_(True),
+                      Deal.fehler_stufe.isnot(None))
+    stumpf = (UNKLAR, UNERREICHBAR)
+    faellig = or_(
+        Deal.check_am.is_(None),
+        # Seiten ohne auswertbare Angabe kommen seltener dran.
+        and_(Deal.check_status.in_(stumpf),
+             Deal.check_am < jetzt - timedelta(
+                 hours=NACHSCHAU_STUNDEN * UNKLAR_FAKTOR)),
+        and_(or_(Deal.check_status.is_(None), Deal.check_status.notin_(stumpf)),
+             Deal.check_am < jetzt - timedelta(hours=NACHSCHAU_STUNDEN)),
+    )
     stmt = (
         select(Deal)
         .where(*bedingungen,
                Deal.url.isnot(None),
                Deal.duplicate_of.is_(None),
                Deal.first_seen >= jetzt - timedelta(days=AKTUALITAET_TAGE),
+               or_(Deal.first_seen >= jetzt - timedelta(
+                   days=AKTUALITAET_FRISCH_TAGE), alt_erlaubt),
                Deal.check_status.notin_(WIDERSPRUCH) | Deal.check_status.is_(None),
-               Deal.check_am.is_(None)
-               | (Deal.check_am < jetzt - timedelta(hours=NACHSCHAU_STUNDEN)))
+               faellig)
         # Noch nie geprueft zuerst, danach das aelteste Urteil; bei
         # Gleichstand der neuere Deal, denn den sieht man oben im Feed.
         .order_by(Deal.check_am.is_(None).desc(), Deal.check_am,

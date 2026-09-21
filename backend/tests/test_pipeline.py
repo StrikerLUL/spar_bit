@@ -12,7 +12,11 @@ from app.sources.base import DealItem
 def db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
+    # Dieselben Voreinstellungen wie im Betrieb (app/db.py). Vorher lief der
+    # Test mit autoflush=True und hat damit einen Fehler verdeckt: eine
+    # frisch angelegte Zeile war hier sichtbar, im Betrieb aber nicht.
+    session = sessionmaker(bind=engine, autoflush=False,
+                           expire_on_commit=False)()
     yield session
     session.close()
 
@@ -339,3 +343,57 @@ def test_gratis_wird_als_hundert_prozent_gefuehrt(db):
     deal = db.scalar(select(Deal).where(Deal.titel == "Freebie"))
     assert deal.ist_gratis
     assert deal.rabatt_prozent == 100.0
+
+
+# --- Preiserhoehungen kommen an -------------------------------------------
+#
+# Die alte Regel war "nur guenstiger zaehlt". Meldete dieselbe Quelle den
+# Artikel spaeter teurer, blieb der alte, niedrige Preis fuer immer auf der
+# Karte stehen - man klickte und zahlte mehr. Genau die Sorte Fehler, die
+# aussieht wie ein falscher Preis.
+
+def test_preiserhoehung_derselben_quelle_kommt_an(db):
+    from app.pipeline import ingest
+    from app.sources.base import DealItem
+
+    def melde(preis):
+        return ingest(db, "mydealz", [DealItem(
+            titel="Sony WH-1000XM5", url="https://x.test/xm5",
+            quelle="mydealz", preis=preis, waehrung="EUR")])
+
+    melde(249.0)
+    from sqlalchemy import select
+
+    from app.models import Deal, PriceHistory
+    deal = db.scalar(select(Deal))
+    assert deal.preis == 249.0
+
+    melde(299.0)
+    db.refresh(deal)
+    assert deal.preis == 299.0, "Preiserhoehung muss ankommen"
+    verlauf = [p.preis for p in db.scalars(select(PriceHistory))]
+    assert verlauf == [249.0, 299.0]
+
+
+def test_guenstigere_quelle_gewinnt_weiterhin(db):
+    from sqlalchemy import select
+
+    from app.models import Deal
+    from app.pipeline import ingest
+    from app.sources.base import DealItem
+
+    ingest(db, "mydealz", [DealItem(titel="LEGO Technic Bugatti",
+                                    url="https://x.test/lego",
+                                    quelle="mydealz", preis=299.0)])
+    ingest(db, "preisjaeger", [DealItem(titel="LEGO Technic Bugatti",
+                                        url="https://x.test/lego",
+                                        quelle="preisjaeger", preis=249.0)])
+    deal = db.scalar(select(Deal))
+    assert deal.preis == 249.0
+
+    # Und die teurere Quelle darf den besseren Preis nicht wieder kippen.
+    ingest(db, "mydealz", [DealItem(titel="LEGO Technic Bugatti",
+                                    url="https://x.test/lego",
+                                    quelle="mydealz", preis=289.0)])
+    db.refresh(deal)
+    assert deal.preis == 249.0

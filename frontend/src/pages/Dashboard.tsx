@@ -1,5 +1,5 @@
 import {
-  Activity, AlertTriangle, Euro, Gift, Target, TrendingUp, Zap,
+  Activity, AlertTriangle, Boxes, Euro, Gift, Target, TrendingUp, Zap,
 } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
@@ -183,6 +183,45 @@ export function Dashboard({ live }: { live: LiveItem[] }) {
               )}
             </CardContent>
           </Card>
+
+          {/* Kategorien der Woche — wovon kam am meisten rein? */}
+          {(stats?.top_kategorien?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Boxes className="h-4 w-4 text-primary" />
+                  Kategorien dieser Woche
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2.5">
+                  {stats!.top_kategorien!.map((entry) => {
+                    const max = stats!.top_kategorien![0].anzahl || 1;
+                    return (
+                      <li key={entry.key} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          {/* Klick führt in den Feed, schon gefiltert. */}
+                          <Link to={`/feed?kategorie=${entry.key}`}
+                                className="truncate hover:text-primary">
+                            {entry.label}
+                          </Link>
+                          <span className="tabular text-muted-foreground">
+                            {entry.anzahl}
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary/50 transition-all duration-700"
+                            style={{ width: `${(entry.anzahl / max) * 100}%` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Letzte Regeltreffer */}
           <Card>

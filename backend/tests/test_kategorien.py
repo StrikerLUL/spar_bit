@@ -152,3 +152,98 @@ def test_nachtrag_fuellt_leere_felder(tmp_path, monkeypatch):
         deals = {d.titel: d for d in db.scalars(select(Deal))}
         assert "speicher" in aus_text(deals["Samsung 2TB NVMe SSD"].kategorien)
         assert deals["Namenloses Angebot"].kategorien == ""
+
+
+# --- Nach einer Listenaenderung neu einstufen ------------------------------
+
+def test_neue_wortliste_erreicht_auch_den_bestand(tmp_path, monkeypatch):
+    """Der Fehler, der erst in drei Wochen auffaellt.
+
+    Ohne diesen Durchlauf waere jede Verbesserung an der Wortliste fuer
+    alles wirkungslos, was schon in der Datenbank liegt - der Filter bliebe
+    fuer den halben Bestand leer, und niemand wuesste, warum.
+    """
+    monkeypatch.setenv("SPARBIT_DATA_DIR", str(tmp_path))
+    from conftest import lade_app_neu
+    lade_app_neu()
+
+    from sqlalchemy import select
+
+    from app import kategorien as kat
+    from app.db import SessionLocal, get_setting, init_db, set_setting
+    from app.models import Deal
+
+    init_db()
+    with SessionLocal() as db:
+        db.add(Deal(url_hash="c" * 32, titel="Roborock S8 Pro Ultra",
+                    titel_norm="roborock s8 pro ultra", url="https://x.test/9",
+                    quelle="test", kategorien=""))      # nach alter Liste leer
+        # Stand einer aelteren Wortliste - genau die Lage nach einem Update.
+        set_setting(db, kat.SCHLUESSEL_STAND,
+                    {"version": kat.VERSION - 1, "cursor": 0})
+        db.commit()
+
+        assert kat.nachtragen(db, grenze=500) == 1
+
+        deal = db.scalar(select(Deal))
+        assert "haushalt" in kat.aus_text(deal.kategorien)
+        stand = get_setting(db, kat.SCHLUESSEL_STAND)
+        assert stand["version"] == kat.VERSION
+
+        # Und danach fasst er nichts mehr an.
+        assert kat.nachtragen(db, grenze=500) == 0
+
+
+def test_neu_einstufen_laeuft_in_haeppchen(tmp_path, monkeypatch):
+    """Ein Start mit 50.000 Deals darf nicht minutenlang haengen."""
+    monkeypatch.setenv("SPARBIT_DATA_DIR", str(tmp_path))
+    from conftest import lade_app_neu
+    lade_app_neu()
+
+    from app import kategorien as kat
+    from app.db import SessionLocal, get_setting, init_db, set_setting
+    from app.models import Deal
+
+    init_db()
+    with SessionLocal() as db:
+        for i in range(5):
+            db.add(Deal(url_hash=f"{i:032d}", titel="Samsung 2TB NVMe SSD",
+                        titel_norm="samsung 2tb nvme ssd",
+                        url=f"https://x.test/{i}", quelle="test", kategorien=""))
+        set_setting(db, kat.SCHLUESSEL_STAND,
+                    {"version": kat.VERSION - 1, "cursor": 0})
+        db.commit()
+
+        assert kat.nachtragen(db, grenze=2) == 2
+        stand = get_setting(db, kat.SCHLUESSEL_STAND)
+        assert stand["version"] != kat.VERSION and stand["cursor"] > 0
+
+        assert kat.nachtragen(db, grenze=2) == 2
+        assert kat.nachtragen(db, grenze=2) == 1        # Rest, damit fertig
+        assert get_setting(db, kat.SCHLUESSEL_STAND)["version"] == kat.VERSION
+
+
+def test_18er_marken_folgen_der_einstufung(tmp_path, monkeypatch):
+    """Wird ein Deal erst spaeter als 18+ erkannt, passen seine Marken nicht
+    mehr - die 18er-Kategorien gibt es nur fuer 18er-Funde."""
+    monkeypatch.setenv("SPARBIT_DATA_DIR", str(tmp_path))
+    from conftest import lade_app_neu
+    lade_app_neu()
+
+    from sqlalchemy import select
+
+    from app.db import SessionLocal, init_db
+    from app.kategorien import aus_text
+    from app.models import Deal
+    from app.pipeline import ingest
+    from app.sources.base import DealItem
+
+    init_db()
+    titel = "Satisfyer Pro 2 Vibrator"
+    with SessionLocal() as db:
+        # Erst ueber eine normale Quelle - die Stichwortpruefung stuft ein.
+        ingest(db, "custom_feed", [DealItem(titel=titel, url="https://x.test/1",
+                                            quelle="custom_feed", preis=24.99)])
+        deal = db.scalar(select(Deal))
+        assert deal.erwachsen is True
+        assert "toys18" in aus_text(deal.kategorien)

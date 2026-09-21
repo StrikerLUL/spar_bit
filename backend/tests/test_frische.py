@@ -229,3 +229,122 @@ async def test_ohne_alle_bleiben_normale_deals_liegen(welt):
         deal = _deal(db, url="https://x.test/teuer", preis=99.0, preis_eur=99.0)
         bilanz = await gratischeck.pruefe_deals(db, Http(), [deal])
         assert bilanz["geprueft"] == 0
+
+
+# --- Korrigiert ist nicht abgelaufen ---------------------------------------
+
+def test_korrigierter_preis_bleibt_sichtbar(welt):
+    """„stimmt nicht" heißt: der Preis wurde korrigiert, das Angebot gibt
+    es noch. Es unter „Abgelaufene ausblenden" zu verstecken, wäre etwas
+    anderes, als der Schalter verspricht."""
+    client, SessionLocal = welt
+    with SessionLocal() as db:
+        _deal(db, titel="Teurer als gemeldet", url="https://x.test/a",
+              check_status="widerlegt")
+        _deal(db, titel="Vorbei", url="https://x.test/b", check_status="abgelaufen")
+
+    items = client.get("/api/deals?nur_gueltig=true").json()["items"]
+    assert [d["titel"] for d in items] == ["Teurer als gemeldet"]
+
+
+def test_chipzahlen_folgen_dem_filter(welt):
+    """Sonst verspricht die Leiste mehr Treffer, als die Liste zeigt."""
+    client, SessionLocal = welt
+    with SessionLocal() as db:
+        _deal(db, titel="Samsung 2TB NVMe SSD", url="https://x.test/a")
+        _deal(db, titel="Crucial P3 2TB SSD", url="https://x.test/b",
+              check_status="abgelaufen")
+
+    alle = {k["key"]: k["anzahl"] for k in client.get("/api/kategorien").json()}
+    gefiltert = {k["key"]: k["anzahl"] for k in
+                 client.get("/api/kategorien?nur_gueltig=true").json()}
+    assert alle["speicher"] == 2
+    assert gefiltert["speicher"] == 1
+
+
+# --- Schonfrist beim Klick -------------------------------------------------
+
+def test_klick_pruefung_haelt_schonfrist_ein(welt, monkeypatch):
+    """Wer durch zwanzig Karten klickt, soll nicht zwanzig fremde Seiten
+    aufrufen."""
+    client, SessionLocal = welt
+    from app.models import utcnow
+
+    with SessionLocal() as db:
+        deal = _deal(db, url="https://x.test/frisch")
+        deal.check_status = "bestaetigt"
+        deal.check_text = "geprüft"
+        deal.check_am = utcnow()
+        db.commit()
+        deal_id = deal.id
+
+    from app import scheduler
+
+    class Verboten:
+        async def get(self, url, **kwargs):
+            raise AssertionError("haette nicht abgerufen werden duerfen")
+
+    monkeypatch.setattr(scheduler, "get_http", lambda: Verboten())
+
+    antwort = client.post(f"/api/deals/{deal_id}/pruefen").json()
+    assert antwort["uebersprungen"] is True
+    assert antwort["befund"]["status"] == "bestaetigt"
+
+
+# --- Der Job im Scheduler, einmal ganz durch -------------------------------
+
+@pytest.mark.asyncio
+async def test_aktualitaets_job_laeuft_durch(welt, monkeypatch):
+    """Bis hierher waren nur die Einzelteile geprüft - der Job selbst nicht."""
+    _, SessionLocal = welt
+    from app import scheduler
+
+    class Antwort:
+        def __init__(self, text):
+            self.text = text
+            self.content = text.encode()
+            self.status_code = 200
+            self.headers = {"content-type": "text/html"}
+
+    class Http:
+        def __init__(self):
+            self.abgerufen = []
+
+        async def get(self, url, **kwargs):
+            self.abgerufen.append(url)
+            return Antwort(ABGELAUFEN)
+
+    http = Http()
+    monkeypatch.setattr(scheduler, "get_http", lambda: http)
+
+    with SessionLocal() as db:
+        _deal(db, url="https://x.test/weg", preis=19.99, preis_eur=19.99)
+
+    await scheduler.aktualitaet_job()
+
+    assert http.abgerufen == ["https://x.test/weg"]
+    with SessionLocal() as db:
+        from sqlalchemy import select
+
+        from app.models import Deal
+        deal = db.scalar(select(Deal))
+        assert deal.check_status == "abgelaufen"
+
+
+@pytest.mark.asyncio
+async def test_aktualitaets_job_laesst_sich_abschalten(welt, monkeypatch):
+    _, SessionLocal = welt
+    from app import gratischeck, scheduler
+    from app.db import set_setting
+
+    class Verboten:
+        async def get(self, url, **kwargs):
+            raise AssertionError("Job war abgeschaltet")
+
+    monkeypatch.setattr(scheduler, "get_http", lambda: Verboten())
+    with SessionLocal() as db:
+        _deal(db, url="https://x.test/egal")
+        set_setting(db, gratischeck.SETTING_AKTUALITAET, False)
+        db.commit()
+
+    await scheduler.aktualitaet_job()      # darf nichts tun und nicht werfen

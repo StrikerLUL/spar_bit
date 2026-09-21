@@ -260,9 +260,9 @@ def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
     if nur_gueltig:
         from sqlalchemy import or_
 
-        from ..gratischeck import WIDERSPRUCH
+        from ..gratischeck import VORBEI
         stmt = stmt.where(or_(Deal.check_status.is_(None),
-                              Deal.check_status.notin_(WIDERSPRUCH)))
+                              Deal.check_status.notin_(VORBEI)))
 
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";")     # Semikolon: Excel-DE-freundlich

@@ -11,7 +11,7 @@ from ..db import get_db
 from .. import erwachsen as erwachsen_mod
 from .. import kategorien as kategorien_mod
 from ..gratischeck import LABEL as CHECK_LABEL
-from ..gratischeck import WIDERSPRUCH as CHECK_WIDERSPRUCH
+from ..gratischeck import VORBEI as CHECK_VORBEI
 from ..models import Deal, Match, Rule, SourceConfig, utcnow
 from ..learning import trainiere
 from ..search import fts_verfuegbar, match_bedingung
@@ -110,11 +110,13 @@ def list_deals(
     if nur_gratis:
         conditions.append(Deal.ist_gratis.is_(True))
     if nur_gueltig:
-        # Was die Zielseite als vorbei oder als falschen Preis gemeldet hat,
-        # bleibt draussen. Ungeprueftes bleibt drin - aus dem Fehlen einer
-        # Aussage soll niemand eine ableiten.
+        # Ausgeblendet wird nur, was die Zielseite als beendet fuehrt.
+        # Ein korrigierter Preis ("stimmt nicht") ist kein Grund: das
+        # Angebot gibt es noch, es ist nur teurer als gemeldet - und die
+        # Karte zeigt inzwischen den richtigen Preis. Ungeprueftes bleibt
+        # ohnehin drin: aus dem Fehlen einer Aussage leitet SparBit keine ab.
         conditions.append(or_(Deal.check_status.is_(None),
-                              Deal.check_status.notin_(CHECK_WIDERSPRUCH)))
+                              Deal.check_status.notin_(CHECK_VORBEI)))
     if min_rabatt is not None:
         conditions.append(Deal.rabatt_prozent >= min_rabatt)
     if max_preis is not None:
@@ -211,31 +213,49 @@ def _fuer_mich(db: Session, stmt, total: int, limit: int, offset: int) -> dict:
 
 @router.get("/kategorien")
 def list_kategorien(bereich: str = "normal", tage: int = 30,
+                    nur_gueltig: bool = False,
                     db: Session = Depends(get_db)) -> list[dict]:
     """Welche Kategorien gibt es - und wie viel steht gerade darin?
 
     Die Zahl ist der Punkt: eine Kategorie ohne Treffer ist ein Knopf, der
     ins Leere fuehrt. Darum liefert die Liste mit, wie viele Deals der
     letzten Wochen darunter fallen, und das UI kann Leeres ausgrauen.
+
+    Gezaehlt wird in **einer** Abfrage, nicht in einer pro Kategorie. Der
+    erste Entwurf stellte 28 einzelne COUNT-Anfragen mit LIKE; das sind 28
+    Tabellendurchlaeufe, weil ein LIKE mit fuehrendem Platzhalter keinen
+    Index benutzen kann - gemessen 240 ms bei 20.000 Deals, und zwar bei
+    jedem Aufruf des Feeds. Hier kommt stattdessen die Marken-Spalte
+    gruppiert zurueck und wird in Python aufgeteilt.
+
+    `nur_gueltig` muss dieselbe Bedingung setzen wie die Deal-Liste - sonst
+    verspricht die Leiste 214 Treffer und der gefilterte Feed zeigt 180.
     """
+    from collections import Counter
+
     erwachsen = bereich == "erwachsen"
     if erwachsen and not erwachsen_mod.ist_aktiv(db):
         raise HTTPException(403, "Der 18+-Bereich ist nicht freigeschaltet.")
 
     seit = utcnow() - timedelta(days=max(1, min(tage, 365)))
-    raus = []
+    bedingungen = [Deal.erwachsen.is_(erwachsen), Deal.first_seen >= seit]
+    if nur_gueltig:
+        bedingungen.append(or_(Deal.check_status.is_(None),
+                               Deal.check_status.notin_(CHECK_VORBEI)))
+
+    zaehler: Counter = Counter()
+    for text, anzahl in db.execute(
+            select(Deal.kategorien, func.count(Deal.id))
+            .where(*bedingungen).group_by(Deal.kategorien)).all():
+        for key in kategorien_mod.aus_text(text):
+            zaehler[key] += anzahl
+
     # Im 18+-Bereich stehen die eigenen Marken oben, danach die normalen -
     # ein Toy ist auch ein Geschenk, aber gesucht wird dort zuerst nach Toys.
-    kategorien = (kategorien_mod.alle(erwachsen=True) + kategorien_mod.alle()
-                  if erwachsen else kategorien_mod.alle())
-    for kategorie in kategorien:
-        anzahl = db.scalar(
-            select(func.count()).select_from(Deal)
-            .where(Deal.erwachsen.is_(erwachsen),
-                   Deal.first_seen >= seit,
-                   Deal.kategorien.like(f"%|{kategorie.key}|%"))) or 0
-        raus.append({**kategorien_mod.als_dict(kategorie), "anzahl": anzahl})
-    return raus
+    auswahl = (kategorien_mod.alle(erwachsen=True) + kategorien_mod.alle()
+               if erwachsen else kategorien_mod.alle())
+    return [{**kategorien_mod.als_dict(k), "anzahl": zaehler.get(k.key, 0)}
+            for k in auswahl]
 
 
 @router.post("/deals/{deal_id}/bookmark")
@@ -248,15 +268,35 @@ def toggle_bookmark(deal_id: int, db: Session = Depends(get_db)) -> dict:
     return {"id": deal.id, "bookmarked": deal.bookmarked}
 
 
+# So lange gilt ein Befund als frisch genug, um beim Klick auf einen Deal
+# nicht noch einmal loszuziehen. Wer durch zwanzig Karten klickt, soll nicht
+# zwanzig fremde Seiten aufrufen - der Knopf "Nachsehen" in der Detailsicht
+# kommt mit `force=true` trotzdem jederzeit durch.
+KLICK_FRISCH_MINUTEN = 30
+
+
 @router.post("/deals/{deal_id}/pruefen")
-async def deal_pruefen(deal_id: int, db: Session = Depends(get_db)) -> dict:
+async def deal_pruefen(deal_id: int, force: bool = False,
+                       db: Session = Depends(get_db)) -> dict:
     """Die Zielseite dieses Deals jetzt aufrufen und gegenpruefen."""
-    from ..gratischeck import pruefe, uebernehme
+    from ..gratischeck import LABEL, pruefe, uebernehme
     from ..scheduler import get_http
 
     deal = db.get(Deal, deal_id)
     if deal is None:
         raise HTTPException(404, "Deal nicht gefunden")
+
+    frisch = (deal.check_am is not None
+              and deal.check_am > utcnow() - timedelta(
+                  minutes=KLICK_FRISCH_MINUTEN))
+    if frisch and not force:
+        # Nichts holen, nur berichten, was zuletzt herauskam.
+        return {"befund": {"status": deal.check_status,
+                           "label": LABEL.get(deal.check_status or "") or None,
+                           "text": deal.check_text,
+                           "preis_eur": deal.check_preis_eur},
+                "korrigiert": False, "uebersprungen": True,
+                "deal": _deal_dict(deal)}
 
     befund = await pruefe(get_http(), deal.url,
                           erwartet_gratis=bool(deal.ist_gratis),
@@ -265,7 +305,7 @@ async def deal_pruefen(deal_id: int, db: Session = Depends(get_db)) -> dict:
     db.commit()
     db.refresh(deal)
     return {"befund": befund.als_dict(), "korrigiert": korrigiert,
-            "deal": _deal_dict(deal)}
+            "uebersprungen": False, "deal": _deal_dict(deal)}
 
 
 @router.get("/stats")
@@ -324,6 +364,17 @@ def stats(db: Session = Depends(get_db)) -> dict:
         .group_by(Deal.quelle).order_by(desc(func.count(Deal.id))).limit(8)
     ).all()
 
+    # Wovon kam diese Woche am meisten? Dieselbe Gruppierung wie in der
+    # Kategorie-Leiste - eine Abfrage, danach in Python aufgeteilt.
+    from collections import Counter
+    kat_zaehler: Counter = Counter()
+    for text, anzahl in db.execute(
+            select(Deal.kategorien, func.count(Deal.id))
+            .where(Deal.first_seen >= week, Deal.erwachsen.is_(False))
+            .group_by(Deal.kategorien)).all():
+        for key in kategorien_mod.aus_text(text):
+            kat_zaehler[key] += anzahl
+
     return {
         "treffer_heute": treffer_heute,
         "deals_heute": deals_heute,
@@ -340,6 +391,9 @@ def stats(db: Session = Depends(get_db)) -> dict:
         "aktive_regeln": db.scalar(
             select(func.count()).select_from(Rule).where(Rule.enabled.is_(True))) or 0,
         "top_quellen": [{"quelle": q, "anzahl": n} for q, n in top_quellen],
+        "top_kategorien": [
+            {"key": key, "label": kategorien_mod.label(key), "anzahl": anzahl}
+            for key, anzahl in kat_zaehler.most_common(8)],
     }
 
 

@@ -72,6 +72,9 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("deals", "preis_zeitraum", "VARCHAR(8)"),
     ("deals", "preis_monat_eur", "FLOAT"),
     ("deals", "preis_hinweis", "VARCHAR(48)"),
+    ("deal_offers", "preis_zeitraum", "VARCHAR(8)"),
+    ("deal_offers", "preis_monat_eur", "FLOAT"),
+    ("deal_offers", "preis_hinweis", "VARCHAR(48)"),
 ]
 
 

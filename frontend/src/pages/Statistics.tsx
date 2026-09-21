@@ -1,6 +1,8 @@
 import { BarChart3, Euro, Signal, Store } from "lucide-react";
 import * as React from "react";
-import { api, type HaendlerStat, type QuellenStat, type TimelinePoint } from "@/lib/api";
+import {
+  api, type HaendlerStat, type Kategorie, type QuellenStat, type TimelinePoint,
+} from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { formatAmount, formatNumber, sourceLabel } from "@/lib/utils";
 import { BarList, TimeSeries } from "@/components/charts";
@@ -23,6 +25,8 @@ export function Statistics() {
     () => api.statistik.quellen(tage), [tage]);
   const { data: haendler } = useAsync<HaendlerStat[]>(
     () => api.statistik.haendler(), []);
+  const { data: kategorien } = useAsync<Kategorie[]>(
+    () => api.kategorien.list("normal", tage), [tage]);
 
   const punkte = (timeline?.punkte ?? []) as unknown as Array<
     Record<string, string | number>>;
@@ -99,6 +103,27 @@ export function Statistics() {
                 sub: `${q.signalquote}% Signal · ${q.gratis} gratis`,
               }))}
               emptyText="Noch keine Deals im gewählten Zeitraum."
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Wovon kommt am meisten?</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Die inhaltlichen Kategorien im gewählten Zeitraum. Nützlich, um
+              zu sehen, wofür sich eine eigene Regel lohnt — und welche
+              Kategorie in deinen Quellen schlicht nicht vorkommt.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              items={(kategorien ?? [])
+                .filter((k) => k.anzahl > 0)
+                .sort((a, b) => b.anzahl - a.anzahl)
+                .slice(0, 10)
+                .map((k) => ({ label: k.label, value: k.anzahl, sub: k.hinweis }))}
+              emptyText="Noch nichts eingestuft."
             />
           </CardContent>
         </Card>

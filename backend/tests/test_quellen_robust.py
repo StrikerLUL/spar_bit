@@ -102,8 +102,13 @@ def test_namen_werden_geputzt(eingabe, erwartet):
 # --- Reddit: 404 ist endgueltig -------------------------------------------
 
 @pytest.mark.asyncio
-async def test_toter_subreddit_wird_gestrichen():
-    """Der Fall r/SexToyDeals: 404 heisst, den gibt es nicht."""
+async def test_toter_subreddit_wird_erst_beim_zweiten_mal_gestrichen():
+    """Der Fall r/SexToyDeals: 404 heisst, den gibt es nicht.
+
+    Aber erst beim zweiten Mal. Ein einzelner 404 kann auch eine Sperre
+    sein, die wieder aufgeht - und einen Namen, den jemand selbst
+    eingetragen hat, loescht man nicht wegen einer einzigen Absage.
+    """
     http = Http({"https://www.reddit.com/r/GameDeals/new/.rss": FEED},
                 status={"https://www.reddit.com/r/GibtsNicht/new/.rss": 404})
     from app.sources.reddit import Reddit
@@ -111,25 +116,50 @@ async def test_toter_subreddit_wird_gestrichen():
     ctx = ctx_fuer(quelle, http, subreddits=["GibtsNicht", "GameDeals"])
 
     items = await quelle.fetch(ctx)
-
     assert len(items) == 1                       # GameDeals liefert weiter
-    assert ctx.notizen["subreddits"] == ["GameDeals"]
-    assert ctx.notizen["entfernt"] == ["GibtsNicht"]
+    assert "subreddits" not in ctx.notizen, "erster 404 zaehlt nur"
+    assert ctx.notizen["_404"] == {"GibtsNicht": 1}
+
+    zweiter = ctx_fuer(quelle, http, **{**ctx.options, **ctx.notizen})
+    await quelle.fetch(zweiter)
+    assert zweiter.notizen["subreddits"] == ["GameDeals"]
+    assert zweiter.notizen["entfernt"] == ["GibtsNicht"]
+
+
+@pytest.mark.asyncio
+async def test_erfolg_setzt_den_zaehler_zurueck():
+    """Ein 404 vor drei Wochen soll den naechsten nicht aufaddieren."""
+    from app.sources.reddit import Reddit
+    quelle = Reddit()
+    url = "https://www.reddit.com/r/Wackelig/new/.rss"
+
+    kaputt = Http(status={url: 404})
+    ctx = ctx_fuer(quelle, kaputt, subreddits=["Wackelig"])
+    with pytest.raises(RuntimeError):
+        await quelle.fetch(ctx)
+    assert ctx.notizen["_404"] == {"Wackelig": 1}
+
+    heil = Http({url: FEED})
+    zweiter = ctx_fuer(quelle, heil, **{**ctx.options, **ctx.notizen})
+    await quelle.fetch(zweiter)
+    assert zweiter.notizen["_404"] == {}
 
 
 @pytest.mark.asyncio
 async def test_gestrichener_subreddit_kostet_nichts_mehr():
-    """Zweiter Lauf mit der korrigierten Liste: kein Anklopfen mehr."""
+    """Ist er einmal raus, wird dort nicht mehr angeklopft."""
     http = Http({"https://www.reddit.com/r/GameDeals/new/.rss": FEED},
                 status={"https://www.reddit.com/r/GibtsNicht/new/.rss": 404})
     from app.sources.reddit import Reddit
     quelle = Reddit()
     ctx = ctx_fuer(quelle, http, subreddits=["GibtsNicht", "GameDeals"])
     await quelle.fetch(ctx)
-
     zweiter = ctx_fuer(quelle, http, **{**ctx.options, **ctx.notizen})
-    http.aufrufe.clear()
     await quelle.fetch(zweiter)
+
+    dritter = ctx_fuer(quelle, http, **{**zweiter.options, **zweiter.notizen})
+    http.aufrufe.clear()
+    await quelle.fetch(dritter)
     assert http.aufrufe == ["https://www.reddit.com/r/GameDeals/new/.rss"]
 
 
@@ -366,8 +396,15 @@ async def test_gelerntes_ueberlebt_einen_fehlschlag(tmp_path, monkeypatch):
         cfg.options = {**(cfg.options or {}), "subreddits": ["GibtsNicht"]}
         db.commit()
 
+    # Zweimal, weil erst der zweite 404 streicht.
     ergebnis = await scheduler.run_source("reddit")
     assert "error" in ergebnis
+    with SessionLocal() as db:
+        # Schon nach dem ersten Fehlschlag muss der Zaehler gespeichert sein -
+        # sonst faengt jeder Lauf wieder bei null an.
+        assert db.get(SourceConfig, "reddit").options["_404"] == {"GibtsNicht": 1}
+
+    await scheduler.run_source("reddit")
 
     with SessionLocal() as db:
         cfg = db.get(SourceConfig, "reddit")

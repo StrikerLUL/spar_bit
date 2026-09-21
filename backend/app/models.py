@@ -352,6 +352,13 @@ class DealOffer(Base):
     rabatt_prozent: Mapped[float | None] = mapped_column(Float)
     haendler: Mapped[str | None] = mapped_column(String(128))
     ist_gratis: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Der Zeitraum gehoert zum Angebot, nicht zum Artikel: dieselbe Sache
+    # kann bei einer Quelle als Einmalkauf und bei einer anderen als Abo
+    # stehen. Ohne diese Spalten haette der Deal-Datensatz das "/Monat"
+    # der einen Quelle und den Preis der anderen.
+    preis_zeitraum: Mapped[str | None] = mapped_column(String(8))
+    preis_monat_eur: Mapped[float | None] = mapped_column(Float)
+    preis_hinweis: Mapped[str | None] = mapped_column(String(48))
     zuerst_gesehen: Mapped[datetime] = mapped_column(UTCDateTime,
                                                      default=utcnow)
     zuletzt_gesehen: Mapped[datetime] = mapped_column(UTCDateTime,

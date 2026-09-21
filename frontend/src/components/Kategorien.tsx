@@ -22,13 +22,17 @@ export function KategorieLeiste({
   bereich = "normal",
   ausgewaehlt,
   onChange,
+  nurGueltig = false,
 }: {
   bereich?: "normal" | "erwachsen";
   ausgewaehlt: string[];
   onChange: (keys: string[]) => void;
+  /** Muss zum Feed-Filter passen — sonst verspricht die Leiste 214 Treffer
+   *  und die gefilterte Liste zeigt 180. */
+  nurGueltig?: boolean;
 }) {
   const { data } = useAsync<Kategorie[]>(
-    () => api.kategorien.list(bereich), [bereich]);
+    () => api.kategorien.list(bereich, 30, nurGueltig), [bereich, nurGueltig]);
   const [alleZeigen, setAlleZeigen] = React.useState(false);
 
   if (!data || data.length === 0) return null;

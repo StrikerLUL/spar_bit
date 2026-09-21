@@ -55,6 +55,13 @@ def ingest(db: Session, source_id: str, items: list[DealItem]) -> list[Deal]:
         db.commit()
         for deal in fresh:
             broker.publish("deal", _deal_payload(deal))
+    elif db.dirty or db.new:
+        # Auch ein Lauf ohne neue Deals veraendert etwas: ein wiedergesehener
+        # Artikel kann einen anderen Preis, einen anderen Zeitraum oder eine
+        # neue 18+-Einstufung haben. Ohne diesen Commit bliebe das im
+        # Arbeitsspeicher stehen und waere beim naechsten Lesen wieder weg -
+        # genau so fiel eine Preiserhoehung frueher unter den Tisch.
+        db.commit()
     return fresh
 
 
@@ -71,7 +78,13 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
     if existing:
         existing.last_seen = utcnow()
         existing.seen_count += 1
+        war_erwachsen = bool(existing.erwachsen)
         erwachsen_mod.markiere(existing, source_id=source_id)
+        # Wird ein Deal erst jetzt als 18+ erkannt (weil er ueber eine
+        # 18+-Quelle noch einmal hereinkommt), passen seine Kategorien
+        # nicht mehr: die 18er-Marken gibt es nur fuer 18er-Funde.
+        if bool(existing.erwachsen) != war_erwachsen or not existing.kategorien:
+            existing.kategorien = kategorien.fuer_deal(existing).text or ""
         _merke_angebot(db, existing, item, source_id)
         _apply_price(db, existing, item, source_id)
         if source_id not in (existing.also_from or []) and source_id != existing.quelle:
@@ -86,7 +99,10 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
             # Gleicher Titel, andere URL -> derselbe Deal aus anderer Quelle.
             cand.last_seen = utcnow()
             cand.seen_count += 1
+            war_erwachsen = bool(cand.erwachsen)
             erwachsen_mod.markiere(cand, source_id=source_id)
+            if bool(cand.erwachsen) != war_erwachsen or not cand.kategorien:
+                cand.kategorien = kategorien.fuer_deal(cand).text or ""
             if source_id not in (cand.also_from or []) and source_id != cand.quelle:
                 cand.also_from = list(cand.also_from or []) + [source_id]
             _merke_angebot(db, cand, item, source_id)
@@ -189,6 +205,9 @@ def _merke_angebot(db: Session, deal: Deal, item: DealItem, source_id: str) -> N
             originalpreis=item.originalpreis, rabatt_prozent=item.rabatt_prozent,
             haendler=(item.haendler or None) and item.haendler[:128],
             ist_gratis=item.ist_gratis,
+            preis_zeitraum=item.preis_zeitraum,
+            preis_monat_eur=to_eur(item.preis_monat, item.waehrung),
+            preis_hinweis=item.preis_hinweis,
         ))
         return
 
@@ -200,64 +219,98 @@ def _merke_angebot(db: Session, deal: Deal, item: DealItem, source_id: str) -> N
     angebot.originalpreis = item.originalpreis
     angebot.rabatt_prozent = item.rabatt_prozent
     angebot.ist_gratis = item.ist_gratis
+    angebot.preis_zeitraum = item.preis_zeitraum
+    angebot.preis_monat_eur = to_eur(item.preis_monat, item.waehrung)
+    angebot.preis_hinweis = item.preis_hinweis
     if item.haendler:
         angebot.haendler = item.haendler[:128]
+
+
+# Wie lange ein Angebot einer Quelle als aktuell gilt. Danach zaehlt es
+# beim "besten Preis" nicht mehr mit: eine Quelle, die den Artikel seit
+# Wochen nicht mehr listet, darf den angezeigten Preis nicht laenger
+# bestimmen.
+ANGEBOT_FRISCH_TAGE = 3
+
+
+def _bestes_angebot(db: Session, deal: Deal):
+    """Das guenstigste *aktuelle* Angebot fuer diesen Deal.
+
+    Gerechnet wird in Euro, damit eine USD-Quelle nicht allein durch die
+    kleinere Zahl gewinnt.
+    """
+    # Ohne dieses flush() faende die Abfrage ein gerade erst angelegtes
+    # Angebot nicht: die Sitzung im Betrieb laeuft mit autoflush=False, und
+    # dann steht das neue Angebot noch im Arbeitsspeicher statt in der
+    # Datenbank. Der Preis einer neu hinzugekommenen, guenstigeren Quelle
+    # waere damit erst einen Lauf spaeter angekommen.
+    db.flush()
+    grenze = utcnow() - timedelta(days=ANGEBOT_FRISCH_TAGE)
+    angebote = [
+        a for a in db.scalars(select(DealOffer).where(DealOffer.deal_id == deal.id))
+        if a.preis is not None and (a.zuletzt_gesehen or grenze) >= grenze
+    ]
+    if not angebote:
+        return None
+    return min(angebote,
+               key=lambda a: a.preis_eur if a.preis_eur is not None else a.preis)
 
 
 def _apply_price(db: Session, deal: Deal, item: DealItem, source_id: str) -> None:
     """Preis eines schon bekannten Deals aktualisieren.
 
-    Es gewinnt der guenstigere Preis - derselbe Artikel taucht bei mehreren
-    Quellen zu verschiedenen Preisen auf, und interessant ist der beste.
-    Jede echte Aenderung landet in der Historie.
+    Angezeigt wird das guenstigste Angebot, das gerade gilt - derselbe
+    Artikel taucht bei mehreren Quellen zu verschiedenen Preisen auf, und
+    interessant ist der beste.
 
-    Wichtig ist, dass Preis, Waehrung, Streichpreis und Rabatt gemeinsam
-    umziehen. Frueher wurden nur Preis und Waehrung ersetzt - der alte
-    Streichpreis blieb stehen und wurde dann mit dem neuen Waehrungszeichen
-    angezeigt: ein EUR-Betrag mit Dollarzeichen davor, und ein Rabatt, der
-    zu keinem der beiden Preise mehr passte.
+    Die frueher hier stehende Regel war "nur guenstiger zaehlt", und die
+    hatte einen blinden Fleck: **Preiserhoehungen kamen nie an.** Meldete
+    dieselbe Quelle den Artikel spaeter teurer, blieb der alte, niedrige
+    Preis fuer immer auf der Karte stehen - man klickte und zahlte mehr.
+    Darum wird der Preis jetzt aus den Angeboten neu bestimmt, statt ihn
+    nur nach unten zu korrigieren; ein Angebot, das seit Tagen niemand mehr
+    gesehen hat, zaehlt dabei nicht mehr mit.
+
+    Wichtig ist, dass Preis, Waehrung, Streichpreis, Rabatt und Zeitraum
+    gemeinsam umziehen. Frueher wurden nur Preis und Waehrung ersetzt - der
+    alte Streichpreis blieb stehen und wurde dann mit dem neuen
+    Waehrungszeichen angezeigt: ein EUR-Betrag mit Dollarzeichen davor, und
+    ein Rabatt, der zu keinem der beiden Preise mehr passte.
     """
     if item.preis is None:
         return
-    neu_eur = to_eur(item.preis, item.waehrung)
-    alt_eur = deal.preis_eur if deal.preis_eur is not None else to_eur(deal.preis,
-                                                                      deal.waehrung)
-
-    guenstiger = (
-        deal.preis is None
-        or (neu_eur is not None and alt_eur is not None and neu_eur < alt_eur)
-        or (neu_eur is None and item.preis < deal.preis)
-    )
-    if not guenstiger:
+    bestes = _bestes_angebot(db, deal)
+    if bestes is None or bestes.preis is None:
         return
 
-    geaendert = deal.preis != item.preis
-    waehrung_wechselt = (deal.waehrung or "EUR") != (item.waehrung or "EUR")
+    geaendert = (deal.preis != bestes.preis
+                 or (deal.waehrung or "EUR") != (bestes.waehrung or "EUR"))
+    if not geaendert and deal.preis_eur is not None:
+        return
 
-    deal.preis = item.preis
-    deal.waehrung = item.waehrung
-    deal.preis_eur = neu_eur
+    deal.preis = bestes.preis
+    deal.waehrung = bestes.waehrung or "EUR"
+    deal.preis_eur = (bestes.preis_eur if bestes.preis_eur is not None
+                      else to_eur(bestes.preis, bestes.waehrung))
     # Der Zeitraum gehoert zum Preis: wer den Preis ersetzt und die Angabe
     # "pro Monat" stehenlaesst, macht aus einem einmaligen Kauf ein Abo.
-    deal.preis_zeitraum = item.preis_zeitraum
-    deal.preis_monat_eur = to_eur(item.preis_monat, item.waehrung)
-    deal.preis_hinweis = item.preis_hinweis
-    deal.ist_gratis = deal.ist_gratis or item.ist_gratis
+    deal.preis_zeitraum = bestes.preis_zeitraum
+    deal.preis_monat_eur = bestes.preis_monat_eur
+    deal.preis_hinweis = bestes.preis_hinweis
+    deal.ist_gratis = bool(bestes.ist_gratis) or (bestes.preis <= 0.009)
 
-    # Streichpreis: der der neuen Quelle, sonst der alte - aber nur, solange
-    # die Waehrung dieselbe bleibt und er ueber dem neuen Preis liegt.
-    if item.originalpreis is not None and item.originalpreis > item.preis:
-        deal.originalpreis = item.originalpreis
-    elif waehrung_wechselt or (deal.originalpreis is not None
-                               and deal.originalpreis <= item.preis):
-        deal.originalpreis = None
-
+    # Streichpreis: der des gewaehlten Angebots - alles andere gehoert zu
+    # einem Preis, der nicht mehr dasteht.
+    deal.originalpreis = (bestes.originalpreis
+                          if (bestes.originalpreis is not None
+                              and bestes.originalpreis > bestes.preis)
+                          else None)
     deal.rabatt_prozent = _rabatt(deal.preis, deal.originalpreis,
-                                  item.rabatt_prozent, deal.ist_gratis)
+                                  bestes.rabatt_prozent, deal.ist_gratis)
 
     if geaendert:
-        db.add(PriceHistory(deal_id=deal.id, preis=item.preis,
-                            waehrung=item.waehrung, quelle=source_id))
+        db.add(PriceHistory(deal_id=deal.id, preis=deal.preis,
+                            waehrung=deal.waehrung, quelle=bestes.quelle))
 
 
 def _rabatt(preis: float | None, original: float | None,

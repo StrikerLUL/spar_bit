@@ -133,6 +133,7 @@ class Reddit(Source):
         items: list[DealItem] = []
         errors: list[str] = []
         tot: list[str] = []
+        geschafft: list[str] = []
         gedrosselt: RateLimited | None = None
         erledigt = 0
 
@@ -146,6 +147,7 @@ class Reddit(Source):
                     ctx.http, url, cache_key=f"{self.id}:{sub}:{listing}",
                     mit_mustern=False)
                 items.extend(self.parse(fund.text, sub))
+                geschafft.append(sub)
                 erledigt += 1
             except RateLimited as exc:
                 # Der Client sperrt den Host jetzt ohnehin fuer die genannte
@@ -158,14 +160,14 @@ class Reddit(Source):
                 code = _status(exc)
                 if code == 404:
                     tot.append(sub)
-                    errors.append(f"r/{sub}: gibt es nicht (404) - entfernt")
+                    errors.append(f"r/{sub}: gibt es nicht (404)")
                 elif code == 403:
                     errors.append(f"r/{sub}: kein Zugang (403) - privat, "
                                   f"gesperrt oder nur mit Anmeldung")
                 else:
                     errors.append(f"r/{sub}: {type(exc).__name__}: {exc}"[:260])
 
-        self._lernen(ctx, subs, tot, start, erledigt)
+        self._lernen(ctx, subs, tot, geschafft, start, erledigt)
 
         if items:
             if errors and ctx.log:
@@ -183,18 +185,43 @@ class Reddit(Source):
         return items
 
     def _lernen(self, ctx: FetchContext, subs: list[str], tot: list[str],
-                start: int, erledigt: int) -> None:
-        """Tote Namen streichen und merken, wo der naechste Lauf anfaengt."""
-        if tot:
-            rest = [s for s in subs if s not in tot]
+                geschafft: list[str], start: int, erledigt: int) -> None:
+        """Tote Namen streichen und merken, wo der naechste Lauf anfaengt.
+
+        Gestrichen wird erst beim **zweiten** 404 in Folge. Der erste kann
+        auch eine Sperre sein, die wieder aufgeht, oder ein Ausrutscher bei
+        Reddit - und einen Namen, den jemand selbst eingetragen hat, sollte
+        man nicht wegen einer einzigen Absage loeschen. Ein erfolgreicher
+        Abruf setzt den Zaehler wieder zurueck.
+        """
+        zaehler = {str(k): int(v) for k, v in
+                   (ctx.options.get("_404") or {}).items()}
+        for sub in geschafft:
+            zaehler.pop(sub, None)
+        for sub in tot:
+            zaehler[sub] = zaehler.get(sub, 0) + 1
+
+        endgueltig = [s for s in tot if zaehler.get(s, 0) >= 2]
+        if endgueltig:
+            rest = [s for s in subs if s not in endgueltig]
             ctx.merke("subreddits", rest)
             bekannt = [str(x) for x in (ctx.options.get("entfernt") or [])]
-            ctx.merke("entfernt", bekannt + [s for s in tot if s not in bekannt])
+            ctx.merke("entfernt",
+                      bekannt + [s for s in endgueltig if s not in bekannt])
             if ctx.log:
-                ctx.log.warning("%s: %s gibt es nicht - aus der Liste entfernt",
-                                self.id, ", ".join("r/" + s for s in tot))
-            subs = [s for s in subs if s not in tot]
+                ctx.log.warning("%s: %s gibt es zweimal in Folge nicht - "
+                                "aus der Liste entfernt", self.id,
+                                ", ".join("r/" + s for s in endgueltig))
+            for sub in endgueltig:
+                zaehler.pop(sub, None)
+            subs = [s for s in subs if s not in endgueltig]
             start = 0
+        elif tot and ctx.log:
+            ctx.log.info("%s: %s hat 404 gemeldet - beim naechsten Mal wieder,"
+                         " dann fliegt er raus", self.id,
+                         ", ".join("r/" + s for s in tot))
+
+        ctx.merke("_404", zaehler)
         if subs:
             ctx.merke("_offset", (start + erledigt) % len(subs))
 

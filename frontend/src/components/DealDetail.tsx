@@ -60,7 +60,9 @@ export function DealDetailDialog({
   const nachsehen = async () => {
     setPrueft(true);
     try {
-      const { befund, korrigiert } = await api.deals.pruefen(dealId);
+      // force: wer hier drückt, will jetzt nachsehen lassen und
+      // nicht den Befund von vorhin.
+      const { befund, korrigiert } = await api.deals.pruefen(dealId, true);
       toast.push(
         befund.status === "widerlegt" || befund.status === "abgelaufen"
           ? "error" : "success",

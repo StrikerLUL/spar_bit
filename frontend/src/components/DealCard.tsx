@@ -36,9 +36,10 @@ export function DealCard({
   const kuerzel = zeitraumKuerzel(deal.preis_zeitraum);
   // Abgelaufen heisst: die Zielseite hat es selbst gesagt. Die Karte
   // bleibt stehen (sie erklärt, warum da nichts mehr kommt), tritt aber
-  // zurück — sonst klickt man wieder darauf.
-  const vorbei = deal.check_status === "abgelaufen"
-    || deal.check_status === "widerlegt";
+  // zurück — sonst klickt man wieder darauf. „stimmt nicht" gehört
+  // ausdrücklich nicht dazu: da wurde nur der Preis korrigiert, das
+  // Angebot gibt es noch.
+  const vorbei = deal.check_status === "abgelaufen";
 
   return (
     <Card hover className={cn("group flex flex-col overflow-hidden",
@@ -141,6 +142,9 @@ export function DealCard({
             {streichpreis && (
               <span className="tabular text-xs text-muted-foreground line-through decoration-muted-foreground/60">
                 {formatAmount(deal.originalpreis, deal.waehrung)}
+                {/* Der Streichpreis eines Abos ist auch einer pro Monat —
+                    ohne das Kürzel steht daneben scheinbar ein Einmalpreis. */}
+                {kuerzel}
               </span>
             )}
             {eur && (

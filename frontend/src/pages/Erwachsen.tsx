@@ -255,7 +255,7 @@ Monat um.">Max. €/Monat</Label>
 
         <div className="mt-3 border-t border-border pt-3">
           <KategorieLeiste bereich="erwachsen" ausgewaehlt={kategorien}
-                           onChange={setKategorien} />
+                           onChange={setKategorien} nurGueltig={nurGueltig} />
         </div>
       </Card>
 

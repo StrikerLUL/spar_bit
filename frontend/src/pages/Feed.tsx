@@ -21,7 +21,12 @@ export function Feed() {
   const [query, setQuery] = React.useState("");
   const [debounced, setDebounced] = React.useState("");
   const [quelle, setQuelle] = React.useState("");
-  const [kategorien, setKategorien] = React.useState<string[]>([]);
+  // ?kategorie=speicher in der Adresse vorbelegen — darauf verlinkt die
+  // Übersicht, und ein Link, der beim Ankommen nichts filtert, ist kaputt.
+  const [kategorien, setKategorien] = React.useState<string[]>(() => {
+    const roh = new URLSearchParams(window.location.search).get("kategorie");
+    return roh ? roh.split(",").filter(Boolean) : [];
+  });
   const [nurGratis, setNurGratis] = React.useState(false);
   const [nurGemerkt, setNurGemerkt] = React.useState(false);
   // Vorgabe an: abgelaufene Deals sind der häufigste Ärger im Feed, und
@@ -130,6 +135,7 @@ export function Feed() {
       await api.searches.create(name, {
         q: query, quelle, kategorie: kategorien.join(","),
         nur_gratis: nurGratis, bookmarked: nurGemerkt,
+        nur_gueltig: nurGueltig, sortierung,
         min_rabatt: minRabatt, max_preis: maxPreis,
       });
       toast.push("success", "Suche gespeichert", name);
@@ -144,6 +150,10 @@ export function Feed() {
     setQuery(String(f.q ?? ""));
     setQuelle(String(f.quelle ?? ""));
     setKategorien(String(f.kategorie ?? "").split(",").filter(Boolean));
+    // Ältere gespeicherte Suchen kennen das Feld nicht - dann bleibt die
+    // Vorgabe (ausblenden) stehen, statt still auf "alles zeigen" zu kippen.
+    if (f.nur_gueltig !== undefined) setNurGueltig(Boolean(f.nur_gueltig));
+    if (f.sortierung) setSortierung(String(f.sortierung));
     setNurGratis(Boolean(f.nur_gratis));
     setNurGemerkt(Boolean(f.bookmarked));
     setMinRabatt(String(f.min_rabatt ?? ""));
@@ -211,7 +221,8 @@ export function Feed() {
         </div>
 
         <div className="mt-3 border-t border-border pt-3">
-          <KategorieLeiste ausgewaehlt={kategorien} onChange={setKategorien} />
+          <KategorieLeiste ausgewaehlt={kategorien} onChange={setKategorien}
+                           nurGueltig={nurGueltig} />
         </div>
 
         {(searches?.length || activeFilters > 0 || query) && (
@@ -349,6 +360,13 @@ oder als anderen Preis gemeldet hat. Ungeprüftes bleibt sichtbar.">
           )}
           <p className="mb-4 text-sm text-muted-foreground">
             {data?.total ?? 0} Treffer
+            {sortierung === "guenstig" && (
+              <span className="ml-2 text-xs"
+                    title="Ein Abo für 4,99 €/Monat wird mit 4,99 € einsortiert,
+ein Angebot über 3 Monate für 9 € mit 3 € — sonst stünde das teurere oben.">
+                · Abos zählen mit ihrem Monatspreis
+              </span>
+            )}
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {items.map((deal) => (

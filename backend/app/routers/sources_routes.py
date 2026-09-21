@@ -181,9 +181,10 @@ async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
 
     # Wer hier drueckt, will jetzt eine Antwort - nicht die Sperrfrist von
     # vorhin, die verhindert, dass eine tote Adresse alle zehn Minuten
-    # durchprobiert wird.
+    # durchprobiert wird. Aufgehoben wird sie aber nur fuer diese Quelle:
+    # alle anderen Hosts haben von dem Knopfdruck nichts mitbekommen.
     from .. import feedfinder
-    feedfinder.pause_zuruecksetzen()
+    feedfinder.pause_zuruecksetzen(getattr(src, "base_url", None) or None)
 
     ctx = build_context(cfg)
     result = await src.health_check(ctx)

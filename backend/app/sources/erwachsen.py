@@ -383,6 +383,21 @@ class ErotikAbo(ErotikFeed):
     ]
 
     async def fetch(self, ctx: FetchContext) -> list[DealItem]:
+        # Eine eigene Fehlermeldung, bevor die geerbte greift: diese Quelle
+        # kann nichts vorbelegen (es gibt keine Adresse, die ich haette
+        # pruefen koennen), also muss wenigstens dastehen, wie man zu einer
+        # kommt. "Keine Adressen eingetragen" allein hilft niemandem.
+        if not [f for f in (ctx.opt("feeds") or []) if str(f).strip()]:
+            raise ValueError(
+                "Noch keine Adresse eingetragen - und vorbelegen kann ich "
+                "hier nichts, weil ich keine einzige davon pruefen konnte. "
+                "So kommst du zu einer: (1) die Angebots-, Deal- oder "
+                "Blog-Seite eines Anbieters im Browser oeffnen, (2) die "
+                "Adresse hier eintragen - die Seite genuegt, den Feed sucht "
+                "SparBit selbst, (3) 'Jetzt testen' druecken. Kommt nichts, "
+                "hat die Seite keinen Feed; dann ist der naechste Anbieter "
+                "dran. Mit 'Feed suchen' laesst sich das vorher pruefen."
+            )
         # Gefiltert wird hier und nicht in parse(): die Quellen sind
         # Einzelstuecke, die sich mehrere Laeufe teilen - Optionen an der
         # Instanz zwischenzulegen waere eine Wette darauf, dass nie zwei
