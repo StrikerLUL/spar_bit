@@ -480,6 +480,21 @@ export interface SavedSearch {
   filter: Record<string, unknown>;
 }
 
+export interface Sparbilanz {
+  tage: number;
+  ersparnis_eur: number;
+  beobachtete_deals: number;
+  mit_verlauf: number;
+  ohne_verlauf: number;
+  gratis_mitgenommen: number;
+  claims: number;
+  hinweis: string;
+  top: {
+    id: number; titel: string; url: string; haendler: string | null;
+    preis: number | null; gespart: number;
+  }[];
+}
+
 export interface PushGeraet {
   id: number;
   geraet: string;
@@ -696,6 +711,9 @@ export const api = {
       get<PreisfehlerListe>(`/preisfehler?tage=${tage}&nur_heiss=${nurHeiss}`),
     pruefen: (id: number) => post<Fehlerurteil>(`/preisfehler/${id}/pruefen`),
     auswertung: () => get<PreisfehlerAuswertung>("/preisfehler/auswertung"),
+    schwelleUebernehmen: () =>
+      post<{ ok: boolean; vorher: number; jetzt: number; grund: string }>(
+        "/preisfehler/schwelle-uebernehmen"),
     rueckmeldung: (id: number, urteil: "echt" | "fehlalarm") =>
       post<{ ok: boolean; urteil_mensch: string | null }>(
         `/preisfehler/${id}/rueckmeldung`, { urteil }),
@@ -785,6 +803,23 @@ export const api = {
     create: (name: string, filter: Record<string, unknown>) =>
       post<SavedSearch>("/searches", { name, filter }),
     remove: (id: number) => del<{ ok: boolean }>(`/searches/${id}`),
+  },
+  bilanz: (tage = 365) => get<Sparbilanz>(`/bilanz?tage=${tage}`),
+  kalenderUrl: (token: string, nurGratis = false) =>
+    `/api/kalender.ics?token=${encodeURIComponent(token)}${nurGratis ? "&nur_gratis=true" : ""}`,
+  regeln: {
+    export: () => get<{ format: string; version: number; regeln: unknown[] }>(
+      "/rules/export"),
+    import: (regeln: unknown[], aktiv = false, ersetzen = false) =>
+      post<{ ok: boolean; angelegt: string[]; uebersprungen: string[]; hinweis: string }>(
+        "/rules/import", { regeln, aktiv, ersetzen }),
+  },
+  opml: {
+    exportUrl: "/api/sources/opml/export",
+    import: (inhalt: string, ziel = "custom_feed") =>
+      post<{ ok: boolean; gefunden: number; neu: number; schon_da: number;
+             quelle: string; aktiv: boolean }>(
+        "/sources/opml/import", { inhalt, ziel }),
   },
   push: {
     schluessel: () => get<{ verfuegbar: boolean; schluessel: string | null;

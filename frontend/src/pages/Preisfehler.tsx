@@ -238,6 +238,20 @@ function Waechter({ aktiv, schwelle }: { aktiv?: boolean; schwelle?: number }) {
 function Eichung({ schwelleSetzen }: { schwelleSetzen: (wert: number) => void }) {
   const { data } = useAsync<PreisfehlerAuswertung>(
     () => api.preisfehler.auswertung(), []);
+  const toast = useToast();
+
+  /** Über den Server übernehmen statt lokal zu rechnen: so nennt die
+   *  Meldung den alten Wert — und damit den Weg zurück. */
+  const uebernehmen = async () => {
+    try {
+      const bericht = await api.preisfehler.schwelleUebernehmen();
+      schwelleSetzen(bericht.jetzt);
+      toast.push("success", `Schwelle ${bericht.vorher} → ${bericht.jetzt}`,
+        `${bericht.grund} Zurück geht über das Feld darüber.`);
+    } catch (err) {
+      toast.push("error", "Übernehmen fehlgeschlagen", (err as Error).message);
+    }
+  };
 
   if (!data) return null;
 
@@ -293,7 +307,7 @@ function Eichung({ schwelleSetzen }: { schwelleSetzen: (wert: number) => void })
             </p>
             {data.vorschlag !== null && (
               <Button size="sm" variant="outline" className="mt-2"
-                      onClick={() => schwelleSetzen(data.vorschlag!)}>
+                      onClick={() => void uebernehmen()}>
                 Schwelle auf {data.vorschlag} setzen
               </Button>
             )}

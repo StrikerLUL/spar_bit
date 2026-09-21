@@ -136,3 +136,75 @@ def explain(rule_id: int, deal_id: int, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(404, "Regel oder Deal nicht gefunden")
     res = evaluate(RuleSpec.from_model(rule), deal)
     return {"matched": res.matched, "gruende": res.reasons, "verfehlt": res.failed}
+
+
+# --- Regeln teilen ---------------------------------------------------------
+
+# Was eine Regel ausmacht. Bewusst ohne id, Trefferzahl und Kanal-IDs:
+# eine Regel aus einer fremden Installation soll sich einsetzen lassen,
+# ohne dort auf Kanaele zu zeigen, die es hier gar nicht gibt.
+TEILBAR = ("name", "priority", "keywords", "required_keywords", "blacklist",
+           "max_preis", "min_rabatt_prozent", "nur_gratis", "min_temperatur",
+           "min_urteil", "min_fehler_score", "sources", "kategorien",
+           "haendler", "erwachsen")
+
+
+@router.get("/export")
+def regeln_export(db: Session = Depends(get_db)) -> dict:
+    """Regeln als JSON zum Weitergeben.
+
+    Eine gute Regel ist Arbeit - und bisher blieb sie in der
+    Installation, in der sie gebaut wurde. Der Export enthaelt keine
+    Kanal-Zuordnung und keine Trefferzahlen: was hier rausgeht, soll
+    woanders funktionieren.
+    """
+    regeln = []
+    for r in db.scalars(select(Rule).order_by(Rule.name)):
+        regeln.append({f: getattr(r, f) for f in TEILBAR})
+    return {"format": "sparbit-regeln", "version": 1, "regeln": regeln}
+
+
+class RegelImport(BaseModel):
+    regeln: list[dict]
+    # Standard: dazulegen statt ersetzen. Wer seine Regeln loswerden
+    # will, sagt das ausdruecklich.
+    ersetzen: bool = False
+    aktiv: bool = False
+
+
+@router.post("/import")
+def regeln_import(body: RegelImport, db: Session = Depends(get_db)) -> dict:
+    """Regeln einsetzen.
+
+    Neue Regeln kommen **ausgeschaltet** an. Eine fremde Regel, die
+    sofort losmeldet, ist der schnellste Weg zu einem stummgeschalteten
+    Kanal - erst ansehen, dann einschalten.
+    """
+    if not isinstance(body.regeln, list) or not body.regeln:
+        raise HTTPException(400, "Keine Regeln in der Datei.")
+
+    if body.ersetzen:
+        db.query(Rule).delete()
+
+    vorhanden = {r.name for r in db.scalars(select(Rule))}
+    angelegt, uebersprungen = [], []
+
+    for roh in body.regeln:
+        if not isinstance(roh, dict) or not roh.get("name"):
+            continue
+        name = str(roh["name"])[:128]
+        if name in vorhanden:
+            uebersprungen.append(name)
+            continue
+        felder = {f: roh[f] for f in TEILBAR if f in roh}
+        felder["name"] = name
+        regel = Rule(**felder, enabled=bool(body.aktiv), channels=[])
+        db.add(regel)
+        vorhanden.add(name)
+        angelegt.append(name)
+
+    db.commit()
+    return {"ok": True, "angelegt": angelegt, "uebersprungen": uebersprungen,
+            "hinweis": ("Neue Regeln sind ausgeschaltet und ohne Kanal - "
+                        "erst ansehen, dann einschalten."
+                        if angelegt and not body.aktiv else "")}

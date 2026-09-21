@@ -25,6 +25,9 @@ class SMTPChannel(Channel):
         OptionSpec("from_addr", "Absender", "string", "", pflicht=True),
         OptionSpec("to_addr", "Empfänger", "string", "", pflicht=True),
         OptionSpec("tls", "STARTTLS", "bool", True),
+        OptionSpec("html", "Als HTML gestalten", "bool", True,
+                   help="Tabelle mit Bildern statt reinem Text. Der Textteil "
+                        "bleibt als Alternative erhalten."),
     ]
 
     async def send(self, config: dict[str, Any], note: Notification, http: Any) -> None:
@@ -51,10 +54,49 @@ class SMTPChannel(Channel):
             f"Quelle: {note.quelle}\nRegel: {note.regel}\n\n"
             f"{note.beschreibung or ''}\n\n{note.url}\n"
         )
+        # HTML als Alternative danebenlegen, nicht anstelle: wer kein HTML
+        # anzeigt (oder nicht will), bekommt weiter genau das von oben.
+        if config.get("html", True):
+            from ..mailhtml import einzeln
+            msg.add_alternative(einzeln(note), subtype="html")
 
+        self._zustellen(config, msg)
+
+
+    async def send_sammel(self, config: dict[str, Any], sammel, http: Any) -> None:
+        """Die Sammelmeldung ist der Fall, fuer den sich HTML lohnt.
+
+        Zwanzig Deals als Textliste sind eine Wand, in der der Bestpreis
+        genauso aussieht wie der Rest.
+        """
+        if sammel.anzahl == 1:
+            await self.send(config, sammel.meldungen[0], http)
+            return
+        await anyio.to_thread.run_sync(self._sammel_sync, config, sammel)
+
+    def _sammel_sync(self, config: dict[str, Any], sammel) -> None:
+        from ..mailhtml import sammel as sammel_html
+
+        host = (config.get("host") or "").strip()
+        to_addr = (config.get("to_addr") or "").strip()
+        from_addr = (config.get("from_addr") or config.get("username") or "").strip()
+        if not (host and to_addr and from_addr):
+            raise ValueError("Host, Absender und Empfaenger muessen gesetzt sein.")
+
+        msg = EmailMessage()
+        msg["Subject"] = sammel.titel[:200]
+        msg["From"] = from_addr
+        msg["To"] = to_addr
+        msg.set_content("\n".join(sammel.kurzzeilen(20)))
+        if config.get("html", True):
+            msg.add_alternative(sammel_html(sammel), subtype="html")
+        self._zustellen(config, msg)
+
+    def _zustellen(self, config: dict[str, Any], msg: EmailMessage) -> None:
+        host = (config.get("host") or "").strip()
         port = int(config.get("port") or 587)
-        password = config.get("password") or ""
         username = config.get("username") or ""
+        password = config.get("password") or ""
 
         if port == 465:
             with smtplib.SMTP_SSL(host, port, timeout=25,
@@ -63,7 +105,6 @@ class SMTPChannel(Channel):
                     srv.login(username, password)
                 srv.send_message(msg)
             return
-
         with smtplib.SMTP(host, port, timeout=25) as srv:
             if config.get("tls", True):
                 srv.starttls(context=ssl.create_default_context())

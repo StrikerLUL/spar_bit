@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -228,3 +228,95 @@ def reset_breaker(source_id: str, db: Session = Depends(get_db)) -> dict:
     cfg.last_error = None
     db.commit()
     return {"ok": True}
+
+
+# --- OPML: Feeds mitbringen und mitnehmen ---------------------------------
+
+OPML_QUELLEN = ("custom_feed", "erwachsen_feeds")
+
+
+@router.get("/opml/export")
+def opml_export(db: Session = Depends(get_db)) -> Response:
+    """Die eigenen Feeds als OPML.
+
+    Das Format, in dem jeder Feedreader seine Abos hat. Wer SparBit
+    umzieht oder seine Liste anderswo weiterpflegen will, soll sie nicht
+    abtippen muessen.
+    """
+    import xml.etree.ElementTree as ET
+    from datetime import UTC, datetime
+
+    opml = ET.Element("opml", version="2.0")
+    kopf = ET.SubElement(opml, "head")
+    ET.SubElement(kopf, "title").text = "SparBit — eigene Feeds"
+    ET.SubElement(kopf, "dateCreated").text = datetime.now(UTC).strftime(
+        "%a, %d %b %Y %H:%M:%S +0000")
+    koerper = ET.SubElement(opml, "body")
+
+    anzahl = 0
+    for cfg in db.scalars(select(SourceConfig).where(
+            SourceConfig.id.in_(OPML_QUELLEN))):
+        for schluessel in ("feeds", "eigene_feeds"):
+            for url in (cfg.options or {}).get(schluessel) or []:
+                if not str(url).strip():
+                    continue
+                ET.SubElement(koerper, "outline", type="rss",
+                              text=str(url), title=str(url),
+                              xmlUrl=str(url))
+                anzahl += 1
+
+    roh = ET.tostring(opml, encoding="utf-8", xml_declaration=True)
+    return Response(content=roh, media_type="text/x-opml; charset=utf-8",
+                    headers={"Content-Disposition":
+                             'attachment; filename="sparbit-feeds.opml"',
+                             "X-SparBit-Feeds": str(anzahl)})
+
+
+class OpmlImport(BaseModel):
+    inhalt: str = Field(min_length=10, max_length=2_000_000)
+    ziel: str = "custom_feed"
+
+
+@router.post("/opml/import")
+def opml_import(body: OpmlImport, db: Session = Depends(get_db)) -> dict:
+    """OPML aus einem Feedreader einlesen.
+
+    Was schon drinsteht, bleibt unberuehrt - zweimal importieren legt
+    keine Dubletten an.
+    """
+    import xml.etree.ElementTree as ET
+
+    if body.ziel not in OPML_QUELLEN:
+        raise HTTPException(400, "Unbekanntes Ziel für den Import.")
+
+    try:
+        baum = ET.fromstring(body.inhalt)
+    except ET.ParseError as exc:
+        raise HTTPException(400, f"Das ist kein gültiges OPML: {exc}") from None
+
+    gefunden: list[str] = []
+    for knoten in baum.iter("outline"):
+        url = (knoten.get("xmlUrl") or knoten.get("xmlurl") or "").strip()
+        if url.lower().startswith(("http://", "https://")) and url not in gefunden:
+            gefunden.append(url)
+
+    if not gefunden:
+        raise HTTPException(400, "In der Datei steht kein einziger Feed "
+                                 "(gesucht wird das Attribut xmlUrl).")
+
+    cfg = db.get(SourceConfig, body.ziel)
+    if cfg is None:
+        raise HTTPException(404, "Diese Quelle gibt es nicht.")
+
+    optionen = dict(cfg.options or {})
+    schluessel = "feeds" if "feeds" in optionen or body.ziel == "custom_feed" \
+        else "eigene_feeds"
+    bestand = [str(f) for f in optionen.get(schluessel) or []]
+    neu = [u for u in gefunden if u not in bestand]
+    optionen[schluessel] = bestand + neu
+    cfg.options = optionen
+    db.commit()
+
+    return {"ok": True, "gefunden": len(gefunden), "neu": len(neu),
+            "schon_da": len(gefunden) - len(neu),
+            "quelle": body.ziel, "aktiv": bool(cfg.enabled)}

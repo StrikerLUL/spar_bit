@@ -75,7 +75,7 @@ OHNE_FELDER = {"browser"}
 def test_alle_kanaele_registriert():
     typen = {c.type for c in all_channels()}
     assert typen == {"telegram", "discord", "slack", "matrix", "gotify",
-                     "pushover", "ntfy", "smtp", "webhook", "browser"}
+                     "pushover", "ntfy", "smtp", "webhook", "browser", "apprise"}
 
 
 @pytest.mark.parametrize("kanal", all_channels(), ids=lambda c: c.type)

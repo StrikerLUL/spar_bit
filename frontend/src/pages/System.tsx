@@ -1,5 +1,6 @@
 import {
-  AlertTriangle, ArrowUpCircle, BadgeCheck, CheckCircle2, Copy, Download,
+  AlertTriangle, ArrowUpCircle, BadgeCheck, CalendarClock, CheckCircle2, Copy,
+  Download,
   HardDrive, Image, Keyboard, Lock, Puzzle, RefreshCw, ScrollText, ShieldCheck,
   Trash2, Upload, XCircle,
 } from "lucide-react";
@@ -15,8 +16,8 @@ import {
   cn, formatBytes, formatDateTime, formatDuration, timeAgo,
 } from "@/lib/utils";
 import {
-  Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Select,
-  Skeleton, Switch,
+  Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Label,
+  Select, Skeleton, Switch,
 } from "@/components/ui";
 import { PageHeader } from "@/components/Layout";
 
@@ -158,6 +159,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
           <ZweiFaktorCard />
 
           <BackupCard />
+
+          <KalenderCard />
 
           <ErweiterungCard />
 
@@ -1044,6 +1047,88 @@ function BilderCard() {
           <Trash2 className="h-3.5 w-3.5" />
           Verwaiste Bilder entfernen
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/** Fristen als abonnierbarer Kalender.
+ *
+ *  Ein Gratis-Spiel mit Frist ist ein Termin. In einer Liste sieht man
+ *  ihn erst, wenn man die Liste aufmacht — im Kalender sagt er selbst
+ *  Bescheid. */
+function KalenderCard() {
+  const toast = useToast();
+  const { data: tokens, reload } = useAsync<ApiTokenInfo[]>(
+    () => api.tokens.list(), []);
+  const [adresse, setAdresse] = React.useState<string | null>(null);
+  const [nurGratis, setNurGratis] = React.useState(false);
+
+  const adresseHolen = async () => {
+    try {
+      // Ein eigenes Token für den Kalender: zurückziehbar, ohne die
+      // Browser-Erweiterung mit abzuschalten.
+      const ergebnis = await api.tokens.create("Kalender");
+      setAdresse(`${window.location.origin}${api.kalenderUrl(ergebnis.token, nurGratis)}`);
+      reload();
+    } catch (err) {
+      toast.push("error", "Anlegen fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <CalendarClock className="h-4 w-4 text-primary" />
+          Fristen im Kalender
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Angebote mit Ablaufdatum als Kalender-Abo — mit Erinnerung sechs
+          Stunden vorher. Funktioniert in Apple Kalender, Google Kalender,
+          Thunderbird und allem, was ICS abonnieren kann.
+        </p>
+
+        <div className="flex items-center justify-between gap-3">
+          <Label>Nur Gratis-Sachen</Label>
+          <Switch checked={nurGratis} onChange={setNurGratis}
+                  label="Nur Gratis-Sachen" />
+        </div>
+
+        {adresse ? (
+          <div className="space-y-2">
+            <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]">
+              {adresse}
+            </code>
+            <Button variant="ghost" size="sm" className="w-full"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(adresse);
+                      toast.push("success", "Kopiert",
+                        "Im Kalender unter „Abonnement hinzufügen“ einfügen.");
+                    }}>
+              <Copy className="h-3.5 w-3.5" />
+              Adresse kopieren
+            </Button>
+            <p className="text-xs text-warning">
+              Wer die Adresse hat, sieht deine Fristen — nicht weitergeben.
+              Zurückziehen geht unten bei den Schlüsseln.
+            </p>
+          </div>
+        ) : (
+          <Button variant="outline" className="w-full"
+                  onClick={() => void adresseHolen()}>
+            <CalendarClock className="h-4 w-4" />
+            Kalender-Adresse erzeugen
+          </Button>
+        )}
+        {!!tokens?.length && (
+          <p className="text-xs text-muted-foreground">
+            {tokens.length} Schlüssel vergeben.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

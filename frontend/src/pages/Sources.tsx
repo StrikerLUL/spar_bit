@@ -1,6 +1,7 @@
 import {
-  AlertTriangle, BellOff, CheckCircle2, Copy, ExternalLink, FlaskConical,
-  HelpCircle, Key, Play, RotateCcw, Rss, TestTube2, XCircle,
+  AlertTriangle, BellOff, CheckCircle2, Copy, Download, ExternalLink,
+  FlaskConical, HelpCircle, Key, Play, RotateCcw, Rss, TestTube2, Upload,
+  XCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
@@ -56,6 +57,7 @@ export function Sources() {
       <PageHeader
         title="Quellen"
         description="Jede Quelle einzeln schaltbar. Prüfe neue Quellen mit „Jetzt testen“, bevor du sie scharf stellst."
+        action={<OpmlKnopf onFertig={reload} />}
       />
 
       <FeedSucher />
@@ -634,6 +636,51 @@ function OptionField({
         spellCheck={false}
       />
       {help}
+    </div>
+  );
+}
+
+
+/** Feeds aus einem Feedreader mitbringen - und wieder mitnehmen.
+ *
+ *  OPML ist das Format, in dem jeder Feedreader seine Abos hält. Wer
+ *  eine gepflegte Liste hat, soll sie nicht abtippen müssen. */
+function OpmlKnopf({ onFertig }: { onFertig: () => void }) {
+  const toast = useToast();
+  const datei = React.useRef<HTMLInputElement>(null);
+
+  const einlesen = async (f: File) => {
+    try {
+      const bericht = await api.opml.import(await f.text());
+      toast.push("success", `${bericht.neu} Feeds übernommen`,
+        (bericht.schon_da ? `${bericht.schon_da} standen schon drin. ` : "")
+        + (bericht.aktiv
+          ? "Die Quelle „Eigene Feeds“ läuft bereits."
+          : "Die Quelle „Eigene Feeds“ ist noch aus — dort einschalten."));
+      onFertig();
+    } catch (err) {
+      toast.push("error", "Import fehlgeschlagen", (err as Error).message);
+    } finally {
+      if (datei.current) datei.current.value = "";
+    }
+  };
+
+  return (
+    <div className="flex gap-2">
+      <input ref={datei} type="file" accept=".opml,.xml,text/xml,application/xml"
+             className="hidden"
+             onChange={(e) => {
+               const f = e.target.files?.[0];
+               if (f) void einlesen(f);
+             }} />
+      <Button variant="outline" onClick={() => datei.current?.click()}>
+        <Upload className="h-4 w-4" />
+        OPML einlesen
+      </Button>
+      <Button variant="ghost" title="Eigene Feeds als OPML sichern"
+              onClick={() => window.open(api.opml.exportUrl, "_blank")}>
+        <Download className="h-4 w-4" />
+      </Button>
     </div>
   );
 }

@@ -1,6 +1,8 @@
-import { BarChart3, Euro, Signal, Store } from "lucide-react";
+import { BarChart3, Euro, PiggyBank, Signal, Store } from "lucide-react";
 import * as React from "react";
-import { api, type HaendlerStat, type QuellenStat, type TimelinePoint } from "@/lib/api";
+import {
+  api, type HaendlerStat, type QuellenStat, type Sparbilanz, type TimelinePoint,
+} from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { formatAmount, formatNumber, sourceLabel } from "@/lib/utils";
 import { BarList, TimeSeries } from "@/components/charts";
@@ -67,6 +69,8 @@ export function Statistics() {
         <Kachel icon={<Euro className="h-4 w-4" />} label="Ersparnis gesamt"
                 wert={formatAmount(summe.ersparnis)} />
       </div>
+
+      <BilanzCard />
 
       <Card className="mb-5">
         <CardHeader>
@@ -146,6 +150,63 @@ function Kachel({
       </div>
       <p className="tabular mt-2.5 text-2xl font-semibold sm:text-3xl">{wert}</p>
       {zusatz && <p className="mt-1 text-xs text-muted-foreground">{zusatz}</p>}
+    </Card>
+  );
+}
+
+
+/** Was das Ganze unter dem Strich gebracht hat.
+ *
+ *  Die Daten dafür liegen seit dem ersten Tag da — beantwortet hat die
+ *  Frage nur nie jemand. Die Zahl steht bewusst mit ihrer Einschränkung
+ *  daneben: sie ist geschätzt, nicht abgerechnet. */
+function BilanzCard() {
+  const { data } = useAsync<Sparbilanz>(() => api.bilanz(365), []);
+  if (!data) return <Skeleton className="mb-5 h-32" />;
+
+  return (
+    <Card className="mb-5">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <PiggyBank className="h-4 w-4 text-primary" />
+          Deine Bilanz — letzte 12 Monate
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <Kachel icon={<Euro className="h-4 w-4" />} label="Geschätzt gespart"
+                  wert={formatAmount(data.ersparnis_eur)} akzent />
+          <Kachel icon={<Signal className="h-4 w-4" />} label="Gemerkte Artikel"
+                  wert={formatNumber(data.beobachtete_deals)}
+                  zusatz={data.ohne_verlauf
+                    ? `${data.ohne_verlauf} ohne genug Verlauf`
+                    : undefined} />
+          <Kachel icon={<Store className="h-4 w-4" />} label="Gratis mitgenommen"
+                  wert={formatNumber(data.gratis_mitgenommen)} />
+          <Kachel icon={<BarChart3 className="h-4 w-4" />} label="Geclaimte Spiele"
+                  wert={formatNumber(data.claims)} />
+        </div>
+
+        {data.top.length > 0 && (
+          <ul className="space-y-1.5 border-t border-border pt-3">
+            {data.top.slice(0, 5).map((eintrag) => (
+              <li key={eintrag.id} className="flex items-baseline justify-between gap-3 text-sm">
+                <a href={eintrag.url} target="_blank" rel="noreferrer noopener"
+                   className="truncate text-primary hover:underline">
+                  {eintrag.titel}
+                </a>
+                <span className="shrink-0 tabular text-success">
+                  −{formatAmount(eintrag.gespart)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {data.hinweis}
+        </p>
+      </CardContent>
     </Card>
   );
 }

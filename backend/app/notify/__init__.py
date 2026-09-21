@@ -1,4 +1,4 @@
-from . import browser, chat, others, push, telegram  # noqa: F401
+from . import apprise_kanal, browser, chat, others, push, telegram  # noqa: F401
 from .base import (
                    Channel,
                    Notification,

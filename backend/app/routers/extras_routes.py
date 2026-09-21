@@ -284,6 +284,20 @@ def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
     )
 
 
+# --- Sparbilanz ------------------------------------------------------------
+
+@router.get("/bilanz")
+def bilanz(tage: int = Query(365, ge=7, le=3650),
+           db: Session = Depends(get_db)) -> dict:
+    """Was das Ganze gebracht hat.
+
+    Die Daten dafuer liegen seit dem ersten Tag da - beantwortet hat die
+    Frage nur nie jemand.
+    """
+    from ..bilanz import berechne
+    return berechne(db, tage)
+
+
 # --- Kalender --------------------------------------------------------------
 
 kalender_router = APIRouter(prefix="/api", tags=["kalender"])
@@ -523,6 +537,33 @@ def preisfehler_auswertung(db: Session = Depends(get_db)) -> dict:
     from ..pricefehler import bewerte_rueckmeldungen
 
     return bewerte_rueckmeldungen(db)
+
+
+@router.post("/preisfehler/schwelle-uebernehmen")
+def schwelle_uebernehmen(db: Session = Depends(get_db)) -> dict:
+    """Den Vorschlag der Eichung uebernehmen.
+
+    Die Auswertung schlug bisher vor und blieb dabei - verstellen musste
+    man selbst, an einer anderen Stelle, mit dem Wert im Kopf. Ein Knopf
+    daneben ist dasselbe in einem Schritt, und weil er den alten Wert
+    zurueckgibt, bleibt der Weg zurueck offen.
+    """
+    from ..pricefehler import bewerte_rueckmeldungen
+
+    auswertung = bewerte_rueckmeldungen(db)
+    vorschlag = auswertung.get("vorschlag")
+    if not vorschlag:
+        raise HTTPException(409, auswertung.get("vorschlag_grund")
+                            or "Es gibt gerade nichts zu übernehmen.")
+
+    vorher = int(get_setting(db, "preisfehler_schwelle", SCHWELLE_HEISS)
+                 or SCHWELLE_HEISS)
+    set_setting(db, "preisfehler_schwelle", int(vorschlag))
+    db.commit()
+    log.info("Preisfehler-Schwelle von %d auf %d gesetzt (Eichung)",
+             vorher, vorschlag)
+    return {"ok": True, "vorher": vorher, "jetzt": int(vorschlag),
+            "grund": auswertung.get("vorschlag_grund")}
 
 
 @router.post("/preisfehler/{deal_id}/pruefen")
