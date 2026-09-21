@@ -229,7 +229,8 @@ async def test_zustellung_haelt_18plus_zurueck(tmp_path, monkeypatch):
             gesendet.append(note.titel)
             return True
 
-    monkeypatch.setattr("app.pipeline.get_channel", lambda typ: Kanal())
+    # Dort ersetzen, wo der Versand nachschlaegt - nicht am Paket.
+    monkeypatch.setattr("app.pipeline.versand.get_channel", lambda typ: Kanal())
 
     with SessionLocal() as db:
         set_setting(db, AKTIV, True)

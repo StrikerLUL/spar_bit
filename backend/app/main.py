@@ -40,6 +40,11 @@ async def lifespan(app: FastAPI):
     with session_scope() as db:
         set_rates(get_setting(db, "currency_rates"))
 
+    # Erst die Erweiterungen laden, dann den Scheduler starten: er legt
+    # beim Start fuer jede registrierte Quelle eine Zeile an.
+    from . import plugins
+    plugins.lade()
+
     from . import scheduler as sched
     sched.start()
 

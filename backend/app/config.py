@@ -43,6 +43,11 @@ class Settings(BaseSettings):
 
     data_dir: Path = _default_data_dir()
     db_file: str = "sparbit.db"
+    # Leer heisst: SQLite im Datenverzeichnis - der Normalfall und das,
+    # was SparBit sein will. Wer die Daten lieber in einem vorhandenen
+    # Postgres haelt, traegt hier dessen Adresse ein
+    # (postgresql+psycopg://benutzer:passwort@host/datenbank).
+    db_url_override: str = ""
 
     # Sitzungs-Signatur. Wird beim ersten Start erzeugt, wenn nicht gesetzt.
     secret_key: str = ""
@@ -67,6 +72,11 @@ class Settings(BaseSettings):
 
     # Claimer-Log (vom claimer-Container gemountet bzw. lokal daneben)
     claimer_log_dir: Path = _default_claimer_dir()
+
+    # Zusaetzliche Quellen-Module, die nicht im Repository stehen. Jede
+    # .py-Datei in diesem Ordner wird beim Start geladen - so lassen sich
+    # eigene Quellen betreiben, ohne SparBit zu forken.
+    plugin_dir: Path | None = None
 
     # SparBit ruft von sich aus nichts im eigenen Netz ab (siehe
     # netzschutz.py). Wer bewusst einen Feed oder Shop aus dem Heimnetz
@@ -103,7 +113,11 @@ class Settings(BaseSettings):
 
     @property
     def db_url(self) -> str:
-        return f"sqlite:///{self.db_path}"
+        return self.db_url_override or f"sqlite:///{self.db_path}"
+
+    @property
+    def ist_sqlite(self) -> bool:
+        return self.db_url.startswith("sqlite")
 
 
 settings = Settings()

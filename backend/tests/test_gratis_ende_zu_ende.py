@@ -97,8 +97,8 @@ async def test_falsches_gratis_wird_vor_der_regel_korrigiert(welt):
             gesendet.append(note.titel)
             return True
 
-    import app.pipeline as pipeline
-    pipeline.get_channel = lambda typ: Kanal()
+    import app.pipeline.versand as versand
+    versand.get_channel = lambda typ: Kanal()
 
     with SessionLocal() as db:
         kanal = Channel(type="discord", name="Test", enabled=True, config={})
@@ -148,8 +148,8 @@ async def test_ohne_gegenprobe_geht_die_falsche_meldung_wieder_raus(welt):
         async def send(self, config, note, http_):
             return True
 
-    import app.pipeline as pipeline
-    pipeline.get_channel = lambda typ: Kanal()
+    import app.pipeline.versand as versand
+    versand.get_channel = lambda typ: Kanal()
 
     with SessionLocal() as db:
         set_setting(db, SETTING_AN, False)

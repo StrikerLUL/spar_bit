@@ -16,15 +16,21 @@ log = logging.getLogger(__name__)
 
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 
-engine = create_engine(
-    settings.db_url,
-    connect_args={"check_same_thread": False, "timeout": 30},
-    pool_pre_ping=True,
-)
+# SQLite braucht zwei Sonderlocken (ein Thread pro Verbindung abschalten,
+# Wartezeit statt "database is locked"), die jede andere Datenbank nicht
+# kennt und mit einem Fehler quittieren wuerde.
+_verbindung = ({"check_same_thread": False, "timeout": 30}
+               if settings.ist_sqlite else {})
+
+engine = create_engine(settings.db_url, connect_args=_verbindung,
+                       pool_pre_ping=True)
 
 
 @event.listens_for(engine, "connect")
 def _sqlite_pragmas(dbapi_conn, _record):
+    """WAL und Konsorten - nur bei SQLite, sonst versteht sie niemand."""
+    if not settings.ist_sqlite:
+        return
     cur = dbapi_conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")       # gleichzeitig lesen + schreiben
     cur.execute("PRAGMA synchronous=NORMAL")
