@@ -10,6 +10,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from .. import feedfinder
+from ..http import RateLimited
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
                    Verification, register)
@@ -46,6 +47,8 @@ class CustomFeed(Source):
         items: list[DealItem] = []
         errors: list[str] = []
         korrigiert: dict[int, str] = {}
+        gedrosselt: RateLimited | None = None
+        drosselungen = 0
         for nummer, url in enumerate(feeds):
             try:
                 fund = await feedfinder.hole(ctx.http, url,
@@ -54,6 +57,12 @@ class CustomFeed(Source):
                 if fund.entdeckt:
                     korrigiert[nummer] = fund.url
                 items.extend(self.parse(text, label or urlsplit(url).hostname or "")[:cap])
+            except RateLimited as exc:
+                # Wer drosselt, drosselt fuer alle Adressen dieses Hosts -
+                # aber andere Hosts in der Liste koennen weiterlaufen.
+                gedrosselt = exc
+                drosselungen += 1
+                errors.append(f"{url}: gedrosselt ({exc})")
             except Exception as exc:
                 errors.append(f"{url}: {type(exc).__name__}: {exc}"[:260])
 
@@ -64,7 +73,16 @@ class CustomFeed(Source):
             ctx.merke("feeds", neu)
 
         if not items and errors:
-            raise RuntimeError(" | ".join(errors[:3]))
+            if gedrosselt is not None and drosselungen == len(errors):
+                # Nur gedrosselt, nichts kaputt: als RateLimited
+                # weiterreichen, damit der Scheduler eine Pause macht statt
+                # die Quelle als defekt zu zaehlen. Steht daneben ein echter
+                # Fehler, gilt der - der waere sonst nicht zu sehen.
+                raise gedrosselt
+            text = " | ".join(errors[:3])
+            if len(errors) > 3:
+                text += f" | (+{len(errors) - 3} weitere)"
+            raise RuntimeError(text)
         return items
 
     def parse(self, text: str, label: str = "") -> list[DealItem]:

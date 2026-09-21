@@ -32,16 +32,48 @@ CLOUDFLARE = ('<html><head><title>Just a moment...</title></head>'
               '<body>Checking your browser before accessing</body></html>')
 
 
+class Antwort:
+    """Das Stueck httpx.Response, an dem SparBit einen Status abliest."""
+
+    def __init__(self, status):
+        self.status_code = status
+
+
+class HttpFehler(Exception):
+    """Nachgebaut nach httpx.HTTPStatusError - Status haengt an .response."""
+
+    def __init__(self, status):
+        super().__init__(f"Client error '{status}'")
+        self.response = Antwort(status)
+
+
 class Http:
-    def __init__(self, seiten):
+    def __init__(self, seiten, status=None):
         self.seiten = seiten
+        # url -> HTTP-Status, fuer Faelle, die kein HTML zurueckgeben
+        self.status = status or {}
         self.aufrufe = []
 
     async def get_text(self, url, **kwargs):
         self.aufrufe.append(url)
+        if url in self.status:
+            raise HttpFehler(self.status[url])
         if url not in self.seiten:
             raise RuntimeError("HTTP 404")
         return self.seiten[url]
+
+
+@pytest.fixture(autouse=True)
+def ohne_sperrfrist():
+    """Jeder Test faengt ohne Muster-Sperrfrist an.
+
+    Sonst haengt das Ergebnis davon ab, welcher Test vorher dieselbe
+    Adresse durchprobiert hat - und genau das hat hier schon einmal einen
+    gruenen Lauf vorgetaeuscht.
+    """
+    feedfinder.pause_zuruecksetzen()
+    yield
+    feedfinder.pause_zuruecksetzen()
 
 
 # --- Erkennen --------------------------------------------------------------
@@ -151,14 +183,19 @@ async def test_ausgezeichneter_feed_der_auch_nicht_geht():
 
 @pytest.mark.asyncio
 async def test_hoechstens_drei_kandidaten():
-    """Sonst klappert SparBit die Seite einer fremden Domain durch."""
+    """Sonst klappert SparBit die Seite einer fremden Domain durch.
+
+    Die Obergrenze gilt jetzt zweimal: hoechstens drei ausgezeichnete
+    Adressen, danach hoechstens vier geratene Muster. Mehr Anfragen darf
+    ein Fehlschlag eine fremde Seite nicht kosten.
+    """
     viele = "".join(
         f'<link rel="alternate" type="application/rss+xml" href="/f{i}.xml">'
         for i in range(8))
     http = Http({"https://x.test/a": f"<html><head>{viele}</head></html>"})
     with pytest.raises(KeinFeed):
         await hole(http, "https://x.test/a")
-    assert len(http.aufrufe) == 1 + feedfinder.MAX_VERSUCHE
+    assert len(http.aufrufe) == 1 + feedfinder.MAX_VERSUCHE + feedfinder.MAX_MUSTER
 
 
 @pytest.mark.asyncio
@@ -192,6 +229,139 @@ async def test_suche_wirft_nicht():
     """Sie wird auf alles losgelassen, was in der Zwischenablage war."""
     ergebnis = await suche(Http({}), "https://gibtsnicht.test/")
     assert ergebnis["ok"] is False and "Nicht erreichbar" in ergebnis["detail"]
+
+
+# --- Muster: wenn die Seite ihren Feed nicht auszeichnet -------------------
+
+def test_muster_kennt_die_pepper_gruppen():
+    """Der zweite Betriebsfall: mydealz zeichnet auf der Gruppen-Seite nichts
+    aus. Die Adresse ist deshalb nicht unbekannt - Pepper legt Gruppen-Feeds
+    unter /rss/gruppe/<slug> ab."""
+    kandidaten = feedfinder.muster("https://www.mydealz.de/gruppe/erotik-rss")
+    assert kandidaten[0] == "https://www.mydealz.de/rss/gruppe/erotik"
+    # Das falsch geratene Suffix darf sich nicht fortpflanzen.
+    assert not any("erotik-rss-rss" in k for k in kandidaten)
+
+
+def test_muster_probiert_die_andere_richtung_auch():
+    """Steht schon die Feed-Variante drin und geht nicht, sind die
+    Seiten-Varianten dran - nicht noch einmal dieselbe Adresse."""
+    kandidaten = feedfinder.muster("https://www.mydealz.de/rss/gruppe/erotik")
+    assert "https://www.mydealz.de/rss/gruppe/erotik" not in kandidaten
+    assert "https://www.mydealz.de/gruppe/erotik-rss" in kandidaten
+
+
+def test_muster_fuer_suchergebnisse():
+    kandidaten = feedfinder.muster(
+        "https://www.preisjaeger.at/search?q=satisfyer&rss=1")
+    assert kandidaten[0] == "https://www.preisjaeger.at/rss/search?q=satisfyer"
+    # /rss/rss/search gibt es nirgends.
+    assert not any("/rss/rss/" in k for k in kandidaten)
+
+
+def test_muster_fuer_suchergebnisse_andersherum():
+    kandidaten = feedfinder.muster(
+        "https://www.preisjaeger.at/rss/search?q=gleitgel")
+    assert not any("/rss/rss/" in k for k in kandidaten)
+    assert "https://www.preisjaeger.at/search?q=gleitgel&rss=1" in kandidaten
+
+
+@pytest.mark.parametrize("url,erwartet", [
+    ("https://shop.test/collections/sale",          # Shopify
+     "https://shop.test/collections/sale.atom"),
+    ("https://shop.test/angebote/",                 # WordPress/WooCommerce
+     "https://shop.test/angebote/feed"),
+])
+def test_muster_kennt_die_shop_systeme(url, erwartet):
+    assert erwartet in feedfinder.muster(url)
+
+
+def test_muster_bleibt_hoeflich():
+    assert len(feedfinder.muster("https://shop.test/x")) <= feedfinder.MAX_MUSTER
+
+
+def test_muster_nur_fuer_echte_adressen():
+    assert feedfinder.muster("ftp://x.test/feed") == []
+    assert feedfinder.muster("keine-adresse") == []
+
+
+@pytest.mark.asyncio
+async def test_seite_ohne_auszeichnung_wird_trotzdem_geheilt():
+    """Der Fall aus dem zweiten Betriebsbericht, Ende zu Ende.
+
+    Die Gruppen-Seite nennt keinen Feed - frueher endete es genau hier mit
+    "Auf der Seite ist auch kein Feed ausgezeichnet". Jetzt wird die
+    Adresse probiert, an der Pepper seine Gruppen-Feeds hat.
+    """
+    seite = ('<!DOCTYPE html><html><head><title>Erotik Angebote ⇒ Dessous, '
+             'Sextoys günstig kaufen - mydealz.de</title></head><body>'
+             '<main>Deals</main></body></html>')
+    http = Http({"https://www.mydealz.de/gruppe/erotik": seite,
+                 "https://www.mydealz.de/rss/gruppe/erotik": FEED})
+    fund = await hole(http, "https://www.mydealz.de/gruppe/erotik")
+    assert fund.entdeckt is True
+    assert fund.url == "https://www.mydealz.de/rss/gruppe/erotik"
+
+
+@pytest.mark.asyncio
+async def test_vierhundertvier_ist_nicht_das_ende():
+    """404 heisst 'hier nicht', nicht 'nirgends' - solange der Pfad geraten war."""
+    http = Http({"https://shop.test/collections/sale.atom": FEED},
+                status={"https://shop.test/collections/sale": 404})
+    fund = await hole(http, "https://shop.test/collections/sale")
+    assert fund.url == "https://shop.test/collections/sale.atom"
+    assert fund.entdeckt is True
+
+
+@pytest.mark.asyncio
+async def test_muster_abschaltbar():
+    """Reddit-Subreddits: dort ist die Adresse richtig und 404 endgueltig."""
+    http = Http({}, status={"https://www.reddit.com/r/GibtsNicht/new/.rss": 404})
+    with pytest.raises(Exception) as fehler:
+        await hole(http, "https://www.reddit.com/r/GibtsNicht/new/.rss",
+                   mit_mustern=False)
+    assert fehler.value.response.status_code == 404
+    assert len(http.aufrufe) == 1          # kein Herumprobieren
+
+
+@pytest.mark.asyncio
+async def test_aussichtslose_adresse_wird_nicht_dauernd_durchprobiert():
+    """Sonst kostet eine tote Adresse jede zehn Minuten fuenf Anfragen."""
+    http = Http({"https://x.test/tot": NACKTE_SEITE})
+    for _ in range(3):
+        with pytest.raises(KeinFeed):
+            await hole(http, "https://x.test/tot")
+    # Erster Lauf: Seite + Muster. Danach nur noch die Seite selbst.
+    assert len(http.aufrufe) == (1 + feedfinder.MAX_MUSTER) + 1 + 1
+
+
+@pytest.mark.asyncio
+async def test_sperrfrist_nennt_die_probierten_adressen():
+    http = Http({"https://x.test/tot": NACKTE_SEITE})
+    with pytest.raises(KeinFeed) as fehler:
+        await hole(http, "https://x.test/tot")
+    assert "/tot/feed" in str(fehler.value)
+
+
+@pytest.mark.asyncio
+async def test_suche_findet_auch_ohne_auszeichnung():
+    """'Feed suchen' soll dasselbe koennen wie der Abruf - sonst sagt der
+    Knopf 'nichts da', und der naechste Lauf findet doch etwas."""
+    seite = '<html><head><title>Shop</title></head><body></body></html>'
+    http = Http({"https://shop.test/": seite,
+                 "https://shop.test/feed": FEED})
+    ergebnis = await suche(http, "https://shop.test/")
+    assert ergebnis["ok"] is True
+    assert ergebnis["feeds"][0]["url"] == "https://shop.test/feed"
+    assert ergebnis["feeds"][0]["herkunft"] == "muster"
+
+
+@pytest.mark.asyncio
+async def test_suche_sagt_was_sie_probiert_hat():
+    http = Http({"https://shop.test/": NACKTE_SEITE})
+    ergebnis = await suche(http, "https://shop.test/")
+    assert ergebnis["ok"] is False
+    assert "/feed" in ergebnis["detail"]
 
 
 # --- Selbstheilung durch den Runner ---------------------------------------

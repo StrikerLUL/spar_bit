@@ -115,9 +115,14 @@ Messungen — der Test auf deinem Server hat das letzte Wort.
   Rechenzentrums-IP kann es 403 geben, wo es vom Heimanschluss klappt. Wenn
   eine Quelle konstant 403 liefert: der Circuit Breaker pausiert sie
   automatisch, und im UI steht der Grund.
-* **Reddit ist streng gegen Cloud-IPs.** 429 oder 403 sind möglich. Der
-  User-Agent ist bewusst sprechend gesetzt (das verlangt Reddit), und das
-  Intervall ist mit 10 Minuten defensiv.
+* **Reddit ist streng gegen Cloud-IPs.** 429 oder 403 sind möglich — im
+  Betrieb bestätigt (`HTTP 429, retry after 58s`). Der User-Agent ist bewusst
+  sprechend gesetzt (das verlangt Reddit), das Intervall ist mit 10 Minuten
+  defensiv, und zwischen zwei Reddit-Anfragen liegen mindestens 3 Sekunden
+  statt der üblichen 1. Kommt trotzdem 429: die Quelle pausiert so lange, wie
+  Reddit sagt, und arbeitet die Subreddits über mehrere Läufe ab, statt bei
+  denselben ersten hängenzubleiben. Mit *Subreddits pro Lauf* lässt sich das
+  zusätzlich begrenzen.
 * **Steam drosselt `appdetails` hart** (grob ~200 Requests/5 Min. pro IP).
   Darum sind die Detailabfragen pro Lauf gedeckelt (Vorgabe 15) und mit einer
   Pause versehen.
@@ -154,6 +159,46 @@ siehst im UI, was daraus geworden ist.
 Deshalb dürfen in den Feed-Feldern auch **Seiten-Adressen** stehen, nicht nur
 Feed-Adressen. Die Gruppen-Pfade von mydealz sind aus diesem Grund auf die
 Seiten umgestellt (`/gruppe/gratis` statt `/gruppe/gratis-rss`).
+
+### Und wenn die Seite ihren Feed nicht auszeichnet
+
+Genau das kam als nächste Meldung aus dem Betrieb — mydealz und Preisjäger
+nennen auf ihren Gruppen- und Suchseiten keinen Feed:
+
+```
+https://www.mydealz.de/gruppe/erotik-rss: KeinFeed: HTML-Seite, kein Feed
+https://www.preisjaeger.at/search?q=satisfyer&rss=1: KeinFeed: HTML-Seite
+```
+
+Unbekannt ist die Adresse deshalb nicht. Jede Software legt ihre Feeds an
+derselben Handvoll Stellen ab, und die probiert SparBit nun durch:
+
+| Software | Eingetragen | Probierte Muster |
+|---|---|---|
+| Pepper-Gruppe/-Tag | `/gruppe/erotik` | `/rss/gruppe/erotik`, `/gruppe/erotik-rss`, `/gruppe/erotik?rss=1`, `/rss/erotik` |
+| Pepper-Suche | `/search?q=X&rss=1` | `/rss/search?q=X`, `/search/rss?q=X`, `/search.rss?q=X` |
+| Shopify-Kollektion | `/collections/sale` | `/collections/sale.atom` |
+| Shopify-Startseite | `https://shop.de/` | `/collections/all.atom`, `/feed`, `/rss` |
+| WordPress/WooCommerce | `https://shop.de/angebote/` | `…/feed`, `…/rss`, `…/feed.xml`, `…/rss.xml` |
+
+Regeln dabei:
+
+* **Übernommen wird nur, was wirklich einen Feed liefert.** Ein Muster, das
+  HTML oder 404 zurückgibt, wird verworfen — nichts wird „optimistisch"
+  eingetragen.
+* **Höchstens vier Muster je Adresse**, und eine Adresse, bei der alle
+  durchfielen, wird eine Stunde lang nicht erneut durchprobiert. *Jetzt
+  testen* hebt die Sperrfrist sofort auf.
+* **Auch ein 404 löst die Suche aus** — bei einem geratenen Pfad heißt er
+  „hier nicht", nicht „nirgends". Nur bei Reddit ist das abgeschaltet: dort
+  stimmt die Adresse, und 404 heißt „diesen Subreddit gibt es nicht".
+* **Bei Suchbegriffen wandert die Vorlage zurück**, nicht nur die eine
+  Adresse: aus einem geheilten `…/rss/search?q=satisfyer` wird
+  `search_path = /rss/search?q={term}` für alle Begriffe.
+
+Die Vorbelegungen der Pepper-Quellen stehen deshalb jetzt auf der
+Feed-Variante (`/rss/gruppe/…`, `/rss/search?q={term}`) — liegt sie anders,
+findet die Muster-Suche die richtige und trägt sie ein.
 
 ### „Feed suchen"
 
@@ -222,12 +267,17 @@ Deal-Host; 44 von 44 Endpoints scheitern am Proxy. Alles unten sind darum
 
 | Quelle | Typ | Vorbelegung | Anmerkung |
 |---|---|---|---|
-| `mydealz_erotik` | RSS | Seite `/gruppe/erotik` | Feed wird auf der Seite gesucht |
-| `preisjaeger_erotik` | RSS | Seite `/gruppe/erotik` | Österreich, gleiche Plattform |
-| `dealabs_erotik` | RSS | Seite `/groupe/erotique` | Frankreich, Slug geraten |
-| `hotukdeals_erwachsen` | RSS | Seite `/tag/adult` | UK, GBP → EUR, Slug geraten |
-| `reddit_erwachsen` | RSS | `SexToyDeals`, `NSFWdeals`, `AdultDeals` | **Namen geraten** — was 404 gibt, löschen |
+| `mydealz_erotik` | RSS | `/rss/gruppe/erotik` | liegt der Feed anders, sucht SparBit ihn |
+| `preisjaeger_erotik` | RSS | `/rss/gruppe/erotik` | Österreich, gleiche Plattform |
+| `dealabs_erotik` | RSS | `/rss/groupe/erotique` | Frankreich, Slug geraten |
+| `hotukdeals_erwachsen` | RSS | `/rss/tag/adult` | UK, GBP → EUR, Slug geraten |
+| `reddit_erwachsen` | RSS | `NSFWdeals`, `AdultDeals` | **Namen geraten** — was 404 gibt, streicht SparBit selbst |
 | `erotik_feed` | RSS/Atom | leer | Shop-Seite *oder* Feed, siehe unten |
+
+`SexToyDeals` stand hier bis zum Betriebsbericht mit in der Vorbelegung und
+ist mit `404 Not Found` widerlegt — deshalb draußen. Die beiden verbliebenen
+Namen kamen in deinen Läufen nie bis zu einer Antwort, weil vorher das
+Rate-Limit griff; sie bleiben damit ungeprüft.
 
 Die Gruppen-Pfade sind weiterhin geraten — aber sie sind jetzt die der
 **Seite**, nicht des Feeds. Gibt es die Gruppe unter dem Namen, findet

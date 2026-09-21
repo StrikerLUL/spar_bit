@@ -6,7 +6,7 @@ Der Anlass war eine Fehlermeldung aus dem Betrieb:
     ValueError: Kein gueltiger Feed (SAXParseException).
     Anfang der Antwort: '<!DOCTYPE html><html class="no-js …
 
-Der Pfad war geraten, und er war falsch. Zwei Sachen sind daran zu lernen.
+Der Pfad war geraten, und er war falsch. Drei Sachen sind daran zu lernen.
 
 Die erste: die Antwort war eine **echte Seite**, kein 404 und keine
 Cloudflare-Wand. Der Server ist also erreichbar, und er weiss, wo sein
@@ -24,14 +24,37 @@ dass beim naechsten Lauf gleich die richtige Adresse dransteht.
 Die zweite: eine Fehlermeldung muss sagen, was zu tun ist. "SAXParseException"
 sagt das nicht. Steht auf der Seite kein Feed, nennt der Fehler jetzt den
 Seitentitel und - wenn vorhanden - welche Adressen dort ausgezeichnet sind.
+
+Die dritte kam aus dem zweiten Betriebsbericht und ist der Grund fuer den
+zweiten Teil dieser Datei: **eine Seite muss ihren Feed nicht auszeichnen.**
+Genau das macht mydealz auf seinen Gruppen-Seiten nicht, und dann half auch
+das Auslesen nichts:
+
+    KeinFeed: Der Server hat eine HTML-Seite geliefert, keinen Feed
+    (Seitentitel: 'Erotik Angebote ⇒ Dessous, Sextoys günstig kaufen').
+    Auf der Seite ist auch kein Feed ausgezeichnet.
+
+Nur: unbekannt ist die Adresse deshalb nicht. Jede Shop- und
+Community-Software legt ihre Feeds an derselben Handvoll Stellen ab -
+Pepper (mydealz, Preisjaeger, Dealabs, HotUKDeals) unter `/rss/gruppe/…`,
+WordPress unter `…/feed`, Shopify haengt `.atom` an jede Kollektion. Diese
+Muster stehen jetzt in `muster()`, werden der Reihe nach durchprobiert, und
+das Ergebnis wandert wieder in die Einstellungen. Geraten wird dabei nichts:
+uebernommen wird nur, was tatsaechlich einen Feed zurueckgibt.
+
+Damit das hoeflich bleibt, gilt eine harte Obergrenze (`MAX_MUSTER`) und
+eine Sperrfrist: eine Adresse, bei der alle Muster durchgefallen sind, wird
+eine Stunde lang nicht noch einmal durchprobiert. Der Feed-Pfad aendert sich
+nicht im Minutentakt, die Quelle laeuft aber alle zehn.
 """
 from __future__ import annotations
 
 import html as html_mod
 import logging
 import re
+import time
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import (parse_qsl, urlencode, urljoin, urlsplit, urlunsplit)
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +62,22 @@ log = logging.getLogger(__name__)
 # waere gegenueber der fremden Seite unhoeflich - und wer drei Feeds
 # anbietet, von denen keiner geht, hat ein anderes Problem.
 MAX_VERSUCHE = 3
+
+# Wie viele geratene Muster-Adressen hoechstens ausprobiert werden. Kleiner
+# als man denkt, und mit Absicht: das hier laeuft bei jedem Fehlschlag
+# wieder, und vier Zusatz-Anfragen alle zehn Minuten sind die Grenze dessen,
+# was man einer fremden Seite zumuten darf.
+MAX_MUSTER = 4
+
+# So lange wird eine Adresse nach einem kompletten Fehlschlag nicht noch
+# einmal mit Mustern durchprobiert. Der Erstabruf laeuft weiter - nur das
+# Durchprobieren pausiert.
+MUSTER_PAUSE = 3600.0
+
+# Manche Server liefern unter derselben Adresse HTML oder Feed, je nachdem
+# wonach gefragt wird. Fragen kostet nichts.
+FEED_ACCEPT = ("application/rss+xml, application/atom+xml, application/xml;q=0.9, "
+               "text/xml;q=0.9, text/html;q=0.5, */*;q=0.1")
 
 FEED_TYPEN = (
     "application/rss+xml", "application/atom+xml", "application/rdf+xml",
@@ -58,6 +97,21 @@ _SIEHT_AUS = re.compile(
     r"|format=(?:rss|atom)",
     re.IGNORECASE)
 
+# Gruppen-, Tag- und Kategorie-Seiten der Pepper-Plattform in allen vier
+# Sprachvarianten, die SparBit anfaesst. Ein fuehrendes /rss gehoert dazu:
+# auch wenn die eingetragene Adresse schon die Feed-Variante ist, sollen
+# bei einem Fehlschlag die anderen Varianten drankommen.
+_PEPPER_RE = re.compile(
+    r"^(?:/rss)?/(gruppe|groupe|group|grupo|tag|tags|kategorie)/([^/?#]+)/?$",
+    re.IGNORECASE)
+
+# "…-rss" ist das Suffix, das frueher geraten wurde. Es bleibt hier stehen,
+# weil es als *Kandidat* weiterhin sinnvoll ist - nur nicht mehr als Wahrheit.
+_RSS_SUFFIX = re.compile(r"-(?:rss|feed|atom)$", re.IGNORECASE)
+
+# Dateiendungen, hinter denen ein Verzeichnis-Muster keinen Sinn ergibt.
+_SEITENDATEI = re.compile(r"\.(?:html?|php|aspx?|jsp)$", re.IGNORECASE)
+
 # Typische Bot-Abwehr. Kein Feed-Problem, sondern ein Zugangsproblem -
 # und das muss anders klingen, sonst sucht man an der falschen Stelle.
 _WAND = (
@@ -66,6 +120,11 @@ _WAND = (
     "ddos protection by", "请稍候", "access denied",
 )
 
+# HTTP-Antworten, bei denen ein anderer Pfad helfen kann. 404 heisst "hier
+# nicht", nicht "nirgends"; 403/406 kommt oefter von einer Weiche, die HTML
+# erwartet hat. Bei 429 oder 5xx waere Weiterprobieren nur unhoeflich.
+_PFADFEHLER = (400, 401, 403, 404, 406, 410, 415)
+
 
 @dataclass
 class Feedlink:
@@ -73,6 +132,7 @@ class Feedlink:
     titel: str | None = None
     typ: str | None = None
     herkunft: str = "link"          # "link" (ausgezeichnet) | "anker" (geraten)
+                                    # | "muster" (bekanntes Software-Muster)
 
     def als_dict(self) -> dict:
         return {"url": self.url, "titel": self.titel, "typ": self.typ,
@@ -183,16 +243,184 @@ def finde_feeds(html: str, basis_url: str = "") -> list[Feedlink]:
     return gefunden[:12]
 
 
+# --- Raten, aber mit System ------------------------------------------------
+
+def muster(url: str) -> list[str]:
+    """Adressen, unter denen bei dieser Software erfahrungsgemaess ein Feed liegt.
+
+    Das ist die Antwort auf den Fall, den `finde_feeds` nicht loesen kann:
+    eine Seite, die ihren Feed nicht auszeichnet. Statt zu kapitulieren
+    werden die Stellen abgeklappert, an denen die jeweilige Software ihren
+    Feed ueblicherweise ablegt.
+
+    Wichtig fuer das Verstaendnis: das hier ist eine **Kandidatenliste**,
+    keine Behauptung. Uebernommen wird nur, was beim Abruf tatsaechlich
+    einen Feed liefert - und die Liste ist absichtlich kurz.
+    """
+    teile = urlsplit(url)
+    if not teile.scheme.lower().startswith("http") or not teile.netloc:
+        return []
+
+    pfad = teile.path or "/"
+    raus: list[str] = []
+
+    def dazu(neuer_pfad: str, query: str = "") -> None:
+        neu = urlunsplit((teile.scheme, teile.netloc, neuer_pfad or "/", query, ""))
+        if neu != url and neu not in raus:
+            raus.append(neu)
+
+    # 1. Pepper-Gruppen: /gruppe/erotik -> /rss/gruppe/erotik
+    #    Ein evtl. schon angehaengtes "-rss" kommt vorher weg, sonst wuerde
+    #    aus einem falschen Pfad ein doppelt falscher.
+    treffer = _PEPPER_RE.match(pfad)
+    if treffer:
+        art, slug = treffer.group(1).lower(), _RSS_SUFFIX.sub("", treffer.group(2))
+        # Die eingetragene Adresse faellt in `dazu` von selbst raus - uebrig
+        # bleiben genau die Varianten, die noch nicht probiert wurden.
+        dazu(f"/rss/{art}/{slug}")
+        dazu(f"/{art}/{slug}-rss")
+        dazu(f"/{art}/{slug}", "rss=1")
+        dazu(f"/rss/{slug}")
+        return raus[:MAX_MUSTER]
+
+    # 2. Suchergebnisse als Feed. Welcher der drei Wege gilt, ist von
+    #    Pepper-Seite zu Pepper-Seite verschieden - darum alle drei.
+    query_paare = parse_qsl(teile.query, keep_blank_values=True)
+    stamm = pfad.rstrip("/")
+    if query_paare and stamm.lower().endswith(("/search", "/suche", "/recherche")):
+        rest = [(k, v) for k, v in query_paare
+                if k.lower() not in ("rss", "feed", "format")]
+        sauber = urlencode(rest)
+        # Ein schon vorhandenes /rss-Praefix abziehen, sonst entstuende
+        # /rss/rss/search - eine Adresse, die es nirgends gibt.
+        nackt = stamm[4:] if stamm.lower().startswith("/rss/") else stamm
+        dazu("/rss" + nackt, sauber)
+        dazu(nackt, sauber + ("&" if sauber else "") + "rss=1")
+        dazu(nackt + "/rss", sauber)
+        dazu(nackt + ".rss", sauber)
+        return raus[:MAX_MUSTER]
+
+    # 3. Alles andere: die ueblichen Stellen einer Shop- oder Blog-Software.
+    if _SEITENDATEI.search(stamm):
+        stamm = stamm.rsplit("/", 1)[0]
+
+    # Shopify haengt an jede Kollektion ein .atom - das ist der zuverlaessigste
+    # Feed im ganzen Shop-Umfeld und kommt darum zuerst.
+    if re.match(r"^/collections/[^/]+$", stamm, re.IGNORECASE):
+        dazu(stamm + ".atom")
+    elif not stamm:
+        dazu("/collections/all.atom")
+
+    for endung in ("/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/index.xml"):
+        dazu(stamm + endung)
+    return raus[:MAX_MUSTER]
+
+
+# Adressen, bei denen zuletzt kein Muster gegriffen hat: monotone Uhr ->
+# Zeitpunkt. Verhindert, dass eine tote Adresse alle zehn Minuten vier
+# zusaetzliche Anfragen erzeugt.
+_muster_pause: dict[str, float] = {}
+
+
+def _pausiert(url: str) -> bool:
+    bis = _muster_pause.get(url)
+    if bis is None:
+        return False
+    if bis > time.monotonic():
+        return True
+    _muster_pause.pop(url, None)
+    return False
+
+
+def _pausieren(url: str) -> None:
+    _muster_pause[url] = time.monotonic() + MUSTER_PAUSE
+    # Die Tabelle darf nicht unbegrenzt wachsen; abgelaufene raus.
+    if len(_muster_pause) > 512:
+        jetzt = time.monotonic()
+        for schluessel in [k for k, v in _muster_pause.items() if v <= jetzt]:
+            _muster_pause.pop(schluessel, None)
+
+
+def pause_zuruecksetzen() -> None:
+    """Sperrfristen vergessen - fuer 'Jetzt testen' und fuer Tests.
+
+    Wer im UI auf den Knopf drueckt, will jetzt eine Antwort und nicht die
+    von vor einer Stunde.
+    """
+    _muster_pause.clear()
+
+
+def _status(exc: Exception) -> int | None:
+    """HTTP-Status einer Fehler-Ausnahme, falls sie einen traegt."""
+    antwort = getattr(exc, "response", None)
+    code = getattr(antwort, "status_code", None)
+    return int(code) if isinstance(code, int) else None
+
+
+def _ist_pfadfehler(exc: Exception) -> bool:
+    code = _status(exc)
+    return code in _PFADFEHLER if code is not None else False
+
+
 # --- Holen -----------------------------------------------------------------
 
-async def hole(http, url: str, *, cache_key: str | None = None) -> Fund:
+async def _probiere(http, kandidaten: list[Feedlink], original: str,
+                    gefunden: list[Feedlink] | None = None) -> Fund | None:
+    """Kandidaten der Reihe nach abrufen, bis einer einen Feed liefert."""
+    for kandidat in kandidaten:
+        if kandidat.url == original:
+            continue
+        try:
+            versuch = await http.get_text(kandidat.url,
+                                          headers={"Accept": FEED_ACCEPT})
+        except Exception as exc:                       # noqa: BLE001
+            log.debug("Feed-Kandidat %s nicht erreichbar: %s", kandidat.url, exc)
+            continue
+        if ist_feed(versuch):
+            log.info("Feed gefunden (%s): %s -> %s",
+                     kandidat.herkunft, original, kandidat.url)
+            return Fund(versuch, kandidat.url, entdeckt=True,
+                        kandidaten=gefunden or kandidaten)
+    return None
+
+
+async def _muster_probieren(http, url: str,
+                            gefunden: list[Feedlink] | None = None) -> Fund | None:
+    """Die bekannten Software-Muster durchgehen - hoechstens `MAX_MUSTER`."""
+    kandidaten = [Feedlink(m, None, None, "muster") for m in muster(url)]
+    if not kandidaten:
+        return None
+    return await _probiere(http, kandidaten, url, gefunden)
+
+
+async def hole(http, url: str, *, cache_key: str | None = None,
+               mit_mustern: bool = True) -> Fund:
     """Feed holen - und wenn eine Webseite kommt, den Feed darauf suchen.
+
+    Drei Stufen, in dieser Reihenfolge:
+
+    1. Die Adresse selbst. Liefert sie einen Feed, ist alles gut.
+    2. Was die gelieferte Seite an Feeds auszeichnet (`<link rel=alternate>`).
+    3. Die bekannten Muster der jeweiligen Software (`muster()`).
 
     Wirft `KeinFeed` mit einer Begruendung, die sagt, was als Naechstes
     zu tun ist. Netzfehler reicht sie unveraendert durch: ein Timeout ist
-    kein Feed-Problem.
+    kein Feed-Problem. `mit_mustern=False` schaltet Stufe 3 ab - sinnvoll
+    ueberall dort, wo die Adresse nachweislich stimmt und ein 404 wirklich
+    "gibt es nicht" heisst (Reddit-Subreddits zum Beispiel).
     """
-    text = await http.get_text(url, cache_key=cache_key)
+    try:
+        text = await http.get_text(url, cache_key=cache_key,
+                                   headers={"Accept": FEED_ACCEPT})
+    except Exception as exc:                           # noqa: BLE001
+        # 404 auf einem geratenen Pfad heisst "hier nicht", nicht "nirgends".
+        if mit_mustern and _ist_pfadfehler(exc) and not _pausiert(url):
+            fund = await _muster_probieren(http, url)
+            if fund is not None:
+                return fund
+            _pausieren(url)
+        raise
+
     if ist_feed(text):
         return Fund(text, url)
 
@@ -207,33 +435,41 @@ async def hole(http, url: str, *, cache_key: str | None = None) -> Fund:
             "Die Seite laesst diesen Server nicht durch - ein anderer Pfad "
             "hilft dagegen nicht.")
 
-    for kandidat in kandidaten[:MAX_VERSUCHE]:
-        if kandidat.url == url:
-            continue
-        try:
-            versuch = await http.get_text(kandidat.url)
-        except Exception as exc:                       # noqa: BLE001
-            log.debug("Feed-Kandidat %s nicht erreichbar: %s", kandidat.url, exc)
-            continue
-        if ist_feed(versuch):
-            log.info("Feed gefunden: %s -> %s", url, kandidat.url)
-            return Fund(versuch, kandidat.url, entdeckt=True, kandidaten=kandidaten)
+    fund = await _probiere(http, kandidaten[:MAX_VERSUCHE], url, kandidaten)
+    if fund is not None:
+        return fund
 
-    raise KeinFeed(_begruendung(url, titel, kandidaten), kandidaten=kandidaten)
+    # Die Seite zeichnet nichts aus (oder das Ausgezeichnete ging nicht) -
+    # jetzt die Stellen abklappern, an denen diese Software ihren Feed hat.
+    probiert: list[str] = []
+    if mit_mustern and not wand and not _pausiert(url):
+        probiert = muster(url)
+        fund = await _muster_probieren(http, url, kandidaten)
+        if fund is not None:
+            return fund
+        _pausieren(url)
+
+    raise KeinFeed(_begruendung(url, titel, kandidaten, probiert),
+                   kandidaten=kandidaten)
 
 
-def _begruendung(url: str, titel: str | None, kandidaten: list[Feedlink]) -> str:
+def _begruendung(url: str, titel: str | None, kandidaten: list[Feedlink],
+                 probiert: list[str] | None = None) -> str:
     wo = urlsplit(url).netloc or url
     kopf = (f"Der Server hat eine HTML-Seite geliefert, keinen Feed"
             + (f" (Seitentitel: {titel!r})" if titel else "") + ".")
-    if not kandidaten:
-        return (f"{kopf} Auf der Seite ist auch kein Feed ausgezeichnet - "
-                f"unter dieser Adresse gibt es vermutlich keinen. Ruf die "
-                f"Seite im Browser auf und such den Feed-Pfad; oder nimm "
-                f"'Feed suchen' auf einer Uebersichtsseite von {wo}.")
-    liste = ", ".join(k.url for k in kandidaten[:MAX_VERSUCHE])
-    return (f"{kopf} Die Seite nennt zwar Feeds ({liste}), aber keiner davon "
-            f"lieferte einen. Adresse hier korrigieren.")
+    if kandidaten:
+        liste = ", ".join(k.url for k in kandidaten[:MAX_VERSUCHE])
+        return (f"{kopf} Die Seite nennt zwar Feeds ({liste}), aber keiner davon "
+                f"lieferte einen. Adresse hier korrigieren.")
+    schwanz = (f"Ruf die Seite im Browser auf und such den Feed-Pfad; oder nimm "
+               f"'Feed suchen' auf einer Uebersichtsseite von {wo}.")
+    if probiert:
+        return (f"{kopf} Auf der Seite ist auch kein Feed ausgezeichnet, und die "
+                f"ueblichen Adressen ({', '.join(probiert)}) lieferten ebenfalls "
+                f"keinen. {schwanz}")
+    return (f"{kopf} Auf der Seite ist auch kein Feed ausgezeichnet - "
+            f"unter dieser Adresse gibt es vermutlich keinen. {schwanz}")
 
 
 async def suche(http, url: str) -> dict:
@@ -241,11 +477,22 @@ async def suche(http, url: str) -> dict:
 
     Ausdruecklich gutmuetig - sie wird auf alles losgelassen, was jemand
     in die Zwischenablage kopiert hat, und soll darauf eine brauchbare
-    Antwort geben statt eines Stacktrace.
+    Antwort geben statt eines Stacktrace. Zeichnet die Seite nichts aus,
+    werden - wie beim Abruf - die bekannten Muster durchprobiert; was davon
+    wirklich einen Feed liefert, steht danach zum Uebernehmen bereit.
     """
     try:
-        text = await http.get_text(url)
+        text = await http.get_text(url, headers={"Accept": FEED_ACCEPT})
     except Exception as exc:                           # noqa: BLE001
+        if _ist_pfadfehler(exc):
+            fund = await _muster_probieren(http, url)
+            if fund is not None:
+                return {"ok": True, "url": url, "ist_selbst_feed": False,
+                        "detail": f"Unter der Adresse selbst kam "
+                                  f"{_status(exc) or 'ein Fehler'} - der Feed "
+                                  f"liegt unter {fund.url}.",
+                        "feeds": [Feedlink(fund.url, seitentitel(fund.text),
+                                           None, "muster").als_dict()]}
         return {"ok": False, "url": url,
                 "detail": f"Nicht erreichbar: {type(exc).__name__}: {exc}"[:300],
                 "feeds": []}
@@ -264,12 +511,27 @@ async def suche(http, url: str) -> dict:
 
     feeds = finde_feeds(text, url)
     titel = seitentitel(text)
-    if not feeds:
-        return {"ok": False, "url": url, "ist_selbst_feed": False,
+    if feeds:
+        return {"ok": True, "url": url, "ist_selbst_feed": False,
+                "detail": f"{len(feeds)} Feed-Adresse(n) gefunden"
+                          + (f" auf {titel!r}" if titel else "") + ".",
+                "feeds": [f.als_dict() for f in feeds]}
+
+    # Nichts ausgezeichnet: die ueblichen Stellen abklappern. Was antwortet,
+    # ist eine gepruefte Adresse - nicht geraten.
+    fund = await _muster_probieren(http, url)
+    if fund is not None:
+        return {"ok": True, "url": url, "ist_selbst_feed": False,
                 "detail": f"Kein Feed ausgezeichnet"
-                          + (f" (Seite: {titel!r})" if titel else "") + ".",
-                "feeds": []}
-    return {"ok": True, "url": url, "ist_selbst_feed": False,
-            "detail": f"{len(feeds)} Feed-Adresse(n) gefunden"
-                      + (f" auf {titel!r}" if titel else "") + ".",
-            "feeds": [f.als_dict() for f in feeds]}
+                          + (f" (Seite: {titel!r})" if titel else "")
+                          + f" - aber unter {fund.url} liegt einer.",
+                "feeds": [Feedlink(fund.url, seitentitel(fund.text), None,
+                                   "muster").als_dict()]}
+
+    versucht = muster(url)
+    return {"ok": False, "url": url, "ist_selbst_feed": False,
+            "detail": (f"Kein Feed ausgezeichnet"
+                       + (f" (Seite: {titel!r})" if titel else "") + "."
+                       + (f" Auch die ueblichen Adressen ({', '.join(versucht)}) "
+                          f"lieferten keinen." if versucht else "")),
+            "feeds": []}

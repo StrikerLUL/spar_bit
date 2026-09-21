@@ -18,7 +18,33 @@ DEFAULT_UA = (
 )
 
 
+# Hosts, die mehr Abstand verlangen als der Standard. Reddit drosselt
+# Anfragen aus Rechenzentrums-Netzen hart (HTTP 429 mit "retry after 58s"),
+# und ein VPS steht praktisch immer in so einem Netz. Drei Sekunden zwischen
+# zwei Subreddits kosten nichts - der Scheduler laeuft ohnehin nur alle paar
+# Minuten - und sind der Unterschied zwischen "liefert" und "429".
+HOST_PAUSEN: dict[str, float] = {
+    "reddit.com": 3.0,
+}
+
+
+def host_pause(host: str, standard: float) -> float:
+    """Mindestabstand fuer diesen Host - Domain-Suffixe zaehlen mit."""
+    host = (host or "").lower().rstrip(".")
+    for domain, pause in HOST_PAUSEN.items():
+        if host == domain or host.endswith("." + domain):
+            return max(standard, pause)
+    return standard
+
+
 class RateLimited(Exception):
+    """429 (oder ein 5xx, das nicht aufhoert) - der Host will Ruhe.
+
+    Eigene Klasse, weil sich daran etwas entscheidet: ein Rate-Limit ist
+    kein kaputter Endpoint. Der Scheduler legt die Quelle darum schlafen,
+    statt sie als fehlerhaft zu zaehlen und irgendwann ganz abzuschalten.
+    """
+
     def __init__(self, retry_after: float, status: int):
         super().__init__(f"HTTP {status}, retry after {retry_after:.0f}s")
         self.retry_after = retry_after
@@ -81,7 +107,7 @@ class PoliteClient:
             now = time.monotonic()
             if st.blocked_until > now:
                 raise RateLimited(st.blocked_until - now, 429)
-            wait = self.per_host_delay - (now - st.last_request)
+            wait = host_pause(host, self.per_host_delay) - (now - st.last_request)
             if wait > 0:
                 await asyncio.sleep(wait)
             st.last_request = time.monotonic()

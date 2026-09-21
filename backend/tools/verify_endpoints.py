@@ -82,10 +82,21 @@ async def check_one(src, api_key: str | None, http: PoliteClient,
 
     try:
         result = await src.health_check(ctx)
+        detail = result.detail
+        # Was die Quelle unterwegs gelernt hat, gehoert in den Bericht:
+        # genau dafuer laeuft dieses Skript. Eine Zeile "Adresse korrigiert:
+        # /rss/gruppe/erotik" ist die Antwort auf die Frage, mit der man es
+        # aufgerufen hat - und ohne sie muesste man sie im Log suchen.
+        if ctx.notizen:
+            detail += "  [korrigiert: " + ", ".join(
+                f"{k}={v}" for k, v in sorted(ctx.notizen.items())
+                if not k.startswith("_")) + "]"
         row |= {
             "ok": result.ok,
             "status": "ok" if result.ok else "fehler",
-            "detail": result.detail,
+            "detail": detail,
+            "gelernt": {k: v for k, v in ctx.notizen.items()
+                        if not k.startswith("_")} or None,
             "items": result.items_found,
             "ms": result.latency_ms,
             "beispiel": (result.samples[0].titel[:90] if result.samples else None),

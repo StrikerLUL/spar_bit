@@ -102,6 +102,11 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
 
         t0 = time.monotonic()
         error: str | None = None
+        # Gedrosselt ist nicht kaputt: ein 429 zaehlt zwar als Fehlversuch,
+        # macht aber den Schutzschalter nicht zu - sonst schaltet sich eine
+        # voellig gesunde Quelle ab, nur weil die Gegenseite gerade knausert.
+        # Stattdessen schlaeft sie genau so lange, wie die Gegenseite sagt.
+        pause: float = 0.0
         items: list = []
 
         try:
@@ -112,6 +117,7 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
             log.debug("%s: 304 nicht geaendert", source_id)
         except RateLimited as exc:
             error = f"Rate-Limit: {exc}"
+            pause = max(float(getattr(exc, "retry_after", 60.0) or 60.0), 60.0)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"[:600]
 
@@ -128,18 +134,34 @@ async def run_source(source_id: str, manual: bool = False) -> dict:
 
             if error:
                 cfg.total_errors += 1
-                cfg.consecutive_failures += 1
                 cfg.last_error = error
-                if cfg.consecutive_failures >= settings.breaker_threshold:
-                    cfg.circuit_open_until = utcnow() + timedelta(
-                        seconds=settings.breaker_cooldown)
-                    log.error("Circuit Breaker fuer '%s' offen bis %s (%d Fehler)",
-                              source_id, cfg.circuit_open_until,
-                              cfg.consecutive_failures,
-                              extra={"source_id": source_id})
-                else:
-                    log.warning("Quelle '%s' fehlgeschlagen: %s", source_id, error,
+
+                # Auch ein Fehlversuch kann etwas gelernt haben - z.B. dass
+                # einer von fuenf Subreddits nicht existiert. Ginge das hier
+                # verloren, stellte die Quelle beim naechsten Lauf dieselbe
+                # Frage noch einmal, und zwar fuer immer.
+                if ctx.notizen:
+                    cfg.options = {**(cfg.options or {}), **ctx.notizen}
+                    log.info("%s: Einstellungen korrigiert (%s)",
+                             source_id, ", ".join(sorted(ctx.notizen)))
+
+                if pause:
+                    cfg.snooze_until = utcnow() + timedelta(seconds=pause)
+                    log.warning("Quelle '%s' gedrosselt, Pause bis %s: %s",
+                                source_id, cfg.snooze_until, error,
                                 extra={"source_id": source_id})
+                else:
+                    cfg.consecutive_failures += 1
+                    if cfg.consecutive_failures >= settings.breaker_threshold:
+                        cfg.circuit_open_until = utcnow() + timedelta(
+                            seconds=settings.breaker_cooldown)
+                        log.error("Circuit Breaker fuer '%s' offen bis %s (%d Fehler)",
+                                  source_id, cfg.circuit_open_until,
+                                  cfg.consecutive_failures,
+                                  extra={"source_id": source_id})
+                    else:
+                        log.warning("Quelle '%s' fehlgeschlagen: %s", source_id, error,
+                                    extra={"source_id": source_id})
             else:
                 cfg.consecutive_failures = 0
                 cfg.circuit_open_until = None

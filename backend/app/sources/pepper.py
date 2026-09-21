@@ -6,12 +6,26 @@ nicht live geprueft werden (Egress-Policy). Alle Pfade sind darum als Option
 im UI editierbar. `Jetzt testen` im UI bzw. tools/verify_endpoints.py sagt
 dir, welche wirklich liefern. Pepper-Seiten stehen zudem hinter Cloudflare -
 gut moeglich, dass ein Teil der Feeds ohne Browser-Header blockt.
+
+Weil die Pfade eben nicht geprueft sind, ist der wichtigste Teil dieser
+Datei nicht die Vorbelegung, sondern was passiert, wenn sie danebenliegt.
+Aus dem Betrieb kamen zwei Meldungen dieser Art:
+
+    /gruppe/erotik-rss: KeinFeed: Der Server hat eine HTML-Seite geliefert
+    /search?q=satisfyer&rss=1: KeinFeed: Der Server hat eine HTML-Seite …
+
+Beides faengt jetzt `app/feedfinder.py` ab: es liest die Feed-Auszeichnung
+der gelieferten Seite und probiert danach die bekannten Pepper-Muster
+(`/rss/gruppe/<slug>`, `/rss/search?q=…`). Was wirklich einen Feed liefert,
+schreibt die Quelle in ihre Einstellungen zurueck - bei Suchbegriffen nicht
+nur die eine Adresse, sondern gleich die Vorlage fuer alle Begriffe.
 """
 from __future__ import annotations
 
 import re
 
 from .. import feedfinder
+from ..http import RateLimited
 from ..priceparse import parse_price_text
 from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
                    Verification, register)
@@ -48,8 +62,11 @@ class PepperSource(Source):
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", [],
                    help="Eigene Suchbegriffe; je Begriff wird ein Such-Feed abgefragt."),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",
-                   "/search?q={term}&rss=1",
-                   help="{term} wird ersetzt. Anpassen falls die Seite es anders macht."),
+                   "/rss/search?q={term}",
+                   help="{term} wird ersetzt. Welcher Weg gilt, ist von "
+                        "Pepper-Seite zu Pepper-Seite verschieden - liefert "
+                        "diese Vorlage HTML statt Feed, probiert SparBit die "
+                        "anderen durch und traegt die passende hier ein."),
         OptionSpec("min_temperatur", "Nur ab Temperatur", "int", 0,
                    help="0 = alles uebernehmen."),
     ]
@@ -57,14 +74,19 @@ class PepperSource(Source):
     async def fetch(self, ctx: FetchContext) -> list[DealItem]:
         pfade = [str(p) for p in (ctx.opt("feeds") or [])]
         # Index mitfuehren, damit ein selbst gefundener Feed genau den
-        # Pfad ersetzt, der daneben lag - und nicht irgendeinen.
-        urls: list[tuple[int | None, str]] = [
-            (i, self._abs(p)) for i, p in enumerate(pfade)]
+        # Pfad ersetzt, der daneben lag - und nicht irgendeinen. Der
+        # Suchbegriff kommt mit, weil sich aus einer geheilten Such-Adresse
+        # die Vorlage fuer alle weiteren Begriffe ableiten laesst.
+        urls: list[tuple[int | None, str, str]] = [
+            (i, self._abs(p), "") for i, p in enumerate(pfade)]
 
-        tmpl = ctx.opt("search_path", "/search?q={term}&rss=1")
+        tmpl = str(ctx.opt("search_path", "/rss/search?q={term}"))
         for term in (ctx.opt("search_terms") or []):
-            urls.append((None,
-                         self._abs(tmpl.format(term=term.strip().replace(" ", "+")))))
+            begriff = str(term).strip()
+            if not begriff:
+                continue
+            urls.append((None, self._abs(tmpl.format(term=begriff.replace(" ", "+"))),
+                         begriff))
 
         if not urls:
             raise ValueError(
@@ -76,16 +98,26 @@ class PepperSource(Source):
         items: list[DealItem] = []
         errors: list[str] = []
         korrigiert: dict[int, str] = {}
+        neue_vorlage: str | None = None
+        gedrosselt: RateLimited | None = None
 
-        for index, url in urls:
+        for index, url, begriff in urls:
             try:
                 fund = await feedfinder.hole(ctx.http, url,
                                              cache_key=f"{self.id}:{url}")
+            except RateLimited as exc:
+                # Der Host ist jetzt gesperrt; die restlichen Feeds wuerden
+                # nur dieselbe Absage bekommen.
+                gedrosselt = exc
+                break
             except Exception as exc:  # eine kaputte Sub-Feed-URL kippt nicht alles
                 errors.append(f"{url}: {type(exc).__name__}: {exc}"[:260])
                 continue
-            if fund.entdeckt and index is not None:
-                korrigiert[index] = fund.url
+            if fund.entdeckt:
+                if index is not None:
+                    korrigiert[index] = fund.url
+                elif neue_vorlage is None and begriff:
+                    neue_vorlage = self._vorlage(fund.url, begriff)
             items.extend(self.parse(fund.text, min_temp))
 
         if korrigiert:
@@ -93,13 +125,43 @@ class PepperSource(Source):
             for index, url in korrigiert.items():
                 neu[index] = url
             ctx.merke("feeds", neu)
+        # Eine Such-Adresse, die wirklich einen Feed geliefert hat, gilt ab
+        # jetzt fuer alle Begriffe - sonst heilt sich jeder Begriff einzeln
+        # und jeder kostet dabei jedes Mal dieselben Zusatz-Anfragen.
+        if neue_vorlage and neue_vorlage != tmpl:
+            ctx.merke("search_path", neue_vorlage)
+            if ctx.log:
+                ctx.log.info("%s: Such-Vorlage korrigiert: %s -> %s",
+                             self.id, tmpl, neue_vorlage)
 
-        if not items and errors:
-            raise RuntimeError(" | ".join(errors[:3]))
-        if errors and ctx.log:
-            ctx.log.warning("%s: %d/%d Feeds fehlerhaft: %s",
-                            self.id, len(errors), len(urls), errors[0])
+        if items:
+            if errors and ctx.log:
+                ctx.log.warning("%s: %d/%d Feeds fehlerhaft: %s",
+                                self.id, len(errors), len(urls), errors[0])
+            return items
+
+        if gedrosselt is not None:
+            raise gedrosselt
+        if errors:
+            text = " | ".join(errors[:3])
+            if len(errors) > 3:
+                text += f" | (+{len(errors) - 3} weitere)"
+            raise RuntimeError(text)
         return items
+
+    def _vorlage(self, gefunden: str, begriff: str) -> str | None:
+        """Aus einer geheilten Such-Adresse die Vorlage zurueckrechnen.
+
+        Beispiel: der Begriff war "satisfyer", gefunden wurde
+        `https://www.mydealz.de/rss/search?q=satisfyer` - dann heisst die
+        Vorlage `/rss/search?q={term}`.
+        """
+        kodiert = begriff.replace(" ", "+")
+        if not kodiert or kodiert not in gefunden:
+            return None
+        stamm = self.base_url.rstrip("/")
+        rel = gefunden[len(stamm):] if stamm and gefunden.startswith(stamm) else gefunden
+        return (rel or "/").replace(kodiert, "{term}")
 
     def _abs(self, path: str) -> str:
         path = path.strip()
@@ -179,7 +241,7 @@ class MyDealz(PepperSource):
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", [],
                    help="z.B. lego, ssd, kopfhoerer"),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",
-                   "/search?q={term}&rss=1"),
+                   "/rss/search?q={term}"),
         OptionSpec("min_temperatur", "Nur ab Temperatur", "int", 0),
     ]
 
@@ -193,7 +255,7 @@ class Preisjaeger(PepperSource):
         OptionSpec("feeds", "Feed-Pfade", "list", ["/rss/alle", "/rss/hot"]),
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", []),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",
-                   "/search?q={term}&rss=1"),
+                   "/rss/search?q={term}"),
         OptionSpec("min_temperatur", "Nur ab Temperatur", "int", 0),
     ]
 
@@ -208,7 +270,7 @@ class HotUKDeals(PepperSource):
         OptionSpec("feeds", "Feed-Pfade", "list", ["/rss/all", "/rss/hot"]),
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", []),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",
-                   "/search?q={term}&rss=1"),
+                   "/rss/search?q={term}"),
         OptionSpec("min_temperatur", "Nur ab Temperatur", "int", 0),
     ]
 
@@ -222,7 +284,7 @@ class Dealabs(PepperSource):
         OptionSpec("feeds", "Feed-Pfade", "list", ["/rss/alle", "/rss/hot"]),
         OptionSpec("search_terms", "Suchbegriff-Feeds", "list", []),
         OptionSpec("search_path", "Such-Pfad-Vorlage", "string",
-                   "/search?q={term}&rss=1"),
+                   "/rss/search?q={term}"),
         OptionSpec("min_temperatur", "Nur ab Temperatur", "int", 0),
     ]
 
