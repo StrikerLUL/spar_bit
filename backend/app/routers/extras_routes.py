@@ -6,7 +6,7 @@ import io
 import logging
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
@@ -20,7 +20,6 @@ from ..images import aufraeumen as bilder_aufraeumen
 from ..images import bild_verzeichnis
 from ..images import statistik as bild_statistik
 from ..models import (
-    Channel,
     Deal,
     DealOffer,
     Match,
@@ -285,46 +284,6 @@ def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
     )
 
 
-@router.post("/system/restore")
-def restore(payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
-    """Backup einspielen. Regeln, Kanaele und Quellen-Konfiguration werden
-    ersetzt; gesammelte Deals bleiben unangetastet - die kommen ohnehin
-    wieder rein."""
-    if not isinstance(payload, dict) or "version" not in payload:
-        raise HTTPException(400, "Das sieht nicht nach einem SparBit-Backup aus.")
-
-    bericht = {"regeln": 0, "kanaele": 0, "quellen": 0}
-
-    if isinstance(payload.get("regeln"), list):
-        db.query(Rule).delete()
-        for row in payload["regeln"]:
-            row = {k: v for k, v in row.items() if k != "id"}
-            db.add(Rule(**row))
-            bericht["regeln"] += 1
-
-    if isinstance(payload.get("kanaele"), list):
-        db.query(Channel).delete()
-        for row in payload["kanaele"]:
-            row = {k: v for k, v in row.items() if k != "id"}
-            db.add(Channel(**row))
-            bericht["kanaele"] += 1
-
-    if isinstance(payload.get("quellen"), list):
-        for row in payload["quellen"]:
-            cfg = db.get(SourceConfig, row.get("id"))
-            if cfg is None:
-                continue      # Quelle gibt es in dieser Version nicht mehr
-            for key in ("enabled", "interval_seconds", "api_key", "options",
-                        "verification"):
-                if key in row:
-                    setattr(cfg, key, row[key])
-            bericht["quellen"] += 1
-
-    db.commit()
-    log.info("Backup eingespielt: %s", bericht)
-    return {"ok": True, **bericht}
-
-
 # --- Gespeicherte Suchen ---------------------------------------------------
 
 class SavedSearchBody(BaseModel):
@@ -360,13 +319,26 @@ def delete_search(search_id: int, db: Session = Depends(get_db)) -> dict:
 # --- Allgemeine Einstellungen ---------------------------------------------
 
 class GeneralSettings(BaseModel):
-    waehrungskurse: dict[str, float] = {}
-    benachrichtigungen_pausiert: bool = False
+    """Alle Felder optional - was nicht mitkommt, bleibt stehen.
+
+    Vorher hatte jedes Feld einen Default, und PUT schrieb sie alle. Wer
+    im Kanal-Bereich einen Waehrungskurs speicherte, setzte damit
+    unbemerkt die Preisfehler-Schwelle auf 70 zurueck: die Seite schickte
+    nur zwei Felder, der Rest kam aus den Defaults. Ein Teil-Update kann
+    das nicht passieren.
+    """
+    waehrungskurse: dict[str, float] | None = None
+    benachrichtigungen_pausiert: bool | None = None
     # Der Preisfehler-Waechter meldet unabhaengig von Regeln und Ruhezeit.
     # Abschaltbar, weil "weckt dich nachts" eine Entscheidung ist, die man
     # selbst treffen sollte.
-    preisfehler_waechter: bool = True
-    preisfehler_schwelle: int = 70
+    preisfehler_waechter: bool | None = None
+    preisfehler_schwelle: int | None = None
+    # Taegliche Sicherung ins Datenverzeichnis. Ein Passwort verschluesselt
+    # sie - sie enthaelt Bot-Token und Passwort-Hashes.
+    backup_taeglich: bool | None = None
+    backup_behalten: int | None = None
+    backup_passwort: str | None = None
 
 
 @router.get("/settings")
@@ -378,18 +350,35 @@ def get_settings(db: Session = Depends(get_db)) -> dict:
         "preisfehler_waechter": bool(get_setting(db, "preisfehler_waechter", True)),
         "preisfehler_schwelle": int(get_setting(db, "preisfehler_schwelle",
                                                 SCHWELLE_HEISS)),
+        "backup_taeglich": bool(get_setting(db, "backup_taeglich", True)),
+        "backup_behalten": int(get_setting(db, "backup_behalten", 7) or 7),
+        # Das Passwort selbst geht nie wieder raus - nur ob eines gesetzt ist.
+        "backup_passwort_gesetzt": bool(get_setting(db, "backup_passwort")),
     }
 
 
 @router.put("/settings")
 def put_settings(body: GeneralSettings, db: Session = Depends(get_db)) -> dict:
-    set_setting(db, "currency_rates", body.waehrungskurse)
-    set_setting(db, "notifications_paused", body.benachrichtigungen_pausiert)
-    set_setting(db, "preisfehler_waechter", body.preisfehler_waechter)
-    set_setting(db, "preisfehler_schwelle",
-                max(30, min(100, int(body.preisfehler_schwelle))))
+    if body.waehrungskurse is not None:
+        set_setting(db, "currency_rates", body.waehrungskurse)
+        set_rates(body.waehrungskurse)
+    if body.benachrichtigungen_pausiert is not None:
+        set_setting(db, "notifications_paused", body.benachrichtigungen_pausiert)
+    if body.preisfehler_waechter is not None:
+        set_setting(db, "preisfehler_waechter", body.preisfehler_waechter)
+    if body.preisfehler_schwelle is not None:
+        set_setting(db, "preisfehler_schwelle",
+                    max(30, min(100, int(body.preisfehler_schwelle))))
+    if body.backup_taeglich is not None:
+        set_setting(db, "backup_taeglich", body.backup_taeglich)
+    if body.backup_behalten is not None:
+        set_setting(db, "backup_behalten", max(1, min(90, int(body.backup_behalten))))
+    # "-" loescht das Passwort, leer laesst es stehen: sonst wuerde jedes
+    # Speichern anderer Einstellungen die Verschluesselung abschalten.
+    if body.backup_passwort:
+        set_setting(db, "backup_passwort",
+                    "" if body.backup_passwort == "-" else body.backup_passwort)
     db.commit()
-    set_rates(body.waehrungskurse)
     return get_settings(db)
 
 

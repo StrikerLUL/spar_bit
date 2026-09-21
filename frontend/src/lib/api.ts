@@ -482,6 +482,27 @@ export interface AppSettings {
   preisfehler_waechter: boolean;
   /** Ab wie vielen Punkten gemeldet wird (30-100). */
   preisfehler_schwelle: number;
+  /** Taegliche Sicherung ins Datenverzeichnis. */
+  backup_taeglich: boolean;
+  /** Wie viele Sicherungen aufgehoben werden. */
+  backup_behalten: number;
+  /** Nur die Auskunft, ob eines gesetzt ist - das Passwort selbst bleibt drin. */
+  backup_passwort_gesetzt?: boolean;
+  /** Beim Speichern: neues Passwort, "-" loescht es, leer laesst es stehen. */
+  backup_passwort?: string;
+}
+
+export interface BackupDatei {
+  name: string;
+  bytes: number;
+  erstellt: string;
+  verschluesselt: boolean;
+}
+
+export interface BackupListe {
+  ordner: string;
+  dateien: BackupDatei[];
+  verschluesselung_moeglich: boolean;
 }
 
 export interface PreisfehlerListe {
@@ -698,6 +719,13 @@ export const api = {
     logs: (level = "ALL", limit = 300) =>
       get<LogLine[]>(`/system/logs?level=${level}&limit=${limit}`),
     backupUrl: "/api/system/backup",
+    backupsListe: () => get<BackupListe>("/system/backups"),
+    backupJetzt: () => post<{ ok: boolean; datei: string; bytes: number; alte_entfernt: number }>(
+      "/system/backups"),
+    backupLoeschen: (name: string) =>
+      del<{ ok: boolean }>(`/system/backups/${encodeURIComponent(name)}`),
+    backupDateiUrl: (name: string) =>
+      `/api/system/backups/${encodeURIComponent(name)}`,
     probleme: () => get<ProblemStatus>("/system/probleme"),
     problemeMelden: (an: boolean) =>
       put<{ ok: boolean; an: boolean }>("/system/probleme/melden", { an }),
@@ -739,9 +767,8 @@ export const api = {
   },
   settings: {
     get: () => get<AppSettings>("/settings"),
-    set: (body: { waehrungskurse: Record<string, number>;
-                  benachrichtigungen_pausiert: boolean }) =>
-      put<AppSettings>("/settings", body),
+    /** Teil-Update: was nicht mitkommt, bleibt unveraendert stehen. */
+    set: (body: Partial<AppSettings>) => put<AppSettings>("/settings", body),
   },
   bilder: {
     status: () => get<BilderStatus>("/bilder-status"),
@@ -783,7 +810,23 @@ export const api = {
   snooze: (sourceId: string, stunden: number) =>
     post<{ id: string; snooze_until: string | null }>(
       `/sources/${sourceId}/snooze?stunden=${stunden}`),
-  restore: (payload: unknown) => post<Record<string, unknown>>("/system/restore", payload),
+  restore: (payload: unknown, passwort?: string) =>
+    post<Record<string, unknown>>("/system/restore",
+      passwort ? { daten: payload, passwort } : payload),
+  /** Verschluesselte Sicherung holen - kommt als Datei zurueck, nicht als Ansicht. */
+  backupVerschluesselt: async (passwort: string, umfang = "voll") => {
+    const antwort = await fetch("/api/system/backup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ passwort, umfang }),
+    });
+    if (!antwort.ok) {
+      const fehler = await antwort.json().catch(() => ({ detail: antwort.statusText }));
+      throw new Error(fehler.detail || "Sicherung fehlgeschlagen");
+    }
+    return antwort.blob();
+  },
   csvUrl: (params: Record<string, boolean>) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) if (v) q.set(k, "true");

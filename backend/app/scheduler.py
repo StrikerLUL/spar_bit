@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, desc, select
 
+from . import backup as backup_mod
 from . import erwachsen as erwachsen_mod
 from . import gratischeck, pricefehler
 from .config import settings
@@ -522,11 +523,34 @@ def cleanup_job() -> None:
         log.error("Aufraeumen fehlgeschlagen: %s", exc)
 
 
+async def backup_job() -> None:
+    """Taegliche Sicherung ins Datenverzeichnis, mit Rotation.
+
+    Der Knopf im UI gab es schon - aber er hilft nur dem, der daran
+    denkt. Eine Sicherung, die niemand ausloest, ist keine.
+    """
+    try:
+        with session_scope() as db:
+            if not get_setting(db, "backup_taeglich", True):
+                return
+            behalten = int(get_setting(db, "backup_behalten", 7) or 7)
+            passwort = str(get_setting(db, "backup_passwort") or "")
+            pfad = await asyncio.to_thread(backup_mod.schreibe_datei, db, passwort)
+            entfernt = await asyncio.to_thread(backup_mod.raeume_auf, behalten)
+        log.info("Sicherung geschrieben: %s (%d alte entfernt)", pfad.name, entfernt)
+        broker.publish("backup", {"datei": pfad.name})
+    except Exception as exc:
+        log.error("Sicherung fehlgeschlagen: %s", exc)
+
+
 def start() -> None:
     ensure_source_rows()
     sync_jobs()
     scheduler.add_job(digest_job, IntervalTrigger(hours=1), id="digest",
                       max_instances=1, coalesce=True)
+    scheduler.add_job(backup_job, IntervalTrigger(hours=24), id="backup",
+                      replace_existing=True, max_instances=1,
+                      next_run_time=utcnow() + timedelta(minutes=5))
     scheduler.add_job(cleanup_job, IntervalTrigger(hours=6), id="cleanup",
                       max_instances=1, coalesce=True)
     scheduler.add_job(watch_job, IntervalTrigger(minutes=10), id="watch",

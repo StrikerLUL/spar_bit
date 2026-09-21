@@ -6,12 +6,13 @@ import platform
 import sys
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import backup as backup_mod
 from .. import claimer as claimer_mod
 from .. import erwachsen as erwachsen_mod
 from .. import gratischeck, updater
@@ -70,32 +71,120 @@ def logs(limit: int = Query(300, le=2000), level: str = "ALL") -> list[dict]:
 
 
 @router.get("/backup")
-def backup(db: Session = Depends(get_db)) -> JSONResponse:
-    """Vollstaendiger JSON-Export. API-Keys und Kanal-Secrets bleiben drin -
-    das ist ein Backup, kein Teilen-Export. Datei entsprechend behandeln."""
-    def rows(model, fields):
-        return [{f: getattr(r, f) for f in fields} for r in db.scalars(select(model))]
+def backup(umfang: str = Query("voll", pattern="^(voll|einstellungen)$"),
+           db: Session = Depends(get_db)) -> JSONResponse:
+    """Vollstaendige Sicherung als JSON.
 
-    data = {
-        "exportiert_am": datetime.now(UTC).isoformat(),
-        "version": "1.0.0",
-        "regeln": rows(Rule, ["id", "name", "enabled", "priority", "keywords",
-                              "required_keywords", "blacklist", "max_preis",
-                              "min_rabatt_prozent", "nur_gratis", "min_temperatur",
-                              "sources", "kategorien", "haendler", "channels"]),
-        "kanaele": rows(Channel, ["id", "type", "name", "enabled", "config"]),
-        "quellen": rows(SourceConfig, ["id", "enabled", "interval_seconds",
-                                       "api_key", "options", "verification"]),
-        "deals": rows(Deal, ["id", "titel", "url", "preis", "originalpreis",
-                             "rabatt_prozent", "waehrung", "ist_gratis",
-                             "haendler", "quelle", "first_seen", "bookmarked"]),
-        "claims": rows(ClaimEvent, ["platform", "titel", "status", "seen_at"]),
-    }
-    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    Enthaelt API-Schluessel, Kanal-Geheimnisse und Passwort-Hashes - das
+    ist eine Sicherung, kein Teilen-Export. Wer sie aus der Hand gibt,
+    nimmt den Weg ueber POST /api/system/backup mit Passwort.
+    """
+    daten = backup_mod.erstelle(db, umfang=umfang)
+    stempel = datetime.now(UTC).strftime("%Y%m%d-%H%M")
     return JSONResponse(
-        content=json.loads(json.dumps(data, default=str)),
-        headers={"Content-Disposition": f'attachment; filename="sparbit-backup-{stamp}.json"'},
+        content=json.loads(backup_mod.als_json(daten)),
+        headers={"Content-Disposition":
+                 f'attachment; filename="sparbit-backup-{stempel}.json"'},
     )
+
+
+class BackupWunsch(BaseModel):
+    umfang: str = "voll"
+    passwort: str = ""
+
+
+@router.post("/backup")
+def backup_verschluesselt(body: BackupWunsch,
+                          db: Session = Depends(get_db)) -> JSONResponse:
+    """Sicherung mit Passwort. Ohne Passwort dasselbe wie GET."""
+    umfang = body.umfang if body.umfang in ("voll", "einstellungen") else "voll"
+    daten = backup_mod.erstelle(db, umfang=umfang)
+    stempel = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+
+    if not body.passwort:
+        return JSONResponse(
+            content=json.loads(backup_mod.als_json(daten)),
+            headers={"Content-Disposition":
+                     f'attachment; filename="sparbit-backup-{stempel}.json"'})
+
+    if len(body.passwort) < 8:
+        raise HTTPException(400, "Das Passwort braucht mindestens 8 Zeichen.")
+    try:
+        huelle = backup_mod.verschluessele(
+            backup_mod.als_json(daten).encode("utf-8"), body.passwort)
+    except backup_mod.VerschluesselungFehlt as exc:
+        raise HTTPException(501, str(exc)) from exc
+    return JSONResponse(
+        content=huelle,
+        headers={"Content-Disposition":
+                 f'attachment; filename="sparbit-backup-{stempel}.json.enc"'})
+
+
+@router.post("/restore")
+def restore(payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
+    """Sicherung einspielen.
+
+    Nimmt die Datei so, wie sie exportiert wurde - offen oder
+    verschluesselt. Fuer den verschluesselten Fall kommt das Passwort in
+    einer Huelle: {"daten": <Datei>, "passwort": "..."}.
+    """
+    passwort = ""
+    if isinstance(payload, dict) and "daten" in payload:
+        passwort = str(payload.get("passwort") or "")
+        payload = payload["daten"]
+
+    if backup_mod.ist_verschluesselt(payload):
+        if not passwort:
+            raise HTTPException(400, "Diese Sicherung ist verschluesselt - "
+                                     "bitte das Passwort mitgeben.")
+        try:
+            payload = backup_mod.entschluessele(payload, passwort)
+        except backup_mod.VerschluesselungFehlt as exc:
+            raise HTTPException(501, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    try:
+        return {"ok": True, **backup_mod.spiele_ein(db, payload)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/backups")
+def backups_liste() -> dict:
+    """Die automatisch geschriebenen Sicherungen im Datenverzeichnis."""
+    return {
+        "ordner": str(backup_mod.ordner()),
+        "dateien": backup_mod.vorhandene(),
+        "verschluesselung_moeglich": backup_mod.verschluesselung_verfuegbar(),
+    }
+
+
+@router.post("/backups")
+def backup_jetzt(db: Session = Depends(get_db)) -> dict:
+    """Jetzt eine Sicherung in den Ordner schreiben."""
+    passwort = str(get_setting(db, "backup_passwort") or "")
+    pfad = backup_mod.schreibe_datei(db, passwort)
+    entfernt = backup_mod.raeume_auf(int(get_setting(db, "backup_behalten", 7) or 7))
+    return {"ok": True, "datei": pfad.name, "bytes": pfad.stat().st_size,
+            "alte_entfernt": entfernt}
+
+
+@router.get("/backups/{name}")
+def backup_holen(name: str) -> FileResponse:
+    pfad = (backup_mod.ordner() / name).resolve()
+    if not pfad.is_relative_to(backup_mod.ordner().resolve()) or not pfad.is_file():
+        raise HTTPException(404, "Diese Sicherung gibt es nicht.")
+    return FileResponse(pfad, media_type="application/json", filename=pfad.name)
+
+
+@router.delete("/backups/{name}")
+def backup_loeschen(name: str) -> dict:
+    pfad = (backup_mod.ordner() / name).resolve()
+    if not pfad.is_relative_to(backup_mod.ordner().resolve()) or not pfad.is_file():
+        raise HTTPException(404, "Diese Sicherung gibt es nicht.")
+    pfad.unlink()
+    return {"ok": True}
 
 
 # --- Selbstueberwachung ----------------------------------------------------
