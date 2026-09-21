@@ -161,6 +161,7 @@ export interface Deal {
 }
 
 export interface WatchItem {
+  liste_id: number | null;
   id: number;
   name: string;
   url: string;
@@ -478,6 +479,20 @@ export interface SavedSearch {
   id: number;
   name: string;
   filter: Record<string, unknown>;
+}
+
+export interface WatchListe {
+  id: number;
+  name: string;
+  beschreibung: string | null;
+  budget: number | null;
+  farbe: string | null;
+  anzahl: number;
+  summe_aktuell: number;
+  summe_ziel: number | null;
+  ohne_preis: number;
+  budget_rest: number | null;
+  ziel_erreicht: number;
 }
 
 export interface Sparbilanz {
@@ -847,6 +862,15 @@ export const api = {
     remove: (id: number) => del<{ ok: boolean }>(`/watch/${id}`),
     pruefen: (id: number) => post<WatchTest>(`/watch/${id}/pruefen`),
     testen: (url: string) => post<WatchTest>("/watch-test", { url }),
+    listen: () => get<WatchListe[]>("/listen"),
+    listeAnlegen: (body: { name: string; budget?: number | null;
+                           beschreibung?: string }) =>
+      post<WatchListe>("/listen", body),
+    listeAendern: (id: number, body: { name: string; budget?: number | null;
+                                       beschreibung?: string }) =>
+      patch<WatchListe>(`/listen/${id}`, body),
+    listeLoeschen: (id: number) =>
+      del<{ ok: boolean; artikel_behalten: number }>(`/listen/${id}`),
     steam: (profil: string, ziel_preis?: number | null, gleich_pruefen = false) =>
       post<SammelErgebnis>("/watch/steam", { profil, ziel_preis, gleich_pruefen }),
     sammel: (urls: string, ziel_preis?: number | null, intervall_minuten?: number) =>

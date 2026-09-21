@@ -13,7 +13,7 @@ from .. import steamwunsch
 from ..auth import current_user
 from ..db import get_db
 from ..learning import notiere, trainiere, vorschlaege
-from ..models import ApiToken, Deal, WatchItem, WatchPrice, utcnow
+from ..models import ApiToken, Deal, WatchItem, WatchListe, WatchPrice, utcnow
 from ..pricewatch import NichtGefunden, preis_aus_seite
 from ..pricewatch import pruefe as pruefe_eintrag
 from ..scheduler import get_http
@@ -27,6 +27,90 @@ router = APIRouter(prefix="/api", tags=["watch"],
                    dependencies=[Depends(current_user)])
 
 
+# --- Listen ----------------------------------------------------------------
+
+class ListeBody(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    beschreibung: str = Field(default="", max_length=1000)
+    budget: float | None = Field(None, ge=0)
+    farbe: str = Field(default="", max_length=16)
+
+
+def _liste_dict(liste: WatchListe, artikel: list[WatchItem]) -> dict:
+    """Eine Liste mit dem, was man bei Geschenken zuerst wissen will."""
+    preise = [a.letzter_preis for a in artikel if a.letzter_preis is not None]
+    ziele = [a.ziel_preis for a in artikel if a.ziel_preis is not None]
+    summe = round(sum(preise), 2)
+    return {
+        "id": liste.id, "name": liste.name,
+        "beschreibung": liste.beschreibung, "budget": liste.budget,
+        "farbe": liste.farbe, "erstellt_am": liste.erstellt_am,
+        "anzahl": len(artikel),
+        "summe_aktuell": summe,
+        "summe_ziel": round(sum(ziele), 2) if ziele else None,
+        "ohne_preis": len(artikel) - len(preise),
+        # Reicht das Budget noch? Negativ heisst: nein.
+        "budget_rest": round(liste.budget - summe, 2) if liste.budget else None,
+        "ziel_erreicht": sum(
+            1 for a in artikel
+            if a.ziel_preis is not None and a.letzter_preis is not None
+            and a.letzter_preis <= a.ziel_preis),
+    }
+
+
+@router.get("/listen")
+def listen(db: Session = Depends(get_db)) -> list[dict]:
+    artikel: dict[int, list[WatchItem]] = {}
+    for eintrag in db.scalars(select(WatchItem).where(WatchItem.liste_id.is_not(None))):
+        artikel.setdefault(eintrag.liste_id, []).append(eintrag)
+    return [_liste_dict(liste, artikel.get(liste.id, []))
+            for liste in db.scalars(select(WatchListe).order_by(WatchListe.name))]
+
+
+@router.post("/listen")
+def liste_anlegen(body: ListeBody, db: Session = Depends(get_db)) -> dict:
+    liste = WatchListe(name=body.name, beschreibung=body.beschreibung or None,
+                       budget=body.budget, farbe=body.farbe or None)
+    db.add(liste)
+    db.commit()
+    db.refresh(liste)
+    return _liste_dict(liste, [])
+
+
+@router.patch("/listen/{liste_id}")
+def liste_aendern(liste_id: int, body: ListeBody,
+                  db: Session = Depends(get_db)) -> dict:
+    liste = db.get(WatchListe, liste_id)
+    if liste is None:
+        raise HTTPException(404, "Liste nicht gefunden")
+    liste.name = body.name
+    liste.beschreibung = body.beschreibung or None
+    liste.budget = body.budget
+    liste.farbe = body.farbe or None
+    db.commit()
+    artikel = list(db.scalars(select(WatchItem).where(WatchItem.liste_id == liste_id)))
+    return _liste_dict(liste, artikel)
+
+
+@router.delete("/listen/{liste_id}")
+def liste_loeschen(liste_id: int, db: Session = Depends(get_db)) -> dict:
+    """Liste weg - die Artikel darin bleiben.
+
+    Loeschen soll eine Ordnung aufloesen, keine Arbeit vernichten: die
+    Artikel liegen danach wieder in der allgemeinen Wunschliste.
+    """
+    liste = db.get(WatchListe, liste_id)
+    if liste is None:
+        raise HTTPException(404, "Liste nicht gefunden")
+    anzahl = 0
+    for eintrag in db.scalars(select(WatchItem).where(WatchItem.liste_id == liste_id)):
+        eintrag.liste_id = None
+        anzahl += 1
+    db.delete(liste)
+    db.commit()
+    return {"ok": True, "artikel_behalten": anzahl}
+
+
 # --- Wunschliste -----------------------------------------------------------
 
 class WatchBody(BaseModel):
@@ -35,11 +119,13 @@ class WatchBody(BaseModel):
     ziel_preis: float | None = Field(None, ge=0)
     intervall_minuten: int = Field(180, ge=30, le=10080)
     aktiv: bool = True
+    liste_id: int | None = None
 
 
 def _watch_dict(eintrag: WatchItem, verlauf: list | None = None) -> dict:
     return {
         "id": eintrag.id, "name": eintrag.name, "url": eintrag.url,
+        "liste_id": eintrag.liste_id,
         "ziel_preis": eintrag.ziel_preis, "aktiv": eintrag.aktiv,
         "intervall_minuten": eintrag.intervall_minuten,
         "letzter_preis": eintrag.letzter_preis, "waehrung": eintrag.waehrung,

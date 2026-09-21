@@ -408,6 +408,24 @@ class CachedImage(Base):
                                                 default=utcnow, index=True)
 
 
+class WatchListe(Base):
+    """Eine Sammlung beobachteter Artikel - mit Zweck und Budget.
+
+    Eine einzige Wunschliste vermischt, was nichts miteinander zu tun
+    hat: Weihnachtsgeschenke, Ersatzteile, das Projekt im Keller. Mit
+    Listen bleibt getrennt, was getrennt gehoert - und ein Budget
+    beantwortet die Frage, die bei Geschenken zuerst kommt: reicht es
+    noch?
+    """
+    __tablename__ = "watch_listen"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    beschreibung: Mapped[str | None] = mapped_column(Text)
+    budget: Mapped[float | None] = mapped_column(Float)
+    farbe: Mapped[str | None] = mapped_column(String(16))
+    erstellt_am: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class WatchItem(Base):
     """Ein selbst beobachteter Artikel.
 
@@ -416,6 +434,9 @@ class WatchItem(Base):
     """
     __tablename__ = "watch_items"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Ohne Liste bleibt der Artikel dort, wo alles bisher lag.
+    liste_id: Mapped[int | None] = mapped_column(
+        ForeignKey("watch_listen.id", ondelete="SET NULL"), index=True)
     name: Mapped[str] = mapped_column(String(255))
     url: Mapped[str] = mapped_column(Text)
     ziel_preis: Mapped[float | None] = mapped_column(Float)

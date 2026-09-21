@@ -50,6 +50,7 @@ from .models import (
     SourceConfig,
     User,
     WatchItem,
+    WatchListe,
     WatchPrice,
 )
 
@@ -128,15 +129,23 @@ def erstelle(db: Session, umfang: str = "voll") -> dict[str, Any]:
                                                  "erstellt_am", "zuletzt_genutzt"])
 
     if umfang == "einstellungen":
+        daten.setdefault("listen", [])
         daten["wunschliste"] = []
         daten["deals"] = []
         daten["claims"] = []
         return daten
 
     # --- Wunschliste mit ihren Preispunkten -------------------------------
+    # Listen ueber ihren Namen verknuepfen, nicht ueber die ID: beim
+    # Einspielen in eine andere Installation waere die ID bedeutungslos.
+    listen_namen = {liste.id: liste.name for liste in db.scalars(select(WatchListe))}
+    daten["listen"] = _zeilen(db, WatchListe, ["name", "beschreibung", "budget",
+                                               "farbe", "erstellt_am"])
+
     wunsch: list[dict] = []
     for item in db.scalars(select(WatchItem)):
         eintrag = {f: getattr(item, f) for f in WATCH_FELDER}
+        eintrag["liste"] = listen_namen.get(item.liste_id)
         eintrag["preise"] = [
             {"preis": p.preis, "waehrung": p.waehrung, "ts": p.ts}
             for p in db.scalars(select(WatchPrice).where(WatchPrice.watch_id == item.id))
@@ -292,7 +301,7 @@ def spiele_ein(db: Session, daten: dict[str, Any]) -> dict[str, int]:
     bericht = dict.fromkeys((
         "regeln", "kanaele", "quellen", "suchen", "einstellungen", "benutzer",
         "wunschliste", "wunschpreise", "deals", "verlauf", "angebote",
-        "interaktionen", "claims", "tokens"), 0)
+        "interaktionen", "claims", "tokens", "listen"), 0)
 
     # --- Benutzer: nur, wenn es noch keinen gibt --------------------------
     # Sonst wuerde eine eingespielte Sicherung den Zugang der laufenden
@@ -357,10 +366,25 @@ def spiele_ein(db: Session, daten: dict[str, Any]) -> dict[str, int]:
     db.flush()
 
     # --- Wunschliste ------------------------------------------------------
+    listen_ids: dict[str, int] = {liste.name: liste.id
+                                  for liste in db.scalars(select(WatchListe))}
+    for zeile in daten.get("listen") or []:
+        name = zeile.get("name")
+        if not name or name in listen_ids:
+            continue
+        liste = WatchListe(name=name, beschreibung=zeile.get("beschreibung"),
+                           budget=zeile.get("budget"), farbe=zeile.get("farbe"),
+                           erstellt_am=_zeit(zeile.get("erstellt_am")) or datetime.now(UTC))
+        db.add(liste)
+        db.flush()
+        listen_ids[name] = liste.id
+        bericht["listen"] = bericht.get("listen", 0) + 1
+
     for zeile in daten.get("wunschliste") or []:
         item = db.scalar(select(WatchItem).where(WatchItem.url == zeile.get("url")))
         if item is None:
             item = WatchItem(**_mit_zeiten(zeile, WATCH_FELDER))
+            item.liste_id = listen_ids.get(zeile.get("liste") or "")
             db.add(item)
             db.flush()
             bericht["wunschliste"] += 1

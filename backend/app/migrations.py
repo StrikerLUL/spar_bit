@@ -235,6 +235,14 @@ def _schritt_006(conn: Connection) -> None:
     indizes_aus_modellen(conn, Base.metadata)
 
 
+def _schritt_007(conn: Connection) -> None:
+    """Wunschlisten - die Tabelle kommt von create_all, die Spalte hierher."""
+    from .models import Base
+
+    spalte_ergaenzen(conn, "watch_items", "liste_id", "INTEGER")
+    indizes_aus_modellen(conn, Base.metadata)
+
+
 SCHRITTE: list[Schritt] = [
     Schritt(1, "Spalten der Releases bis 1.0", _schritt_001),
     Schritt(2, "Fehlende Indizes nachziehen", _schritt_002),
@@ -242,6 +250,7 @@ SCHRITTE: list[Schritt] = [
     Schritt(4, "Produktkennung je Deal, rueckwirkend gefuellt", _schritt_004),
     Schritt(5, "Ablaufdatum, aus den Rohdaten nachgetragen", _schritt_005),
     Schritt(6, "Push-Abos", _schritt_006),
+    Schritt(7, "Wunschlisten mit Budget", _schritt_007),
 ]
 
 
