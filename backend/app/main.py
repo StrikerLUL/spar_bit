@@ -4,14 +4,17 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
+from . import gesundheit
+from .auth import current_user
 from .config import settings
 from .currency import set_rates
-from .db import get_setting, init_db, session_scope
+from .db import get_db, get_setting, init_db, session_scope
 from .events import broker
 from .logging_setup import setup_logging
 from .routers import (
@@ -25,6 +28,7 @@ from .routers import (
     watch_routes,
 )
 from .sicherheitsheader import SicherheitsHeader
+from .tokens import pruefe as pruefe_token
 
 setup_logging()
 log = logging.getLogger("sparbit")
@@ -91,8 +95,40 @@ app.include_router(watch_routes.extern_router)
 
 
 @app.get("/api/health")
-def health() -> dict:
-    return {"status": "ok"}
+def health(response: Response) -> dict:
+    """Tiefencheck - ohne Anmeldung, damit ein Wachhund ihn abfragen kann.
+
+    Herausgegeben werden nur Zustaende, keine Daten: welcher Teil in
+    Ordnung ist und seit wann nichts mehr laeuft. 503 gibt es erst,
+    wenn wirklich etwas kaputt ist - ein Mangel (degraded) bleibt 200,
+    sonst startet ein Container-Orchestrator den Dienst neu, obwohl er
+    seine Arbeit tut.
+    """
+    stand = gesundheit.bericht()
+    if stand["status"] == "down":
+        response.status_code = 503
+    return stand
+
+
+@app.get("/api/metrics", response_class=PlainTextResponse)
+def metrics(request: Request, db: Session = Depends(get_db)) -> str:
+    """Prometheus-Format. Die Zahlen liegen ohnehin schon in der Datenbank.
+
+    Anders als /api/health nicht offen: die Zahlen verraten, welche
+    Quellen laufen und wie viele Deals hier liegen. Zugang hat, wer
+    angemeldet ist - oder ein API-Token schickt, wie es Prometheus mit
+    bearer_token_file ohnehin kann.
+    """
+    try:
+        current_user(request, db)
+        return gesundheit.metriken()
+    except HTTPException:
+        pass
+
+    kopf = request.headers.get("authorization", "")
+    if kopf.lower().startswith("bearer ") and pruefe_token(db, kopf.split(" ", 1)[1].strip()):
+        return gesundheit.metriken()
+    raise HTTPException(401, "Anmeldung oder API-Token noetig.")
 
 
 @app.exception_handler(Exception)

@@ -43,9 +43,16 @@ def info(db: Session = Depends(get_db)) -> dict:
     wal = settings.db_path.with_suffix(".db-wal")
     if wal.exists():
         db_bytes += wal.stat().st_size
+    from .. import migrations
+    from ..db import engine
+
     return {
         "version": "1.0.0",
         "python": sys.version.split()[0],
+        # Damit sichtbar ist, auf welchem Stand diese Datenbank steht -
+        # vorher liess sich das nur am Vorhandensein einzelner Spalten raten.
+        "schema_stand": migrations.version(engine),
+        "schema_neuester": migrations.neuester_stand(),
         "platform": platform.platform(),
         "gestartet": STARTED_AT,
         "laufzeit_sekunden": int((datetime.now(UTC) - STARTED_AT).total_seconds()),
