@@ -10,10 +10,11 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .. import steamwunsch
-from ..auth import current_user
+from ..auth import current_user, darf_schreiben
+from ..besitz import gehoert_mir, nur_meine
 from ..db import get_db
 from ..learning import notiere, trainiere, vorschlaege
-from ..models import ApiToken, Deal, WatchItem, WatchListe, WatchPrice, utcnow
+from ..models import ApiToken, Deal, User, WatchItem, WatchListe, WatchPrice, utcnow
 from ..pricewatch import NichtGefunden, preis_aus_seite
 from ..pricewatch import pruefe as pruefe_eintrag
 from ..scheduler import get_http
@@ -59,18 +60,23 @@ def _liste_dict(liste: WatchListe, artikel: list[WatchItem]) -> dict:
 
 
 @router.get("/listen")
-def listen(db: Session = Depends(get_db)) -> list[dict]:
+def listen(db: Session = Depends(get_db),
+           user: User = Depends(current_user)) -> list[dict]:
     artikel: dict[int, list[WatchItem]] = {}
-    for eintrag in db.scalars(select(WatchItem).where(WatchItem.liste_id.is_not(None))):
+    for eintrag in db.scalars(nur_meine(select(WatchItem), WatchItem, user)
+                              .where(WatchItem.liste_id.is_not(None))):
         artikel.setdefault(eintrag.liste_id, []).append(eintrag)
     return [_liste_dict(liste, artikel.get(liste.id, []))
-            for liste in db.scalars(select(WatchListe).order_by(WatchListe.name))]
+            for liste in db.scalars(nur_meine(select(WatchListe), WatchListe, user)
+                                    .order_by(WatchListe.name))]
 
 
 @router.post("/listen")
-def liste_anlegen(body: ListeBody, db: Session = Depends(get_db)) -> dict:
+def liste_anlegen(body: ListeBody, db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
     liste = WatchListe(name=body.name, beschreibung=body.beschreibung or None,
-                       budget=body.budget, farbe=body.farbe or None)
+                       budget=body.budget, farbe=body.farbe or None,
+                       benutzer_id=user.id)
     db.add(liste)
     db.commit()
     db.refresh(liste)
@@ -79,9 +85,10 @@ def liste_anlegen(body: ListeBody, db: Session = Depends(get_db)) -> dict:
 
 @router.patch("/listen/{liste_id}")
 def liste_aendern(liste_id: int, body: ListeBody,
-                  db: Session = Depends(get_db)) -> dict:
+                  db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
     liste = db.get(WatchListe, liste_id)
-    if liste is None:
+    if liste is None or not gehoert_mir(liste, user):
         raise HTTPException(404, "Liste nicht gefunden")
     liste.name = body.name
     liste.beschreibung = body.beschreibung or None
@@ -93,14 +100,15 @@ def liste_aendern(liste_id: int, body: ListeBody,
 
 
 @router.delete("/listen/{liste_id}")
-def liste_loeschen(liste_id: int, db: Session = Depends(get_db)) -> dict:
+def liste_loeschen(liste_id: int, db: Session = Depends(get_db),
+                   user: User = Depends(darf_schreiben)) -> dict:
     """Liste weg - die Artikel darin bleiben.
 
     Loeschen soll eine Ordnung aufloesen, keine Arbeit vernichten: die
     Artikel liegen danach wieder in der allgemeinen Wunschliste.
     """
     liste = db.get(WatchListe, liste_id)
-    if liste is None:
+    if liste is None or not gehoert_mir(liste, user):
         raise HTTPException(404, "Liste nicht gefunden")
     anzahl = 0
     for eintrag in db.scalars(select(WatchItem).where(WatchItem.liste_id == liste_id)):
@@ -143,15 +151,18 @@ def _watch_dict(eintrag: WatchItem, verlauf: list | None = None) -> dict:
 
 
 @router.get("/watch")
-def liste(db: Session = Depends(get_db)) -> list[dict]:
+def liste(db: Session = Depends(get_db),
+          user: User = Depends(current_user)) -> list[dict]:
     return [_watch_dict(e) for e in db.scalars(
-        select(WatchItem).order_by(desc(WatchItem.erstellt_am)))]
+        nur_meine(select(WatchItem), WatchItem, user)
+        .order_by(desc(WatchItem.erstellt_am)))]
 
 
 @router.get("/watch/{watch_id}")
-def einzeln(watch_id: int, db: Session = Depends(get_db)) -> dict:
+def einzeln(watch_id: int, db: Session = Depends(get_db),
+            user: User = Depends(current_user)) -> dict:
     eintrag = db.get(WatchItem, watch_id)
-    if eintrag is None:
+    if eintrag is None or not gehoert_mir(eintrag, user):
         raise HTTPException(404, "Nicht gefunden")
     verlauf = db.scalars(select(WatchPrice).where(WatchPrice.watch_id == watch_id)
                          .order_by(WatchPrice.ts.asc()).limit(200))
@@ -160,14 +171,15 @@ def einzeln(watch_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/watch")
-async def anlegen(body: WatchBody, db: Session = Depends(get_db)) -> dict:
+async def anlegen(body: WatchBody, db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
     """Artikel aufnehmen und gleich einmal abfragen.
 
     Der erste Abruf passiert sofort und synchron: so erfaehrt man auf der
     Stelle, ob die Seite ueberhaupt lesbar ist, statt es erst in drei
     Stunden zu merken.
     """
-    eintrag = WatchItem(**body.model_dump())
+    eintrag = WatchItem(**body.model_dump(), benutzer_id=user.id)
     db.add(eintrag)
     db.commit()
     db.refresh(eintrag)
@@ -347,10 +359,13 @@ def _name_aus_url(url: str) -> str:
 
 
 @router.put("/watch/{watch_id}")
-def aendern(watch_id: int, body: WatchBody, db: Session = Depends(get_db)) -> dict:
+def aendern(watch_id: int, body: WatchBody, db: Session = Depends(get_db),
+            user: User = Depends(darf_schreiben)) -> dict:
     eintrag = db.get(WatchItem, watch_id)
-    if eintrag is None:
+    if eintrag is None or not gehoert_mir(eintrag, user):
         raise HTTPException(404, "Nicht gefunden")
+    if eintrag.benutzer_id is None:
+        eintrag.benutzer_id = user.id
     for schluessel, wert in body.model_dump().items():
         setattr(eintrag, schluessel, wert)
     if eintrag.aktiv:
@@ -429,14 +444,16 @@ class InteraktionBody(BaseModel):
 
 @router.post("/deals/{deal_id}/interaktion")
 def interaktion(deal_id: int, body: InteraktionBody,
-                db: Session = Depends(get_db)) -> dict:
-    notiere(db, deal_id, body.art)
+                db: Session = Depends(get_db),
+                user: User = Depends(current_user)) -> dict:
+    notiere(db, deal_id, body.art, benutzer_id=user.id)
     return {"ok": True}
 
 
 @router.get("/empfehlungen/status")
-def lern_status(db: Session = Depends(get_db)) -> dict:
-    modell = trainiere(db)
+def lern_status(db: Session = Depends(get_db),
+                user: User = Depends(current_user)) -> dict:
+    modell = trainiere(db, benutzer_id=user.id)
     return {
         "bereit": modell.bereit,
         "positiv": round(modell.n_positiv, 1),
@@ -449,8 +466,9 @@ def lern_status(db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/empfehlungen/regeln")
-def regel_vorschlaege(db: Session = Depends(get_db)) -> list[dict]:
-    return [asdict(v) for v in vorschlaege(db)]
+def regel_vorschlaege(db: Session = Depends(get_db),
+                      user: User = Depends(current_user)) -> list[dict]:
+    return [asdict(v) for v in vorschlaege(db, benutzer_id=user.id)]
 
 
 # --- Token fuer die Erweiterung -------------------------------------------
@@ -460,24 +478,30 @@ class TokenBody(BaseModel):
 
 
 @router.get("/tokens")
-def token_liste(db: Session = Depends(get_db)) -> list[dict]:
+def token_liste(db: Session = Depends(get_db),
+                user: User = Depends(current_user)) -> list[dict]:
     return [{"id": t.id, "name": t.name, "praefix": t.praefix,
              "erstellt_am": t.erstellt_am, "zuletzt_genutzt": t.zuletzt_genutzt}
-            for t in db.scalars(select(ApiToken).order_by(ApiToken.id))]
+            for t in db.scalars(nur_meine(select(ApiToken), ApiToken, user)
+                                .order_by(ApiToken.id))]
 
 
 @router.post("/tokens")
-def token_anlegen(body: TokenBody, db: Session = Depends(get_db)) -> dict:
+def token_anlegen(body: TokenBody, db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
     zeile, klartext = erzeuge(db, body.name)
+    zeile.benutzer_id = user.id
+    db.commit()
     # Der Klartext ist genau hier einmal zu sehen - danach nur noch der Hash.
     return {"id": zeile.id, "name": zeile.name, "token": klartext,
             "hinweis": "Jetzt kopieren — dieser Schlüssel wird nie wieder angezeigt."}
 
 
 @router.delete("/tokens/{token_id}")
-def token_loeschen(token_id: int, db: Session = Depends(get_db)) -> dict:
+def token_loeschen(token_id: int, db: Session = Depends(get_db),
+                   user: User = Depends(darf_schreiben)) -> dict:
     zeile = db.get(ApiToken, token_id)
-    if zeile is None:
+    if zeile is None or not gehoert_mir(zeile, user):
         raise HTTPException(404, "Token nicht gefunden")
     db.delete(zeile)
     db.commit()

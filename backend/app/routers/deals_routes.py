@@ -11,7 +11,7 @@ from ..auth import current_user
 from ..db import get_db
 from ..gratischeck import LABEL as CHECK_LABEL
 from ..learning import trainiere
-from ..models import Deal, Match, Rule, SourceConfig, utcnow
+from ..models import Deal, Match, Rule, SourceConfig, User, utcnow
 from ..pricefehler import HEISS as PF_HEISS
 from ..pricefehler import VERDACHT as PF_VERDACHT
 from ..search import fts_verfuegbar, match_bedingung
@@ -64,6 +64,7 @@ def list_deals(
     limit: int = Query(60, le=200),
     offset: int = 0,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> dict:
     stmt = select(Deal)
     # 18+ ist kein Filter, sondern eine getrennte Ablage: entweder man ist
@@ -112,7 +113,7 @@ def list_deals(
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
     if sortierung == "fuer_mich":
-        return _fuer_mich(db, stmt, total, limit, offset)
+        return _fuer_mich(db, stmt, total, limit, offset, benutzer_id=user.id)
 
     rows = db.scalars(stmt.order_by(desc(Deal.first_seen)).limit(limit).offset(offset))
     return {"total": total, "items": [_deal_dict(d) for d in rows]}
@@ -126,13 +127,14 @@ EMPFEHLUNG_POOL = 600
 PASST_AB = 0.6
 
 
-def _fuer_mich(db: Session, stmt, total: int, limit: int, offset: int) -> dict:
+def _fuer_mich(db: Session, stmt, total: int, limit: int, offset: int,
+               benutzer_id: int | None = None) -> dict:
     """Nach gelerntem Interesse sortieren.
 
     Faellt zurueck auf "neu zuerst", solange zu wenig gelernt wurde - eine
     Reihenfolge aus drei Beispielen waere geraten, nicht empfohlen.
     """
-    modell = trainiere(db)
+    modell = trainiere(db, benutzer_id=benutzer_id)
     kandidaten = list(db.scalars(
         stmt.order_by(desc(Deal.first_seen)).limit(EMPFEHLUNG_POOL)))
 

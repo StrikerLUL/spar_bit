@@ -70,8 +70,12 @@ def test_zu_wenig_verlauf_wird_nicht_geschaetzt(client):
 def test_regeln_export_laesst_kanaele_weg(client):
     """Eine Regel aus einer fremden Installation darf nicht auf Kanäle
     zeigen, die es hier gar nicht gibt."""
+    kanal = client.post("/api/channels", json={
+        "type": "webhook", "name": "Test",
+        "config": {"url": "https://example.de/hook"}}).json()
     client.post("/api/rules", json={"name": "LEGO", "keywords": ["lego"],
-                                    "channels": [1], "priority": "SOFORT"})
+                                    "channels": [kanal["id"]],
+                                    "priority": "SOFORT"})
     export = client.get("/api/rules/export").json()
     assert export["format"] == "sparbit-regeln"
     assert export["regeln"][0]["name"] == "LEGO"

@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from ..auth import current_user
+from ..auth import current_user, darf_schreiben
+from ..besitz import gehoert_mir, nur_meine
 from ..currency import DEFAULT_RATES, get_rates, set_rates, to_eur
 from ..db import get_db, get_setting, set_setting
 from ..gratischeck import LABEL as GRATIS_LABEL
@@ -27,6 +28,7 @@ from ..models import (
     Rule,
     SavedSearch,
     SourceConfig,
+    User,
     utcnow,
 )
 from ..pricefehler import HEISS as PF_HEISS
@@ -333,14 +335,17 @@ class SavedSearchBody(BaseModel):
 
 
 @router.get("/searches")
-def list_searches(db: Session = Depends(get_db)) -> list[dict]:
+def list_searches(db: Session = Depends(get_db),
+                  user: User = Depends(current_user)) -> list[dict]:
+    stmt = nur_meine(select(SavedSearch), SavedSearch, user).order_by(SavedSearch.id)
     return [{"id": s.id, "name": s.name, "filter": s.filter}
-            for s in db.scalars(select(SavedSearch).order_by(SavedSearch.id))]
+            for s in db.scalars(stmt)]
 
 
 @router.post("/searches")
-def create_search(body: SavedSearchBody, db: Session = Depends(get_db)) -> dict:
-    row = SavedSearch(name=body.name, filter=body.filter)
+def create_search(body: SavedSearchBody, db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
+    row = SavedSearch(name=body.name, filter=body.filter, benutzer_id=user.id)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -348,9 +353,10 @@ def create_search(body: SavedSearchBody, db: Session = Depends(get_db)) -> dict:
 
 
 @router.delete("/searches/{search_id}")
-def delete_search(search_id: int, db: Session = Depends(get_db)) -> dict:
+def delete_search(search_id: int, db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
     row = db.get(SavedSearch, search_id)
-    if row is None:
+    if row is None or not gehoert_mir(row, user):
         raise HTTPException(404, "Suche nicht gefunden")
     db.delete(row)
     db.commit()

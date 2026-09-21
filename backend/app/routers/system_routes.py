@@ -16,7 +16,7 @@ from .. import backup as backup_mod
 from .. import claimer as claimer_mod
 from .. import erwachsen as erwachsen_mod
 from .. import gratischeck, updater
-from ..auth import current_user
+from ..auth import current_user, nur_admin
 from ..config import settings
 from ..db import get_db, get_setting, set_setting
 from ..events import broker
@@ -33,6 +33,10 @@ from ..models import (
 
 router = APIRouter(prefix="/api/system", tags=["system"],
                    dependencies=[Depends(current_user)])
+# Eine Sicherung enthaelt die Geheimnisse aller Konten, ein Restore
+# ueberschreibt ihre Regeln, und ein Update betrifft die ganze Anlage.
+# Das ist nichts, was ein einzelnes Mitglied entscheiden sollte.
+nur_fuer_admins = [Depends(nur_admin)]
 
 STARTED_AT = datetime.now(UTC)
 
@@ -77,7 +81,7 @@ def logs(limit: int = Query(300, le=2000), level: str = "ALL") -> list[dict]:
     return recent_logs(limit, level)
 
 
-@router.get("/backup")
+@router.get("/backup", dependencies=nur_fuer_admins)
 def backup(umfang: str = Query("voll", pattern="^(voll|einstellungen)$"),
            db: Session = Depends(get_db)) -> JSONResponse:
     """Vollstaendige Sicherung als JSON.
@@ -100,7 +104,7 @@ class BackupWunsch(BaseModel):
     passwort: str = ""
 
 
-@router.post("/backup")
+@router.post("/backup", dependencies=nur_fuer_admins)
 def backup_verschluesselt(body: BackupWunsch,
                           db: Session = Depends(get_db)) -> JSONResponse:
     """Sicherung mit Passwort. Ohne Passwort dasselbe wie GET."""
@@ -127,7 +131,7 @@ def backup_verschluesselt(body: BackupWunsch,
                  f'attachment; filename="sparbit-backup-{stempel}.json.enc"'})
 
 
-@router.post("/restore")
+@router.post("/restore", dependencies=nur_fuer_admins)
 def restore(payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
     """Sicherung einspielen.
 
@@ -157,7 +161,7 @@ def restore(payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.get("/backups")
+@router.get("/backups", dependencies=nur_fuer_admins)
 def backups_liste() -> dict:
     """Die automatisch geschriebenen Sicherungen im Datenverzeichnis."""
     return {
@@ -167,7 +171,7 @@ def backups_liste() -> dict:
     }
 
 
-@router.post("/backups")
+@router.post("/backups", dependencies=nur_fuer_admins)
 def backup_jetzt(db: Session = Depends(get_db)) -> dict:
     """Jetzt eine Sicherung in den Ordner schreiben."""
     passwort = str(get_setting(db, "backup_passwort") or "")
@@ -177,7 +181,7 @@ def backup_jetzt(db: Session = Depends(get_db)) -> dict:
             "alte_entfernt": entfernt}
 
 
-@router.get("/backups/{name}")
+@router.get("/backups/{name}", dependencies=nur_fuer_admins)
 def backup_holen(name: str) -> FileResponse:
     pfad = (backup_mod.ordner() / name).resolve()
     if not pfad.is_relative_to(backup_mod.ordner().resolve()) or not pfad.is_file():
@@ -185,7 +189,7 @@ def backup_holen(name: str) -> FileResponse:
     return FileResponse(pfad, media_type="application/json", filename=pfad.name)
 
 
-@router.delete("/backups/{name}")
+@router.delete("/backups/{name}", dependencies=nur_fuer_admins)
 def backup_loeschen(name: str) -> dict:
     pfad = (backup_mod.ordner() / name).resolve()
     if not pfad.is_relative_to(backup_mod.ordner().resolve()) or not pfad.is_file():

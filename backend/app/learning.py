@@ -140,7 +140,22 @@ def _lesbar(merkmal: str) -> str:
     }.get(art, wert)
 
 
-def trainiere(db: Session, tage: int = 120) -> Modell:
+def _nur(stmt, benutzer_id: int | None):
+    """Auf die Spuren eines Benutzers einschraenken.
+
+    Ohne das lernt der Feed aus dem Verhalten aller zusammen - und
+    schlaegt dem einen vor, was der andere gemerkt hat. Zwei Geschmaecker
+    in einem Modell ergeben keinen Durchschnitt, sondern Rauschen.
+    NULL zaehlt mit: so sehen Spuren aus der Zeit vor den Konten aus.
+    """
+    if benutzer_id is None:
+        return stmt
+    from sqlalchemy import or_
+    return stmt.where(or_(Interaction.benutzer_id == benutzer_id,
+                          Interaction.benutzer_id.is_(None)))
+
+
+def trainiere(db: Session, tage: int = 120, benutzer_id: int | None = None) -> Modell:
     """Modell aus den aufgezeichneten Interaktionen bauen.
 
     Als negative Beispiele dienen Deals, die im selben Zeitraum durch den
@@ -152,7 +167,7 @@ def trainiere(db: Session, tage: int = 120) -> Modell:
     gewichte: dict[int, float] = defaultdict(float)
     verworfen: set[int] = set()
     for eintrag in db.scalars(
-            select(Interaction).where(Interaction.ts >= seit)):
+            _nur(select(Interaction).where(Interaction.ts >= seit), benutzer_id)):
         if eintrag.art in NEGATIV:
             verworfen.add(eintrag.deal_id)
         elif eintrag.art in POSITIV:
@@ -198,7 +213,8 @@ class Vorschlag:
     treffer: int
 
 
-def vorschlaege(db: Session, tage: int = 120, limit: int = 4) -> list[Vorschlag]:
+def vorschlaege(db: Session, tage: int = 120, limit: int = 4,
+                benutzer_id: int | None = None) -> list[Vorschlag]:
     """Aus dem Verhalten Regeln ableiten, die man anlegen koennte.
 
     Vorgeschlagen wird nur, was oft genug vorkam - eine Regel aus zwei
@@ -206,8 +222,9 @@ def vorschlaege(db: Session, tage: int = 120, limit: int = 4) -> list[Vorschlag]
     """
     seit = utcnow() - timedelta(days=tage)
     gemocht = [eintrag.deal_id for eintrag in db.scalars(
-        select(Interaction).where(Interaction.ts >= seit,
-                                  Interaction.art.in_(("gemerkt", "alarm"))))]
+        _nur(select(Interaction).where(Interaction.ts >= seit,
+                                       Interaction.art.in_(("gemerkt", "alarm"))),
+             benutzer_id))]
     if len(set(gemocht)) < MIN_POSITIV:
         return []
 
@@ -262,16 +279,17 @@ def vorschlaege(db: Session, tage: int = 120, limit: int = 4) -> list[Vorschlag]
     return raus
 
 
-def notiere(db: Session, deal_id: int, art: str) -> None:
+def notiere(db: Session, deal_id: int, art: str,
+            benutzer_id: int | None = None) -> None:
     """Eine Interaktion festhalten. Doppelte am selben Tag werden gespart."""
     if art not in POSITIV and art not in NEGATIV:
         return
     heute = utcnow() - timedelta(hours=12)
     schon_da = db.scalar(
-        select(Interaction).where(Interaction.deal_id == deal_id,
-                                  Interaction.art == art,
-                                  Interaction.ts >= heute))
+        _nur(select(Interaction).where(Interaction.deal_id == deal_id,
+                                       Interaction.art == art,
+                                       Interaction.ts >= heute), benutzer_id))
     if schon_da:
         return
-    db.add(Interaction(deal_id=deal_id, art=art))
+    db.add(Interaction(deal_id=deal_id, art=art, benutzer_id=benutzer_id))
     db.commit()

@@ -243,6 +243,49 @@ def _schritt_007(conn: Connection) -> None:
     indizes_aus_modellen(conn, Base.metadata)
 
 
+def _schritt_008(conn: Connection) -> None:
+    """Mehrbenutzer: Rollen und Besitz - und alles dem Erstbenutzer geben.
+
+    Der heikle Teil ist nicht die Spalte, sondern der Bestand: eine
+    Installation, die bisher einem gehoerte, darf nach dem Update nicht
+    dastehen, als gehoerte nichts mehr jemandem. Alles Vorhandene
+    bekommt darum den ersten Benutzer - genau den, der es angelegt hat.
+    """
+    from .models import ADMIN, Base
+
+    spalte_ergaenzen(conn, "users", "rolle", f"VARCHAR(16) DEFAULT '{ADMIN}'")
+    spalte_ergaenzen(conn, "users", "aktiv", "BOOLEAN DEFAULT 1")
+
+    besitz = ("rules", "channels", "watch_items", "watch_listen",
+              "saved_searches", "interactions", "api_tokens", "push_abos")
+    for tabelle in besitz:
+        spalte_ergaenzen(conn, tabelle, "benutzer_id", "INTEGER")
+
+    if not tabelle_existiert(conn, "users"):
+        return
+
+    erster = conn.execute(text("SELECT MIN(id) FROM users")).scalar()
+    if erster is None:
+        return                      # frische Installation, nichts zu erben
+
+    # Wer schon da war, ist Admin: vorher gab es keine Rollen, und die
+    # Alternative waere, sich aus der eigenen Installation auszusperren.
+    conn.execute(text(f"UPDATE users SET rolle = '{ADMIN}' WHERE rolle IS NULL"))
+    conn.execute(text("UPDATE users SET aktiv = 1 WHERE aktiv IS NULL"))
+
+    uebertragen = 0
+    for tabelle in besitz:
+        if not tabelle_existiert(conn, tabelle):
+            continue
+        ergebnis = conn.execute(
+            text(f"UPDATE {tabelle} SET benutzer_id = :u WHERE benutzer_id IS NULL"),
+            {"u": erster})
+        uebertragen += ergebnis.rowcount or 0
+    if uebertragen:
+        log.info("Migration: %d Datensaetze dem Erstbenutzer zugeordnet", uebertragen)
+    indizes_aus_modellen(conn, Base.metadata)
+
+
 SCHRITTE: list[Schritt] = [
     Schritt(1, "Spalten der Releases bis 1.0", _schritt_001),
     Schritt(2, "Fehlende Indizes nachziehen", _schritt_002),
@@ -251,6 +294,7 @@ SCHRITTE: list[Schritt] = [
     Schritt(5, "Ablaufdatum, aus den Rohdaten nachgetragen", _schritt_005),
     Schritt(6, "Push-Abos", _schritt_006),
     Schritt(7, "Wunschlisten mit Budget", _schritt_007),
+    Schritt(8, "Mehrbenutzer: Rollen und Besitz", _schritt_008),
 ]
 
 

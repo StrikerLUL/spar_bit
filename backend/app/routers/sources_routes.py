@@ -9,15 +9,19 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from .. import erwachsen as erwachsen_mod
-from ..auth import current_user
+from ..auth import current_user, nur_admin
 from ..db import get_db
 from ..models import SourceConfig, SourceRun, utcnow
 from ..scheduler import build_context, run_source, schedule_source
 from ..sources import all_sources, get_source
 
 log = logging.getLogger(__name__)
+# Lesen darf jeder Angemeldete, aendern nur ein Admin: eine Quelle
+# kostet Anfragen bei einem fremden Server, und wer sie umstellt,
+# entscheidet fuer die ganze Anlage - nicht nur fuer sich.
 router = APIRouter(prefix="/api/sources", tags=["sources"],
                    dependencies=[Depends(current_user)])
+schreib_abhaengig = [Depends(nur_admin)]
 
 
 class FeedSuche(BaseModel):
@@ -99,7 +103,7 @@ def list_sources(db: Session = Depends(get_db)) -> list[dict]:
     return out
 
 
-@router.post("/feed-suche")
+@router.post(dependencies=schreib_abhaengig, path="/feed-suche")
 async def feed_suche(body: FeedSuche) -> dict:
     """Welche Feeds zeichnet diese Adresse aus?
 
@@ -142,7 +146,7 @@ def source_runs(source_id: str, limit: int = 30,
              "error": r.error} for r in rows]
 
 
-@router.patch("/{source_id}")
+@router.patch(dependencies=schreib_abhaengig, path="/{source_id}")
 def update_source(source_id: str, body: SourceUpdate,
                   db: Session = Depends(get_db)) -> dict:
     src = get_source(source_id)
@@ -170,7 +174,7 @@ def update_source(source_id: str, body: SourceUpdate,
     return _serialize(src, cfg, {})
 
 
-@router.post("/{source_id}/test")
+@router.post(dependencies=schreib_abhaengig, path="/{source_id}/test")
 async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
     """'Jetzt testen' - health_check mit Live-Ergebnis, ohne zu speichern."""
     src = get_source(source_id)
@@ -210,7 +214,7 @@ async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
     }
 
 
-@router.post("/{source_id}/run")
+@router.post(dependencies=schreib_abhaengig, path="/{source_id}/run")
 async def run_now(source_id: str, db: Session = Depends(get_db)) -> dict:
     if get_source(source_id) is None:
         raise HTTPException(404, "Quelle unbekannt")
@@ -218,7 +222,7 @@ async def run_now(source_id: str, db: Session = Depends(get_db)) -> dict:
     return await run_source(source_id, manual=True)
 
 
-@router.post("/{source_id}/reset")
+@router.post(dependencies=schreib_abhaengig, path="/{source_id}/reset")
 def reset_breaker(source_id: str, db: Session = Depends(get_db)) -> dict:
     cfg = db.get(SourceConfig, source_id)
     if cfg is None:
@@ -277,7 +281,7 @@ class OpmlImport(BaseModel):
     ziel: str = "custom_feed"
 
 
-@router.post("/opml/import")
+@router.post(dependencies=schreib_abhaengig, path="/opml/import")
 def opml_import(body: OpmlImport, db: Session = Depends(get_db)) -> dict:
     """OPML aus einem Feedreader einlesen.
 

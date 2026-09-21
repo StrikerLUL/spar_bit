@@ -51,6 +51,18 @@ const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
 
 // --- Typen ---------------------------------------------------------------
 
+export interface Benutzer {
+  id: number;
+  username: string;
+  /** admin | mitglied | gast */
+  rolle: string;
+  aktiv: boolean;
+  erstellt: string;
+  zuletzt_angemeldet: string | null;
+  zweifaktor: boolean;
+  ich: boolean;
+}
+
 export interface ZweiFaktorStatus {
   aktiv: boolean;
   vorbereitet: boolean;
@@ -61,6 +73,7 @@ export interface AuthStatus {
   setup_done: boolean;
   logged_in: boolean;
   username: string | null;
+  rolle: string | null;
 }
 
 export interface GratisBefund {
@@ -691,6 +704,14 @@ export const api = {
     logout: () => post<{ ok: boolean }>("/auth/logout"),
     changePassword: (old_password: string, new_password: string) =>
       post<{ ok: boolean }>("/auth/password", { old_password, new_password }),
+    benutzer: () => get<Benutzer[]>("/auth/benutzer"),
+    benutzerAnlegen: (body: { username: string; password: string; rolle: string }) =>
+      post<Benutzer>("/auth/benutzer", body),
+    benutzerAendern: (id: number, body: { rolle?: string; aktiv?: boolean;
+                                          neues_passwort?: string }) =>
+      patch<Benutzer>(`/auth/benutzer/${id}`, body),
+    benutzerLoeschen: (id: number) =>
+      del<{ ok: boolean; geloescht: string }>(`/auth/benutzer/${id}`),
     zweifaktor: () => get<ZweiFaktorStatus>("/auth/zweifaktor"),
     zweifaktorStart: () =>
       post<{ geheimnis: string; otpauth: string }>("/auth/zweifaktor/start"),

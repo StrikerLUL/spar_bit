@@ -1,12 +1,13 @@
 import {
   AlertTriangle, ArrowUpCircle, BadgeCheck, CalendarClock, CheckCircle2, Copy,
-  Download,
+  Download, Users,
   HardDrive, Image, Keyboard, Lock, Puzzle, RefreshCw, ScrollText, ShieldCheck,
   Trash2, Upload, XCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
-  api, type ApiTokenInfo, type AppSettings, type BackupListe, type BilderStatus,
+  api, type ApiTokenInfo, type AppSettings, type BackupListe, type Benutzer,
+  type BilderStatus,
   type ErwachsenStatus, type GratisCheckStatus, type LogLine,
   type ProblemStatus, type SystemInfo, type UpdateStatus, type ZweiFaktorStatus,
 } from "@/lib/api";
@@ -32,6 +33,10 @@ const LEVEL_STYLES: Record<string, string> = {
 export function System({ liveLogs }: { liveLogs: LogLine[] }) {
   const { data: info, loading, reload } = useAsync<SystemInfo>(
     () => api.system.info(), []);
+  // Die eigene Rolle entscheidet, was auf dieser Seite überhaupt
+  // bedienbar ist - ein Mitglied sieht die Konten, ändert sie aber nicht.
+  const { data: status } = useAsync(() => api.auth.status(), []);
+  const rolle = status?.rolle ?? null;
   const [level, setLevel] = React.useState("ALL");
   const { data: logs, reload: reloadLogs } = useAsync<LogLine[]>(
     () => api.system.logs(level), [level]);
@@ -155,6 +160,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
               )}
             </CardContent>
           </Card>
+
+          <BenutzerCard meineRolle={rolle} />
 
           <ZweiFaktorCard />
 
@@ -637,6 +644,120 @@ const Row = ({ label, value }: { label: string; value: string }) => (
     <span className="truncate text-right font-medium" title={value}>{value}</span>
   </div>
 );
+
+
+/** Konten im Haushalt.
+ *
+ *  Sichtbar für alle — wer zusammen wohnt, weiß ohnehin, wer mitliest.
+ *  Ändern darf nur ein Admin. Abschalten statt löschen ist die
+ *  vorsichtige Variante: Regeln und Wunschliste bleiben erhalten. */
+function BenutzerCard({ meineRolle }: { meineRolle: string | null }) {
+  const toast = useToast();
+  const { data, reload } = useAsync<Benutzer[]>(() => api.auth.benutzer(), []);
+  const [offen, setOffen] = React.useState(false);
+  const [name, setName] = React.useState("");
+  const [passwort, setPasswort] = React.useState("");
+  const [rolle, setRolle] = React.useState("mitglied");
+  const admin = meineRolle === "admin";
+
+  if (!data) return <Skeleton className="h-40" />;
+
+  const anlegen = async () => {
+    try {
+      await api.auth.benutzerAnlegen({ username: name, password: passwort, rolle });
+      setName("");
+      setPasswort("");
+      setOffen(false);
+      reload();
+      toast.push("success", "Konto angelegt",
+        "Eigene Regeln, Kanäle und Wunschliste — getrennt von deinen.");
+    } catch (err) {
+      toast.push("error", "Anlegen fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  const aendern = async (id: number, patch: { rolle?: string; aktiv?: boolean }) => {
+    try {
+      await api.auth.benutzerAendern(id, patch);
+      reload();
+    } catch (err) {
+      toast.push("error", "Nicht möglich", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-primary" />
+          Konten
+          <Badge variant="outline">{data.length}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ul className="space-y-2">
+          {data.map((u) => (
+            <li key={u.id} className="flex items-center justify-between gap-2 text-xs">
+              <span className={cn("truncate", !u.aktiv && "text-muted-foreground line-through")}>
+                {u.username}
+                {u.ich && <span className="ml-1 text-muted-foreground">(du)</span>}
+                {u.zweifaktor && <span className="ml-1" title="Zweiter Faktor aktiv">🔒</span>}
+              </span>
+              {admin && !u.ich ? (
+                <div className="flex shrink-0 items-center gap-1">
+                  <Select value={u.rolle} className="h-7 w-28 text-xs"
+                          onChange={(e) => void aendern(u.id, { rolle: e.target.value })}>
+                    <option value="admin">Admin</option>
+                    <option value="mitglied">Mitglied</option>
+                    <option value="gast">Gast</option>
+                  </Select>
+                  <Switch checked={u.aktiv} label="Konto aktiv"
+                          onChange={(an) => void aendern(u.id, { aktiv: an })} />
+                </div>
+              ) : (
+                <Badge variant="outline">{u.rolle}</Badge>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {admin && (offen ? (
+          <div className="space-y-2 border-t border-border pt-3">
+            <Input value={name} placeholder="Benutzername"
+                   onChange={(e) => setName(e.target.value)} />
+            <Input type="password" value={passwort}
+                   placeholder="Passwort (mind. 10 Zeichen)"
+                   autoComplete="new-password"
+                   onChange={(e) => setPasswort(e.target.value)} />
+            <Select value={rolle} onChange={(e) => setRolle(e.target.value)}>
+              <option value="mitglied">Mitglied — eigene Regeln und Wunschliste</option>
+              <option value="gast">Gast — darf nur zusehen</option>
+              <option value="admin">Admin — verwaltet Quellen und Konten</option>
+            </Select>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => void anlegen()}
+                      disabled={name.length < 3 || passwort.length < 10}>
+                Anlegen
+              </Button>
+              <Button variant="ghost" onClick={() => setOffen(false)}>Abbrechen</Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="outline" className="w-full" onClick={() => setOffen(true)}>
+            <Users className="h-4 w-4" />
+            Konto hinzufügen
+          </Button>
+        ))}
+
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Jedes Konto hat eigene Regeln, Kanäle, Wunschlisten und gelernte
+          Vorlieben. Gemeinsam bleiben Quellen, gesammelte Deals und die
+          Systemeinstellungen.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
 
 
 /** Zweiter Faktor per Authenticator-App.

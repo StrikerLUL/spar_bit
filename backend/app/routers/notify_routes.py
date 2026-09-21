@@ -7,10 +7,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from ..auth import current_user
+from ..auth import current_user, darf_schreiben
+from ..besitz import gehoert_mir, nur_meine
 from ..db import get_db, get_setting, set_setting
 from ..models import Channel as ChannelRow
-from ..models import NotificationLog, PushAbo
+from ..models import NotificationLog, PushAbo, User
 from ..notify import all_channels, get_channel
 from ..scheduler import get_http
 
@@ -57,16 +58,26 @@ def channel_types() -> list[dict]:
 
 
 @router.get("")
-def list_channels(db: Session = Depends(get_db)) -> list[dict]:
-    return [_channel_dict(c) for c in db.scalars(select(ChannelRow).order_by(ChannelRow.id))]
+def list_channels(db: Session = Depends(get_db),
+                  user: User = Depends(current_user)) -> list[dict]:
+    stmt = nur_meine(select(ChannelRow), ChannelRow, user).order_by(ChannelRow.id)
+    return [_channel_dict(c) for c in db.scalars(stmt)]
+
+
+def _mein_kanal(channel_id: int, db: Session, user: User) -> ChannelRow:
+    row = db.get(ChannelRow, channel_id)
+    if row is None or not gehoert_mir(row, user):
+        raise HTTPException(404, "Kanal nicht gefunden")
+    return row
 
 
 @router.post("")
-def create_channel(body: ChannelBody, db: Session = Depends(get_db)) -> dict:
+def create_channel(body: ChannelBody, db: Session = Depends(get_db),
+                   user: User = Depends(darf_schreiben)) -> dict:
     if get_channel(body.type) is None:
         raise HTTPException(400, f"Unbekannter Kanaltyp '{body.type}'")
     row = ChannelRow(type=body.type, name=body.name, enabled=body.enabled,
-                     config=body.config)
+                     config=body.config, benutzer_id=user.id)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -75,10 +86,11 @@ def create_channel(body: ChannelBody, db: Session = Depends(get_db)) -> dict:
 
 @router.put("/{channel_id}")
 def update_channel(channel_id: int, body: ChannelBody,
-                   db: Session = Depends(get_db)) -> dict:
-    row = db.get(ChannelRow, channel_id)
-    if row is None:
-        raise HTTPException(404, "Kanal nicht gefunden")
+                   db: Session = Depends(get_db),
+                   user: User = Depends(darf_schreiben)) -> dict:
+    row = _mein_kanal(channel_id, db, user)
+    if row.benutzer_id is None:
+        row.benutzer_id = user.id
     row.name, row.enabled = body.name, body.enabled
     # Maskierte Werte nicht ueberschreiben: leere/maskierte Felder behalten.
     merged = dict(row.config or {})
@@ -95,20 +107,18 @@ def update_channel(channel_id: int, body: ChannelBody,
 
 
 @router.delete("/{channel_id}")
-def delete_channel(channel_id: int, db: Session = Depends(get_db)) -> dict:
-    row = db.get(ChannelRow, channel_id)
-    if row is None:
-        raise HTTPException(404, "Kanal nicht gefunden")
+def delete_channel(channel_id: int, db: Session = Depends(get_db),
+                   user: User = Depends(darf_schreiben)) -> dict:
+    row = _mein_kanal(channel_id, db, user)
     db.delete(row)
     db.commit()
     return {"ok": True}
 
 
 @router.post("/{channel_id}/test")
-async def test_channel(channel_id: int, db: Session = Depends(get_db)) -> dict:
-    row = db.get(ChannelRow, channel_id)
-    if row is None:
-        raise HTTPException(404, "Kanal nicht gefunden")
+async def test_channel(channel_id: int, db: Session = Depends(get_db),
+                       user: User = Depends(current_user)) -> dict:
+    row = _mein_kanal(channel_id, db, user)
     impl = get_channel(row.type)
     if impl is None:
         raise HTTPException(400, f"Unbekannter Kanaltyp '{row.type}'")
@@ -202,10 +212,16 @@ def push_schluessel(db: Session = Depends(get_db)) -> dict:
 
 
 @push_router.post("/abo")
-def push_anmelden(body: AboBody, db: Session = Depends(get_db)) -> dict:
+def push_anmelden(body: AboBody, db: Session = Depends(get_db),
+                  user: User = Depends(current_user)) -> dict:
     """Dieses Geraet anmelden. Derselbe Endpunkt zweimal ist kein Fehler -
     der Browser erneuert ihn von sich aus."""
     vorhanden = db.scalar(select(PushAbo).where(PushAbo.endpunkt == body.endpunkt))
+    if vorhanden is not None and not gehoert_mir(vorhanden, user):
+        # Derselbe Browser, anderes Konto: das Abo wechselt den Besitzer,
+        # statt beim alten zu bleiben - sonst bekaeme der Vorgaenger
+        # weiter die Meldungen auf dieses Geraet.
+        vorhanden.benutzer_id = user.id
     if vorhanden:
         vorhanden.p256dh = body.p256dh
         vorhanden.auth = body.auth
@@ -215,7 +231,7 @@ def push_anmelden(body: AboBody, db: Session = Depends(get_db)) -> dict:
         return {"ok": True, "neu": False, "id": vorhanden.id}
 
     abo = PushAbo(endpunkt=body.endpunkt, p256dh=body.p256dh, auth=body.auth,
-                  geraet=body.geraet[:255] or None)
+                  geraet=body.geraet[:255] or None, benutzer_id=user.id)
     db.add(abo)
     db.commit()
     db.refresh(abo)
@@ -223,17 +239,20 @@ def push_anmelden(body: AboBody, db: Session = Depends(get_db)) -> dict:
 
 
 @push_router.get("/abos")
-def push_liste(db: Session = Depends(get_db)) -> list[dict]:
+def push_liste(db: Session = Depends(get_db),
+               user: User = Depends(current_user)) -> list[dict]:
     return [{"id": a.id, "geraet": a.geraet or "unbekanntes Gerät",
              "erstellt_am": a.erstellt_am, "zuletzt_ok": a.zuletzt_ok,
              "host": a.endpunkt.split("/")[2] if "/" in a.endpunkt else ""}
-            for a in db.scalars(select(PushAbo).order_by(desc(PushAbo.erstellt_am)))]
+            for a in db.scalars(nur_meine(select(PushAbo), PushAbo, user)
+                                .order_by(desc(PushAbo.erstellt_am)))]
 
 
 @push_router.delete("/abo/{abo_id}")
-def push_abmelden(abo_id: int, db: Session = Depends(get_db)) -> dict:
+def push_abmelden(abo_id: int, db: Session = Depends(get_db),
+                  user: User = Depends(current_user)) -> dict:
     abo = db.get(PushAbo, abo_id)
-    if abo is None:
+    if abo is None or not gehoert_mir(abo, user):
         raise HTTPException(404, "Nicht gefunden")
     db.delete(abo)
     db.commit()

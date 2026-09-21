@@ -108,7 +108,8 @@ def erstelle(db: Session, umfang: str = "voll") -> dict[str, Any]:
     }
 
     # --- Konfiguration (immer dabei) --------------------------------------
-    daten["benutzer"] = _zeilen(db, User, ["username", "password_hash", "created_at"])
+    daten["benutzer"] = _zeilen(db, User, ["username", "password_hash",
+                                           "created_at", "rolle", "aktiv"])
     daten["einstellungen"] = [
         {"key": s.key, "value": s.value}
         for s in db.scalars(select(Setting))
@@ -310,6 +311,8 @@ def spiele_ein(db: Session, daten: dict[str, Any]) -> dict[str, int]:
         for zeile in daten["benutzer"]:
             db.add(User(username=zeile["username"],
                         password_hash=zeile["password_hash"],
+                        rolle=zeile.get("rolle") or "admin",
+                        aktiv=bool(zeile.get("aktiv", True)),
                         created_at=_zeit(zeile.get("created_at")) or datetime.now(UTC)))
             bericht["benutzer"] += 1
 

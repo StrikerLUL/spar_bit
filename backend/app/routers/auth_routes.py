@@ -8,10 +8,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import zweifaktor
-from ..auth import authenticate, clear_session, create_user, current_user, issue_session, setup_done
+from ..auth import (
+    authenticate,
+    clear_session,
+    create_user,
+    current_user,
+    hash_password,
+    issue_session,
+    nur_admin,
+    setup_done,
+)
 from ..db import get_db
 from ..loginguard import SANFT_AB, LoginGesperrt, client_ip, fehlversuch, pruefen, zuruecksetzen
-from ..models import User
+from ..models import ADMIN, ROLLEN, User
 
 log = logging.getLogger(__name__)
 
@@ -35,21 +44,33 @@ def status(request: Request, db: Session = Depends(get_db)) -> dict:
     done = setup_done(db)
     logged_in = False
     username = None
+    rolle = None
     if done:
         try:
             user = current_user(request, db)
-            logged_in, username = True, user.username
+            logged_in, username, rolle = True, user.username, user.rolle
         except HTTPException:
             pass
-    return {"setup_done": done, "logged_in": logged_in, "username": username}
+    return {"setup_done": done, "logged_in": logged_in, "username": username,
+            "rolle": rolle}
 
 
 @router.post("/setup")
 def setup(body: SetupBody, request: Request, response: Response,
           db: Session = Depends(get_db)) -> dict:
+    """Das erste Konto anlegen - und nur das.
+
+    Der Endpunkt ist offen, weil es vor dem ersten Benutzer niemanden
+    gibt, der sich anmelden koennte. Genau darum muss er zumachen,
+    sobald es einen gibt: sonst waere er ein Weg, sich ohne Anmeldung
+    ein Konto anzulegen. Weitere Benutzer legt ein Admin an.
+    """
+    if setup_done(db):
+        raise HTTPException(409, "Die Einrichtung ist abgeschlossen. Weitere "
+                                 "Benutzer legt ein Administrator an.")
     user = create_user(db, body.username, body.password)
     issue_session(response, user, secure=request.url.scheme == "https")
-    return {"ok": True, "username": user.username}
+    return {"ok": True, "username": user.username, "rolle": user.rolle}
 
 
 @router.post("/login")
@@ -69,7 +90,12 @@ def login(body: Credentials, request: Request, response: Response,
 
     try:
         user = authenticate(db, body.username, body.password)
-    except HTTPException:
+    except HTTPException as fehler:
+        if fehler.status_code != http_status.HTTP_401_UNAUTHORIZED:
+            # Ein abgeschaltetes Konto ist kein Rateversuch: das Passwort
+            # stimmt ja. Diese Meldung darf nicht unter "falsch" landen,
+            # sonst sucht der Betroffene an der falschen Stelle.
+            raise
         versuche = fehlversuch(db, ip, body.username)
         rest = SANFT_AB - versuche
         hinweis = ("Benutzername oder Passwort falsch."
@@ -213,3 +239,105 @@ def change_password(body: PasswordChange, db: Session = Depends(get_db),
     user.password_hash = hash_password(body.new_password)
     db.commit()
     return {"ok": True}
+
+
+# --- Benutzer verwalten ---------------------------------------------------
+
+class NeuerBenutzer(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=10, max_length=256)
+    rolle: str = "mitglied"
+
+
+class BenutzerAenderung(BaseModel):
+    rolle: str | None = None
+    aktiv: bool | None = None
+    neues_passwort: str | None = Field(default=None, min_length=10, max_length=256)
+
+
+def _benutzer_dict(u: User, ich: int) -> dict:
+    return {"id": u.id, "username": u.username, "rolle": u.rolle,
+            "aktiv": bool(u.aktiv), "erstellt": u.created_at,
+            "zuletzt_angemeldet": u.last_login,
+            "zweifaktor": bool(u.totp_aktiv), "ich": u.id == ich}
+
+
+@router.get("/benutzer")
+def benutzer_liste(db: Session = Depends(get_db),
+                   user: User = Depends(current_user)) -> list[dict]:
+    """Wer hier Konten hat. Sichtbar fuer alle - wer im selben Haushalt
+    wohnt, weiss ohnehin, wer mitliest."""
+    from sqlalchemy import select as sel
+    return [_benutzer_dict(u, user.id)
+            for u in db.scalars(sel(User).order_by(User.id))]
+
+
+@router.post("/benutzer")
+def benutzer_anlegen(body: NeuerBenutzer, db: Session = Depends(get_db),
+                     _: User = Depends(nur_admin)) -> dict:
+    neu = create_user(db, body.username, body.password, body.rolle)
+    return _benutzer_dict(neu, 0)
+
+
+@router.patch("/benutzer/{benutzer_id}")
+def benutzer_aendern(benutzer_id: int, body: BenutzerAenderung,
+                     db: Session = Depends(get_db),
+                     admin: User = Depends(nur_admin)) -> dict:
+    ziel = db.get(User, benutzer_id)
+    if ziel is None:
+        raise HTTPException(404, "Benutzer nicht gefunden")
+
+    if body.rolle is not None:
+        if body.rolle not in ROLLEN:
+            raise HTTPException(400, f"Unbekannte Rolle '{body.rolle}'.")
+        # Der letzte Admin darf sich nicht selbst entmachten - danach
+        # koennte niemand mehr Quellen umstellen oder Benutzer anlegen.
+        if ziel.rolle == ADMIN and body.rolle != ADMIN and _admins(db) <= 1:
+            raise HTTPException(409, "Das ist der letzte Administrator.")
+        ziel.rolle = body.rolle
+
+    if body.aktiv is not None:
+        if not body.aktiv and ziel.id == admin.id:
+            raise HTTPException(409, "Sich selbst abschalten geht nicht.")
+        if not body.aktiv and ziel.rolle == ADMIN and _admins(db) <= 1:
+            raise HTTPException(409, "Das ist der letzte Administrator.")
+        ziel.aktiv = body.aktiv
+
+    if body.neues_passwort:
+        # Ein Admin darf zuruecksetzen, ohne das alte zu kennen - sonst
+        # waere ein vergessenes Passwort das Ende des Kontos.
+        ziel.password_hash = hash_password(body.neues_passwort)
+        log.info("Passwort von '%s' durch Admin zurueckgesetzt", ziel.username)
+
+    db.commit()
+    return _benutzer_dict(ziel, admin.id)
+
+
+@router.delete("/benutzer/{benutzer_id}")
+def benutzer_loeschen(benutzer_id: int, db: Session = Depends(get_db),
+                      admin: User = Depends(nur_admin)) -> dict:
+    """Konto samt allem, was daran haengt.
+
+    Loeschen nimmt Regeln, Kanaele und Wunschliste mit - wer das nicht
+    will, schaltet das Konto ab, statt es zu loeschen.
+    """
+    ziel = db.get(User, benutzer_id)
+    if ziel is None:
+        raise HTTPException(404, "Benutzer nicht gefunden")
+    if ziel.id == admin.id:
+        raise HTTPException(409, "Sich selbst löschen geht nicht.")
+    if ziel.rolle == ADMIN and _admins(db) <= 1:
+        raise HTTPException(409, "Das ist der letzte Administrator.")
+
+    name = ziel.username
+    db.delete(ziel)
+    db.commit()
+    log.info("Benutzer '%s' geloescht", name)
+    return {"ok": True, "geloescht": name}
+
+
+def _admins(db: Session) -> int:
+    from sqlalchemy import func
+    from sqlalchemy import select as sel
+    return db.scalar(sel(func.count()).select_from(User)
+                     .where(User.rolle == ADMIN, User.aktiv.is_(True))) or 0

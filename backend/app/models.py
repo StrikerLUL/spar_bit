@@ -61,6 +61,15 @@ class Setting(Base):
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON)
 
 
+# Rollen. Bewusst nur drei - fuer einen Haushalt braucht es kein
+# Rechtesystem, sondern eine klare Antwort auf "wer darf die Quellen
+# umstellen".
+ADMIN = "admin"        # darf alles, auch Benutzer und Quellen
+MITGLIED = "mitglied"  # eigene Regeln, Kanaele, Wunschlisten
+GAST = "gast"          # darf zusehen, nichts anlegen
+ROLLEN = (ADMIN, MITGLIED, GAST)
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -68,6 +77,13 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     last_login: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    # Der erste Benutzer einer Installation ist immer Admin - sonst gaebe
+    # es niemanden, der weitere anlegen koennte.
+    rolle: Mapped[str] = mapped_column(String(16), default=ADMIN)
+    # Abschalten statt loeschen: so bleiben Regeln und Verlauf erhalten,
+    # waehrend die Anmeldung nicht mehr geht.
+    aktiv: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Zweiter Faktor (TOTP). Das Geheimnis steht hier im Klartext - es
     # muss zur Pruefung jedes Codes wieder lesbar sein, ein Hash ginge
@@ -228,6 +244,10 @@ Index("ix_deals_fehler", Deal.fehler_stufe, Deal.first_seen.desc())
 class Rule(Base):
     __tablename__ = "rules"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(128))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[str] = mapped_column(String(16), default="NORMAL")  # SOFORT|NORMAL
@@ -277,6 +297,10 @@ class Match(Base):
 class Channel(Base):
     __tablename__ = "channels"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     type: Mapped[str] = mapped_column(String(32))   # telegram|smtp|webhook|ntfy
     name: Mapped[str] = mapped_column(String(128))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -342,6 +366,10 @@ class SavedSearch(Base):
     """Gespeicherter Filter im Feed - ein Klick statt jedes Mal neu einstellen."""
     __tablename__ = "saved_searches"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(128))
     filter: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -419,6 +447,10 @@ class WatchListe(Base):
     """
     __tablename__ = "watch_listen"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(128))
     beschreibung: Mapped[str | None] = mapped_column(Text)
     budget: Mapped[float | None] = mapped_column(Float)
@@ -434,6 +466,10 @@ class WatchItem(Base):
     """
     __tablename__ = "watch_items"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     # Ohne Liste bleibt der Artikel dort, wo alles bisher lag.
     liste_id: Mapped[int | None] = mapped_column(
         ForeignKey("watch_listen.id", ondelete="SET NULL"), index=True)
@@ -477,6 +513,10 @@ class Interaction(Base):
     """
     __tablename__ = "interactions"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     deal_id: Mapped[int] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"),
                                          index=True)
     # angesehen | geoeffnet | geklickt | gemerkt | alarm | verworfen
@@ -495,6 +535,10 @@ class PushAbo(Base):
     """
     __tablename__ = "push_abos"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     endpunkt: Mapped[str] = mapped_column(Text, unique=True)
     p256dh: Mapped[str] = mapped_column(String(255))
     auth: Mapped[str] = mapped_column(String(64))
@@ -513,6 +557,10 @@ class ApiToken(Base):
     """
     __tablename__ = "api_tokens"
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Wem das gehoert. NULL heisst "allen" - so sehen Datensaetze aus,
+    # die es vor den Benutzerkonten schon gab.
+    benutzer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(128))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     praefix: Mapped[str] = mapped_column(String(12))
