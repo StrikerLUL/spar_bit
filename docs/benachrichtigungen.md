@@ -124,16 +124,57 @@ python cli.py kanaele hinzufuegen smtp "Postfach" \
 </details>
 
 <details>
-<summary><strong>Webhook</strong> — Home Assistant, n8n, eigene Skripte</summary>
+<summary><strong>Webhook</strong> — n8n, eigene Skripte</summary>
 
 Bekommt den Treffer als JSON: Titel, URL, Preis, Originalpreis, Rabatt,
 Händler, Quelle, Regel, Tags, `ist_gratis`, `prioritaet`, `urteil` und
 `deal_id`. Eine Discord-URL wird hier weiterhin erkannt — für Discord ist der
-eigene Kanal oben aber schöner.
+eigene Kanal oben aber schöner. Für Home Assistant gibt es seit Kurzem einen
+eigenen Kanal (siehe unten), der einem die Bastelei abnimmt.
 
 ```bash
 python cli.py kanaele hinzufuegen webhook "n8n" --set url=https://n8n.local/hook/deal
 ```
+</details>
+
+<details>
+<summary><strong>Home Assistant</strong> — der Sensor erscheint drüben von selbst</summary>
+
+Der Webhook-Kanal funktioniert für Home Assistant, verlangt aber, dass man
+drüben eine Automation baut, das JSON auseinandernimmt und daraus einen Sensor
+bastelt. Eine halbe Stunde Arbeit für etwas, das MQTT von sich aus kann.
+
+1. In Home Assistant die **MQTT-Integration** einrichten (üblicherweise mit
+   dem Mosquitto-Add-on).
+2. In SparBit einen Kanal vom Typ **Home Assistant (MQTT)** anlegen: Adresse
+   des Brokers, Port, gegebenenfalls Benutzer und Passwort.
+3. **Test senden.**
+
+Danach steht drüben ein Gerät *SparBit* mit dem Sensor **Letzter Deal**. Der
+Zustand ist der Titel, alles Weitere hängt als Attribut daran:
+
+| Attribut | Wofür |
+|---|---|
+| `preis`, `preis_eur`, `preis_text` | für Karten und Vergleiche |
+| `urteil`, `urteil_text` | „Bestpreis", „war günstiger" … |
+| `ist_preisfehler`, `fehler_text` | die Felder, für die man eine Automation baut: *wenn Preisfehler, dann Licht rot* |
+| `gutschein_code` | was man an der Kasse braucht |
+| `url`, `entity_picture`, `haendler`, `quelle`, `regel`, `prioritaet` | der Rest |
+
+Alles mit `retain`: nach einem Neustart von Home Assistant steht sofort wieder
+der letzte Fund da statt „unbekannt".
+
+Zwei SparBits an einem Broker? Dann bei einem die **Kennung** ändern — sonst
+überschreiben sie sich gegenseitig den Sensor.
+
+```bash
+python cli.py kanaele hinzufuegen homeassistant "Zuhause" \
+    --set host=192.168.1.10 --set port=1883
+```
+
+Das Paket `paho-mqtt` gehört zu den Abhängigkeiten und ist im Docker-Image
+enthalten. Fehlt es bei einer Installation von Hand, meldet sich nur dieser
+eine Kanal mit einem Klartext-Hinweis — SparBit läuft weiter.
 </details>
 
 

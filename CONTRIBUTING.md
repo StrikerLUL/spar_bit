@@ -27,12 +27,23 @@ python -m venv .venv && .venv/bin/pip install -r backend/requirements-dev.txt
 .venv/bin/pip install ruff pytest-cov
 
 .venv/bin/ruff check .          # Linter
-.venv/bin/python -m pytest -q   # Tests (dauert ~2 Minuten)
+.venv/bin/python -m pytest -q   # 1068 Tests (dauert ~5 Minuten)
 
-cd frontend && npm ci && npm run lint && npm run typecheck && npm run build
+cd frontend && npm ci
+npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-Dasselbe läuft in der CI, auf Python 3.11 bis 3.13.
+Oder einmal einrichten und danach nichts mehr davon tippen: `.devcontainer/`
+(VS Code Dev Containers, GitHub Codespaces) und
+
+```bash
+.venv/bin/pip install pre-commit && .venv/bin/pre-commit install
+```
+
+Dasselbe läuft in der CI, auf Python 3.11 bis 3.13 — dazu CodeQL, ein
+Abhängigkeits-Audit, der Durchstich im Browser und ein Abgleich der erzeugten
+API-Typen. Was die CI genau prüft, steht in
+[docs/entwicklung.md](docs/entwicklung.md#was-die-ci-prüft).
 
 **Nicht benutzt wird `ruff format`.** Der Code ist von Hand gesetzt — Tabellen
 in Dicts, ausgerichtete Kommentare, bewusste Zeilenumbrüche. Eine
@@ -50,8 +61,35 @@ Besonders wichtig bei:
 * **Preis-Parsing** — jeder Fall, der einmal falsch lag, bleibt als Test da.
 * **Sicherheitsgrenzen** — SSRF-Schutz, Besitzverhältnisse zwischen Konten,
   Entpacken von Archiven. Diese Tests beschreiben Angriffe, keine Features.
+  Ein neuer anlagenweiter Endpunkt gehört in die Liste in
+  `test_berechtigungen.py`: solche Lücken findet man nicht, indem man
+  Endpunkte einzeln prüft, sondern indem man sie aufzählt.
 * **Migrationen** — eine alte Datenbank muss nach dem Update funktionieren,
   und das lässt sich nur mit einer alten Datenbank prüfen.
+* **Erkennung, die auch schweigen können muss** — Gutschein-Codes,
+  Warengruppen, die Gratis-Gegenprobe. Dort ist die halbe Testdatei voller
+  Fälle, in denen **nichts** herauskommen darf: ein erfundener Gutschein ist
+  schlimmer als keiner, weil man ihm glaubt und damit an der Kasse steht.
+
+### Die Oberfläche
+
+Vitest und Testing Library. Geprüft wird, was der Benutzer tun kann — Text,
+Rollen, Beschriftungen —, nicht wie es aussieht: ein Snapshot über
+Tailwind-Klassen hielte bis zur nächsten Anpassung und meldete dann „rot",
+ohne dass etwas kaputt ist.
+
+```bash
+npm --prefix frontend test            # im Beobachtungsmodus
+npm --prefix frontend run test:ci     # einmal, mit Abdeckung
+npm --prefix frontend run test:e2e    # Durchstich im echten Browser
+```
+
+Eine Stolperfalle: jsdom meldet `en-US` als Browsersprache. Ein Test, der
+deutsche Zahlen erwartet, setzt darum in `beforeEach` die Sprache — sonst
+läuft er auf Englisch und vergleicht `1,299.00` mit `1.299,00`. Und zwischen
+Zahl und Währungszeichen steht ein **geschütztes** Leerzeichen; im Test muss
+es genauso dastehen, sonst vergleicht man zwei Strings, die gleich aussehen
+und es nicht sind.
 
 ## Eine neue Quelle
 
@@ -68,6 +106,20 @@ Der Weg steht in [docs/entwicklung.md](docs/entwicklung.md). Drei Regeln:
 Geht es nur um deine eigene Seite? Dann brauchst du keinen Fork: ein Modul
 in `SPARBIT_PLUGIN_DIR` wird beim Start geladen (siehe
 [docs/entwicklung.md](docs/entwicklung.md)).
+
+## Wenn sich die API ändert
+
+`frontend/src/lib/api.ts` ist handgeschrieben und kennt das Backend nicht.
+Nach jeder Änderung an einem API-Körper:
+
+```bash
+python backend/tools/openapi_export.py frontend/openapi.json
+npm --prefix frontend run api:types
+```
+
+Die erzeugten Typen werden eingecheckt, die CI vergleicht. Ohne das fällt ein
+umbenanntes Feld erst im Browser auf — und zwar als `undefined`, also als
+fehlender Wert, nicht als Fehler.
 
 ## Datenbank ändern
 

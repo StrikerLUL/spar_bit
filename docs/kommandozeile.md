@@ -10,7 +10,7 @@ innerhalb einer Minute, ohne Neustart.
 
 ```bash
 python cli.py status                      # Überblick
-python cli.py kanaele typen               # alle 9 Kanäle mit ihren Feldern
+python cli.py kanaele typen               # alle 12 Kanäle mit ihren Feldern
 python cli.py quellen liste
 python cli.py regeln liste
 python cli.py deals lego --anzahl 10
@@ -27,6 +27,9 @@ python cli.py deals lego --anzahl 10
 | `gratischeck` | `--an/--aus`, `--max-pro-lauf 12` |
 | `18plus` | `--an --ich-bin-volljaehrig`, `--aus`, `--melden an/aus` |
 | `deals` | `[suchbegriff] --gratis --urteil bestpreis --anzahl 20` |
+| `diagnose` | `<nr>` — warum kam dieser Fund nicht an? |
+| `warengruppen` | `[--tage 30]` — was hier anfällt, nach Ware sortiert |
+| `kurse` | `[--jetzt] [--automatisch an/aus]` — Wechselkurse ansehen und holen |
 
 Ein paar Beispiele:
 
@@ -71,6 +74,32 @@ Bereich taucht in `quellen liste` keine 18+-Quelle auf.
 
 `regeln testen` zeigt dieselbe Vorschau wie das UI: wie viele der letzten Deals
 die Regel getroffen hätte, mit Beispielen und den knapp verfehlten.
+
+### Die drei neuen Befehle
+
+```bash
+# "Warum kam das nicht an?" - dieselbe Stufenliste wie im UI, nur auch dann
+# zu haben, wenn der Server aus ist und man gerade herausfinden will, warum.
+python cli.py deals lego --anzahl 5        # die Nummer heraussuchen
+python cli.py diagnose 1234
+
+# Was fällt hier eigentlich an - nach Ware, nicht nach Quelle?
+python cli.py warengruppen --tage 90
+
+# Wechselkurse: ansehen, holen, Automatik umstellen
+python cli.py kurse                        # mit Datum und Alter
+python cli.py kurse --jetzt                # sofort bei der EZB holen
+python cli.py kurse --automatisch aus      # dann gilt, was im UI steht
+```
+
+`diagnose` gibt je Stufe ein Zeichen aus: ✓ durchgelassen, ✗ hier war Schluss,
+und ein graues `·` für eine Stufe, die zwar stoppt, aber auf dem Weg dieses
+Fundes gar nicht liegt. Bei einem gewöhnlichen Deal steht der Preisfehler-Weg
+so da — richtig wäre ein Kreuz, nur führt es am Thema vorbei.
+
+`kurse` färbt den Stand rot, sobald er älter als 90 Tage ist. Das ist der
+einzige Fehler in SparBit, der sich sonst nie von selbst meldet: eine Regel
+„max. 20 €" greift bei Fremdwährungen einfach ein bisschen daneben.
 
 Die CLI meckert früh statt spät: fehlende Pflichtfelder, vertippte Feldnamen
 (`--set urll=…`), Regeln ohne Bedingung und Stichworte, die zugleich auf der

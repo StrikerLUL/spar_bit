@@ -7,7 +7,19 @@ Aufbau, eigene Quellen, eigene Kanaele, Tests.
 ```bash
 python run.py --dev              # Backend mit Auto-Neuladen
 cd frontend && npm run dev       # Oberfläche separat, mit Hot-Reload
-cd backend && pytest tests/ -q   # 622 Tests, ohne Netzwerk
+
+python -m pytest -q              # 1068 Tests im Backend, ohne Netzwerk
+npm --prefix frontend test       # 61 Tests der Oberfläche (Vitest)
+npm --prefix frontend run test:e2e   # Durchstich im echten Browser
+```
+
+Wer nicht erst Python-Versionen sortieren will: `.devcontainer/` richtet beides
+in einem Schritt ein (VS Code Dev Containers oder GitHub Codespaces). Und
+`.pre-commit-config.yaml` sagt in zwei Sekunden, was die CI in vier Minuten
+sagen würde:
+
+```bash
+.venv/bin/pip install pre-commit && .venv/bin/pre-commit install
 ```
 
 ### Eine neue Quelle hinzufügen
@@ -98,6 +110,78 @@ Frontend: Vite, React 18, TypeScript, Tailwind. Beim lokalen Start liefert das
 Backend die gebaute Oberfläche gleich mit aus — ein Prozess, ein Port.
 
 
+### Die Oberfläche übersetzen
+
+Zwei Sprachen, ohne Bibliothek — `frontend/src/lib/i18n.ts`. Der Kniff:
+**Deutsch ist zugleich Vorgabe und Schlüssel.**
+
+```tsx
+const { t } = useSprache();
+<Button>{t("Speichern")}</Button>
+```
+
+Steht `"Speichern"` nicht im englischen Wörterbuch, erscheint „Speichern" —
+nicht `missing.key`. Eine halb fertige Übersetzung soll aussehen wie Deutsch,
+nicht wie ein Defekt. Das ist auch der Grund, warum man Seite für Seite
+weitermachen kann, ohne dass zwischendurch etwas kaputt ist.
+
+Stand: Navigation, Anmeldung, Feed, Deal-Karten, Preisurteile und die
+gemeinsamen Bedienelemente sind übersetzt. Die Einstellungsseiten (Regeln,
+Kanäle, Quellen, System) sind es nicht — dort steht viel erklärender
+Fließtext, und ein halb übersetzter Absatz ist schlimmer als ein deutscher.
+
+Weitermachen heißt: im Bauteil `useSprache()` holen, die sichtbaren Texte in
+`t("…")` einpacken und die englischen Entsprechungen in `EN` nachtragen. Was
+dabei **nicht** durch `t()` gehört: Fehlermeldungen vom Backend (die kommen
+schon fertig) und Daten aus der Datenbank (Regelnamen, Händler, Deal-Titel).
+
+Zahlen, Daten und Dauern gehen über `formatAmount`, `timeAgo` und
+`formatDuration` in `lib/utils.ts` — die lesen die Sprache selbst und brauchen
+keinen Hook. Wer `new Intl.…("de-DE")` schreibt, umgeht das; dafür gibt es
+dort `intl()`.
+
+### Was die Oberfläche gegen das Backend hält
+
+`api.ts` ist handgeschrieben — 950 Zeilen Typen, die das Backend nicht kennt.
+Wird dort ein Feld umbenannt, fällt das sonst erst im Browser auf, und zwar
+als `undefined`: also als fehlender Wert, nicht als Fehler.
+
+Nach jeder Änderung an einem API-Körper:
+
+```bash
+python backend/tools/openapi_export.py frontend/openapi.json
+npm --prefix frontend run api:types
+```
+
+Das erzeugt `src/lib/api-typen.ts` (eingecheckt), `api-vertrag.ts` behauptet
+auf Typ-Ebene, dass der handgeschriebene Client dazu passt, und `tsc` prüft
+das mit. Die CI erzeugt beides neu und vergleicht — weicht etwas ab, ist die
+Antwort ein roter Lauf statt eines leeren Feldes.
+
+### Der Scheduler als eigener Dienst
+
+Normalerweise nicht nötig: SparBit ist ein Prozess. Wenn das Einsammeln die
+Oberfläche träge macht, geht auch getrennt:
+
+```bash
+# .env
+SPARBIT_SCHEDULER=aus            # gilt für den API-Prozess
+
+docker compose --profile worker up -d
+# oder ohne Docker:
+cd backend && python -m app.worker
+```
+
+**Genau einer.** Zwei Worker auf derselben Datenbank fragen jede Quelle
+doppelt ab und verschicken jede Meldung zweimal; eine Sperre dagegen wäre ein
+verteiltes Schloss für einen Fall, den es in einem Haushalt nicht gibt.
+
+Der Live-Ticker läuft weiter: der Worker spiegelt seine Ereignisse in die
+Tabelle `event_log`, der API-Prozess liest alle zwei Sekunden nach — aber nur,
+solange jemand zusieht. Der Telegram-Bot läuft dann im Worker, nicht im
+API-Prozess: Long Polling ist eine Dauerverbindung, und zwei davon würden sich
+die Nachrichten gegenseitig wegnehmen.
+
 ## Eigene Quellen ohne Fork
 
 Eine Quelle, die nur dich interessiert, braucht keinen Fork. Setze
@@ -153,13 +237,29 @@ Der Schema-Stand steht unter *Logs & System* und in `/api/system/info`.
 
 ## Was die CI prüft
 
-Bei jedem Push: `ruff check`, die Testsuite auf Python 3.11/3.12/3.13 mit
-Abdeckungsschwelle, `eslint`, `tsc`, der Frontend-Build, beide Docker-Images
-und ein Probelauf von `docker compose config`.
+Bei jedem Push:
 
-Bei einem Tag `v*` baut ein zweiter Workflow die Oberfläche und hängt sie als
-`frontend-dist.tar.gz` samt Prüfsumme ans Release — das Archiv, das `run.py`
-holt, wenn kein Node installiert ist.
+| Lauf | Was er sagt |
+|---|---|
+| `ruff check` | Linter, ohne Formatierungsstreit |
+| Testsuite auf 3.11/3.12/3.13 | mit Gesamtschwelle (78 %) |
+| **Abdeckung der geänderten Zeilen** | nur bei PRs, 80 %. Die Gesamtschwelle trägt den Bestand und sagt nichts darüber, ob *neuer* Code getestet ist — ein ungetestetes Modul fällt in einer großen Codebasis nicht auf |
+| `eslint`, `tsc`, Vitest, Build | die Oberfläche |
+| **Oberfläche gegen OpenAPI** | erzeugt die API-Typen neu und vergleicht sie mit den eingecheckten |
+| **Durchstich im Browser** | Playwright gegen ein echtes Backend |
+| **CodeQL** | statische Analyse, wöchentlich auch ohne neuen Code |
+| `pip-audit`, `npm audit` | bekannte Lücken in Abhängigkeiten — als Warnung, nicht blockierend: ein Fund ohne verfügbares Update soll sichtbar sein, aber nicht alle offenen PRs rot färben |
+| Docker-Images, `docker compose config` | auch der HTTPS-Pfad mit Caddy |
+
+Bei einem Push auf `main` und bei einem Tag `v*` baut ein zweiter Workflow
+beide Images für `amd64` und `arm64`, signiert sie schlüssellos über sigstore
+und lädt sie nach `ghcr.io` — unter anderem mit der Marke `sha-<commit>`.
+Genau die zieht der Auto-Updater auf dem VPS: das Image zum ausgecheckten
+Commit, und wenn es keines gibt (eigener Fork), baut er wie zuvor selbst.
+
+Bei einem Tag baut ein dritter Workflow außerdem die Oberfläche und hängt sie
+als `frontend-dist.tar.gz` samt Prüfsumme, Stückliste und Herkunftsnachweis
+ans Release — das Archiv, das `run.py` holt, wenn kein Node installiert ist.
 
 ## Überwachung
 

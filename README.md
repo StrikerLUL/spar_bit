@@ -6,7 +6,7 @@ Ein Preisfehler ist kein Rabatt. Es ist ein Versehen des Händlers — eine
 verrutschte Kommastelle, eine vergessene Null. Der Fernseher für 899 € steht
 plötzlich für 89,90 € drin, und zwanzig Minuten später nicht mehr.
 
-SparBit beobachtet dafür rund um die Uhr 15 Deal-Quellen, vergleicht jeden
+SparBit beobachtet dafür rund um die Uhr 17 Deal-Quellen, vergleicht jeden
 Preis mit dem **eigenen beobachteten Verlauf** und mit dem, was andere Quellen
 für denselben Artikel verlangen — und weckt dich, wenn etwas nicht
 zusammenpasst. Mit Begründung, nicht mit einer Punktzahl.
@@ -15,7 +15,7 @@ Nebenbei macht es das, was ein Deal-Monitor sonst so macht: Gratis-Spiele
 einsammeln, Wunschlisten überwachen, nach deinen Regeln filtern und über elf
 Kanäle melden — bis hin zu Push direkt in den Browser.
 
-![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-848-22c55e)
+![Lizenz](https://img.shields.io/badge/Lizenz-MIT-blue) ![Python](https://img.shields.io/badge/Python-3.11+-3776ab) ![React](https://img.shields.io/badge/React-18-61dafb) ![Tests](https://img.shields.io/badge/Tests-1129-22c55e)
 
 **Auf einem VPS** — ein Befehl, inklusive Docker, HTTPS, Zertifikat und
 Update-Knopf im UI:
@@ -63,6 +63,7 @@ dem, was man gerade sucht:
 | **[Entwicklung](docs/entwicklung.md)** | Aufbau, eigene Quellen, eigene Kanäle, Tests |
 | **[Sicherheit & Problemlösung](docs/sicherheit.md)** | Was geschützt ist, was nicht, und was zu tun ist, wenn es klemmt |
 | **[ENDPOINTS.md](ENDPOINTS.md)** | Welche Quelle welchen Endpunkt nutzt — und welche ungeprüft ist |
+| **[CHANGELOG.md](CHANGELOG.md)** | Was der nächste Klick auf *Aktualisieren* bringt |
 | **[CONTRIBUTING.md](CONTRIBUTING.md)** | Wie hier gearbeitet wird |
 
 > **Vor dem ersten Start: [ENDPOINTS.md](ENDPOINTS.md) lesen.**
@@ -76,10 +77,10 @@ dem, was man gerade sucht:
 
 ## In Kürze
 
-**Finden** — 15 Quellen als Plugins (Deal-Communities, Reddit, Gaming-Stores,
-eigene RSS-Feeds, eigene JSON-Schnittstellen), dazu eine Wunschliste, die
-Artikel selbst beobachtet, statt auf Posts zu warten. Steam-Wunschlisten lassen
-sich übernehmen, Feedreader-Listen per OPML einlesen.
+**Finden** — 17 Quellen als Plugins (Deal-Communities aus vier Ländern,
+Reddit, Gaming-Stores, eigene RSS-Feeds, eigene JSON-Schnittstellen), dazu eine
+Wunschliste, die Artikel selbst beobachtet, statt auf Posts zu warten.
+Steam-Wunschlisten lassen sich übernehmen, Feedreader-Listen per OPML einlesen.
 
 **Zusammenführen** — derselbe Artikel aus vier Quellen kommt einmal an. Wo eine
 Produktkennung in der Adresse steht (ASIN, Steam-AppID, GTIN), wird nicht mehr
@@ -88,16 +89,21 @@ geraten, sondern gewusst.
 **Beurteilen** — der Rabatt der Quelle sagt wenig, weil er gegen eine UVP
 rechnet, die nie jemand bezahlt hat. SparBit urteilt aus dem eigenen
 Preisverlauf: *Bestpreis*, *sehr gut*, *war günstiger*, *UVP fragwürdig* — und
-sagt „zu wenig Daten", statt zu raten.
+sagt „zu wenig Daten", statt zu raten. Steht ein Gutschein-Code im Text, steht
+er auf der Karte statt im gekürzten Fließtext.
 
-**Filtern** — Regeln aus Keywords, Preisgrenzen, Mindestrabatt, Preisurteil und
-Preisfehler-Punktzahl, mit Live-Vorschau und Begründung je Deal. Der Feed lernt
-mit, lokal und erklärbar. Regeln lassen sich exportieren und weitergeben.
+**Filtern** — Regeln aus Keywords, Preisgrenzen, Mindestrabatt, Preisurteil,
+Warengruppe und Preisfehler-Punktzahl, mit Live-Vorschau und Begründung je
+Deal. Und die Gegenrichtung: zu jedem Fund sagt SparBit, **warum er nicht
+angekommen ist** — Stufe für Stufe, vom 18+-Filter bis zum Versandprotokoll.
+Der Feed lernt mit, lokal und erklärbar. Regeln lassen sich exportieren und
+weitergeben.
 
-**Melden** — elf Kanäle: Telegram, Discord, Slack, Matrix, ntfy, Gotify,
-Pushover, E-Mail (auch als HTML), Webhook, **Web Push direkt in den Browser**
-und **Apprise** für alles Weitere (Signal, Home Assistant, Mastodon …). Dazu
-Ruhezeiten, Sammelmeldungen und eine Erinnerung, bevor ein Angebot ausläuft.
+**Melden** — zwölf Kanäle: Telegram, Discord, Slack, Matrix, ntfy, Gotify,
+Pushover, E-Mail (auch als HTML), Webhook, **Web Push direkt in den Browser**,
+**Home Assistant über MQTT** (der Sensor erscheint drüben von selbst) und
+**Apprise** für alles Weitere (Signal, Mastodon, Teams …). Dazu Ruhezeiten,
+Sammelmeldungen und eine Erinnerung, bevor ein Angebot ausläuft.
 
 **Nicht verpassen** — Angebote mit Frist landen auf Wunsch als
 abonnierbarer Kalender im Handy, mit Erinnerung sechs Stunden vorher.
@@ -107,7 +113,12 @@ Wunschlisten. Quellen und gesammelte Deals bleiben gemeinsam.
 
 **Für dich behalten** — alles läuft auf deinem Rechner. Kein Konto, keine
 Telemetrie, keine Cloud. Deal-Bilder werden lokal zwischengespeichert, damit
-der Händler beim Blättern nicht deine IP sieht.
+der Händler beim Blättern nicht deine IP sieht. Der einzige Abruf, den SparBit
+von sich aus macht, sind die Wechselkurse der EZB — eine Datei am Tag, und
+abschaltbar.
+
+**Auf Deutsch, auf Englisch** — die Oberfläche spricht beides, und Zahlen,
+Daten und Dauern folgen der Sprache. Umschalten unten links.
 
 ---
 
@@ -125,6 +136,7 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 | **Blogs** | Sparhamster.at, Schnäppchenfuchs |
 | **Reddit** | GameDeals, FreeGameFindings, freebies, googleplaydeals, AppHookup, Schnaeppchen — Subreddits im UI pflegbar |
 | **Gaming** | Epic Games Store, GOG, Steam, CheapShark, IsThereAnyDeal, GG.deals |
+| **International** | Slickdeals (US, USD), OzBargain (AU, AUD) — wegen der Zeitzone oft die erste Quelle, die einen weltweiten Preisfehler meldet |
 | **Eigene** | beliebige RSS/Atom-Feeds und eigene JSON-Schnittstellen (Adresse und Feldnamen genügen, kein Code) |
 | **18+** | sechs weitere Quellen in einem getrennten Bereich — standardmäßig aus, siehe unten |
 
@@ -155,12 +167,21 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 * Der Preis kommt aus **strukturierten Daten** (JSON-LD, Open Graph,
   Microdata), nicht aus geratenen CSS-Selektoren. Liefert eine Seite davon
   nichts, sagt SparBit das, statt sich etwas auszudenken.
+* **Versandkosten zählen mit**, wo der Shop sie auszeichnet: 195 € plus 9,90 €
+  sind teurer als 199 € versandkostenfrei. *Keine Angabe* und *kostenlos*
+  bleiben dabei zwei verschiedene Dinge — der Gesamtpreis trägt dieselbe
+  Unsicherheit wie vorher, nicht mehr.
 * **Mehrere Listen mit Budget je Liste** — die Leiste zeigt den Rest (negativ,
   wenn überzogen) und wie viele Artikel ihren Zielpreis erreicht haben.
 * **Sammeleingabe:** mehrere Adressen einfügen, eine je Zeile; Namen und
   Preise holt SparBit selbst.
 * **Steam-Wunschliste übernehmen** — Profilname, Steam-ID oder Adresse, ohne
   API-Schlüssel.
+* **Shops, die ihren Preis erst per JavaScript setzen**, bleiben ehrlich
+  *„kann ich nicht lesen"*. Wer sie trotzdem braucht, stellt einen
+  Render-Dienst daneben (browserless, eigener Playwright-Container) und
+  schaltet ihn je Artikel frei. Kein Browser im Image: das wäre ein halbes
+  Gigabyte und ein eigener Angriffspfad für eine Handvoll Shops.
 * **[Browser-Erweiterung](browser-extension/)** für Chrome, Edge, Brave und
   Firefox: Artikel in einem Klick von jeder Shop-Seite auf die Liste setzen,
   und direkt dort sehen, wenn SparBit ihn woanders günstiger kennt. Sie nutzt
@@ -182,9 +203,16 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 * **Preisvergleich über Quellen:** was jede Quelle verlangt, wird einzeln
   gespeichert und als Tabelle gezeigt, günstigster zuerst, jede Zeile mit
   eigenem Link.
-* **Währungsumrechnung** (USD, GBP, CHF, PLN → EUR, Kurse im UI pflegbar),
-  damit „max. 20 €" auch bei einer Dollar-Quelle greift. Der Gegenwert steht
-  daneben: `29,99 $ · ≈ 27,59 €`.
+* **Währungsumrechnung** (USD, GBP, CHF, PLN, AUD → EUR), damit „max. 20 €"
+  auch bei einer Dollar-Quelle greift. Der Gegenwert steht daneben:
+  `29,99 $ · ≈ 27,59 €`. Die Kurse kommen **täglich von der EZB** — eine
+  Datei, kein Schlüssel, abschaltbar; daneben steht ihr Datum. Ein fester
+  Kurs im Code altert nämlich still: niemand bekommt eine Fehlermeldung,
+  wenn „max. 20 €" seit einem Jahr bei 21,40 € zuschlägt.
+* **Gutschein-Code aus dem Text**, auf der Karte und in der Meldung. Gesucht
+  wird nie nach dem Code allein, sondern immer nach dem Wort, das ihn
+  ankündigt — sonst stünde in jeder zweiten Meldung eine Artikelnummer, der
+  man an der Kasse glaubt.
 * **Titel-Preisparser mit Etiketten:** `statt`/`UVP` markiert den alten,
   `nur`/`jetzt`/`für` den neuen Preis — und eine Zahl ohne Währungszeichen
   wird nur akzeptiert, wenn sie ein Paar vervollständigt. Sonst meldet
@@ -233,11 +261,24 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 
 * Bedingungen: Keywords (ODER), Pflicht-Keywords (UND), Blacklist,
   Preisgrenze, Mindestrabatt, „nur 0 €", Mindest-Temperatur, Preisurteil,
-  **Preisfehler-Punktzahl**, Quellen-, Kategorie- und Händlerfilter.
+  **Preisfehler-Punktzahl**, Quellen-, Warengruppen- und Händlerfilter.
+* **Warengruppen** sagen, *was* ein Fund ist — Elektronik, Haushalt,
+  Werkzeug, Spielzeug und acht weitere —, nicht aus welcher Art Quelle er
+  kam. Erkannt aus Stichwörtern, also nachvollziehbar: daneben steht das
+  Wort, das die Einteilung ausgelöst hat. Was sich nicht erkennen lässt,
+  bleibt ohne Gruppe; „Sonstiges" wäre eine Antwort, die so aussieht, als
+  hätte jemand hingesehen.
 * Priorität **SOFORT** (Push in Sekunden) oder **NORMAL** (Sammelmeldung).
 * **Live-Vorschau beim Bauen:** wie viele der letzten 500 Deals getroffen
   worden wären, mit Beispielen, den *knapp verfehlten* und je Deal einer
   Begründung, warum er getroffen oder gescheitert ist.
+* **Und die Gegenrichtung: „Warum kam das nicht an?"** In der Detailansicht
+  jedes Deals läuft derselbe Weg ab, den die Zustellung nimmt — 18+-Sperre,
+  jede einzelne Regel, Preisfehler-Weg, globale Pause, Ruhezeit, Kanäle,
+  Versandverlauf. Jede Stufe sagt, ob sie durchlässt, und wenn nicht: warum
+  und was dagegen zu tun wäre. Vorher hieß die Antwort darauf: an vier
+  Stellen nachsehen und am Ende raten, ob die Regel nicht traf oder der
+  Kanal nicht zustellte.
 * **Der Feed lernt mit** — lokal, ohne externen Dienst. Sortierung *Für dich*,
   und jede Empfehlung sagt, warum sie dasteht. Aus demselben Verhalten
   schlägt SparBit fertige Regeln vor („16 von 16 gemerkten Deals passen zu
@@ -266,7 +307,8 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 | **E-Mail** | SMTP, auf Wunsch als HTML-Tabelle mit Bildern |
 | **Webhook** | Home Assistant, n8n, eigene Skripte — bekommt JSON |
 | **Browser (Web Push)** | verschlüsselt (RFC 8291), signiert (VAPID), kommt an, auch wenn SparBit nicht offen ist |
-| **Apprise** | über hundert weitere Dienste: Signal, Mastodon, Teams, MQTT … |
+| **Home Assistant** | über MQTT, mit Auto-Discovery: der Sensor erscheint drüben von selbst, mit Preis, Urteil, Gutschein-Code und Link als Attribute |
+| **Apprise** | über hundert weitere Dienste: Signal, Mastodon, Teams … |
 
 * Beliebig viele parallel, jeder einzeln abschaltbar und mit **Test senden**
   sofort prüfbar. Der Versandverlauf nennt Fehler im Klartext.
@@ -292,7 +334,9 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 ### Auswerten
 
 * **Statistiken** — Verlauf, Ausbeute je Quelle inklusive *Signalanteil* (wie
-  viel Prozent der Funde eine Regel getroffen haben) und häufigste Händler.
+  viel Prozent der Funde eine Regel getroffen haben), häufigste Händler und
+  **Warengruppen**: was hier eigentlich anfällt, und wie viel davon wirklich
+  günstig war.
 * **Bilanz** — geschätzte Ersparnis, gemerkte Artikel, mitgenommene
   Gratis-Sachen, geclaimte Spiele. Gerechnet gegen den **beobachteten
   Referenzpreis**, nicht gegen die UVP, und gezählt wird nur, was du
@@ -301,8 +345,11 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 
 ### Bedienung
 
-* Hell / dunkel / wie im System. Als **App installierbar (PWA)**, voll
-  bedienbar auf dem Handy.
+* Hell / dunkel / wie im System, **deutsch oder englisch**. Als **App
+  installierbar (PWA)**, voll bedienbar auf dem Handy — und offline zeigt sie
+  eine SparBit-Seite mit „keine Verbindung" statt der Fehlerseite des
+  Browsers. Gecacht wird dabei nur die Hülle, nie ein Deal: ein längst
+  korrigierter Preisfehler sähe im Cache aus wie ein gültiger.
 * **Strg/Cmd + K** für den Schnellzugriff, `/` springt in die Suche, `?`
   zeigt die Befehle, `g` gefolgt von `d` (Übersicht), `f` (Feed), `s`
   (Statistiken), `w` (Wunschliste), `q` (Quellen), `r` (Regeln), `b`
@@ -312,7 +359,7 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 * **Kommandozeile** — `cli.py` steuert dieselbe Datenbank wie die Oberfläche,
   **auch wenn der Server aus ist**: `status`, `kanaele`, `quellen`, `regeln`,
   `wunschliste`, `preisfehler`, `gratischeck`, `feed-suche`, `18plus`,
-  `deals`. Sie meckert früh statt spät und schlägt bei einem Tippfehler im
+  `deals`, `diagnose`, `warengruppen`, `kurse`. Sie meckert früh statt spät und schlägt bei einem Tippfehler im
   Quellennamen die richtige vor.
 * **REST-API** hinter derselben Anmeldung, mit OpenAPI-Dokumentation unter
   `/api/docs` und dem Schema unter `/api/openapi.json`.
@@ -356,18 +403,36 @@ verdecken.
   eigene Änderungen auf dem Server werden nie überschrieben. Der Container
   fasst den Host nicht an — er hinterlegt nur einen Auftrag, den ein
   systemd-Timer abholt.
+* **Fertige Images statt Eigenbau.** Der Updater zieht aus der
+  GitHub-Registry das Image, das zu *genau dem* ausgecheckten Commit gehört
+  (`sha-<hash>`), und baut nur, wenn es keines gibt — eigener Commit, eigener
+  Fork. Das spart auf einem kleinen VPS Minuten und das halbe RAM, und der
+  Bau kann nicht dort scheitern, wo die CI grün war. Für `amd64` und
+  `arm64`, signiert (sigstore, schlüssellos), mit Stückliste und
+  Herkunftsnachweis.
 * **Reverse-Proxy-Vorlagen** für Caddy, nginx, Traefik und Nginx Proxy
   Manager, inklusive der drei Dinge, die sonst schiefgehen (kein Puffern auf
   `/api/events`, `X-Forwarded-Proto`, lange Lesezeit).
 * **Automatische Sicherung** täglich nach `data/backups`, die letzten sieben.
   Enthält alles, was nicht nachwächst; mit Passwort AES-256-verschlüsselt.
   Einspielen ersetzt die Konfiguration und **ergänzt** die Daten.
-* **`/api/health`** prüft Datenbank, Scheduler und Quellen (503 nur, wenn
-  wirklich etwas kaputt ist — ein Mangel bleibt 200, sonst startet ein
-  Orchestrator den Dienst neu, obwohl er arbeitet). **`/api/metrics`**
-  liefert Prometheus-Textformat, hinter Anmeldung oder API-Token.
-* **Andere Datenbank** möglich (`SPARBIT_DB_URL_OVERRIDE`, z. B. Postgres);
-  die Volltextsuche fällt dort auf `LIKE` zurück. SQLite bleibt der Normalfall.
+* **`/api/health`** prüft Datenbank, Scheduler, Quellen und das Alter der
+  Wechselkurse (503 nur, wenn wirklich etwas kaputt ist — ein Mangel bleibt
+  200, sonst startet ein Orchestrator den Dienst neu, obwohl er arbeitet).
+  **`/api/metrics`** liefert Prometheus-Textformat, hinter Anmeldung oder
+  API-Token; ein fertiges **Grafana-Dashboard** samt der Alarme, die sich
+  lohnen, liegt unter [`deploy/grafana/`](deploy/grafana/).
+* **Andere Datenbank** möglich (`SPARBIT_DB_URL_OVERRIDE`, z. B. Postgres) —
+  **mit derselben Suchsyntax**: dort übersetzt derselbe Parser in `tsquery`
+  statt in FTS5, mit GIN-Index. (Bis vor kurzem fiel die Suche auf Postgres
+  stillschweigend auf `LIKE` zurück — die dokumentierte Syntax funktionierte
+  genau dann nicht, wenn jemand die ebenfalls dokumentierte Postgres-Option
+  nutzte.) SQLite bleibt der Normalfall.
+* **Scheduler getrennt betreibbar**, falls das Einsammeln die Oberfläche
+  träge macht: `SPARBIT_SCHEDULER=aus` plus `docker compose --profile worker
+  up -d`. Der Live-Ticker läuft weiter — der Worker spiegelt seine Ereignisse
+  über die Datenbank. Genau *ein* Worker: zwei fragen jede Quelle doppelt ab.
+  Für einen Haushalt ist das nicht nötig.
 * **Aufräumen von selbst:** Deals nach 60 Tagen, Logs nach 14 (beides
   einstellbar) — **gemerkte Deals bleiben**. Nicht erreichbare Bilder werden
   einmal versucht und dann übersprungen.
@@ -380,13 +445,22 @@ verdecken.
 ### Sicherheit und Privatsphäre
 
 * Passwort mit **argon2** gehasht, **kein Standard-Passwort** im Code.
-* **Zweiter Faktor** (TOTP) mit acht Ersatzcodes.
+* **Zweiter Faktor** (TOTP) mit acht Ersatzcodes — auf Wunsch **Pflicht für
+  Administratoren**. Ein Admin-Konto kann Sicherungen herunterladen, und in
+  denen stehen die Geheimnisse aller Konten. Gesperrt werden dann nur die
+  Admin-Funktionen: anmelden und den zweiten Faktor einrichten geht weiter,
+  sonst wäre es eine Aussperrung statt einer Hürde.
 * **Bremse gegen Durchprobieren:** ab 5 Fehlversuchen wachsende Wartezeit, ab
   10 für 15 Minuten gesperrt — die Zähler liegen in der Datenbank, ein
   Neustart hebt die Sperre nicht auf.
 * **Netzschutz vor jedem ausgehenden Abruf:** keine Adresse im eigenen Netz,
   auch nicht über eine Weiterleitung. Obergrenze beim Lesen, gezählt auf
   *entpackte* Bytes.
+* **Bremse für die Knöpfe, die nach draußen greifen** — „Quelle testen",
+  Feed-Suche, Sammeleingabe der Wunschliste, Kanal-Test. Ein Aufruf hier löst
+  mehrere Abrufe bei einem fremden Shop aus; ohne Bremse wird SparBit zum
+  Verstärker, und gesperrt wird am Ende nicht SparBit, sondern die IP deines
+  Servers. Gezählt je Konto, mit `Retry-After` in der Absage.
 * Session-Cookie signiert, `HttpOnly`, `SameSite=Lax`, `Secure` bei HTTPS.
   **Content-Security-Policy** auf beiden Auslieferungswegen.
 * Kanal-Geheimnisse liegen in der Datenbank, nicht in Dateien, und kommen aus
@@ -400,8 +474,12 @@ verdecken.
   `./data/images` abgelegt und von SparBit ausgeliefert — sonst erführe jeder
   Händler bei jedem Öffnen des Feeds, welche Deals du dir ansiehst.
 * **Kein Konto, keine Telemetrie, keine Cloud.** Was SparBit nach außen
-  spricht, sind die Quellen, die du eingeschaltet hast, und die Kanäle, die
-  du eingerichtet hast.
+  spricht, sind die Quellen, die du eingeschaltet hast, die Kanäle, die du
+  eingerichtet hast — und **ein** Abruf, den es von sich aus macht: die
+  Wechselkurse der EZB, einmal am Tag, rund 3 KB, ohne Schlüssel und ohne
+  Cookies. Abschaltbar unter *Benachrichtigungen → Währung & Pause*; dann
+  gilt, was du dort einträgst, und das UI sagt weiterhin, wie alt es ist.
+  Der Grund für die Ausnahme steht oben bei den Preisen.
 
 ### Erweitern
 
@@ -413,9 +491,19 @@ verdecken.
   und übersprungen, statt den Start zu verhindern.
 * **Ohne jeden Code** geht es über die mitgelieferten Quellen *Eigener Feed*
   (RSS/Atom) und *Eigene JSON-Schnittstelle* (Adresse und Feldnamen).
-* **848 Tests**, ohne Netzwerk lauffähig. Die CI prüft `ruff`, die Testsuite
-  auf Python 3.11/3.12/3.13 mit Abdeckungsschwelle, `eslint`, `tsc`, den
-  Frontend-Build und beide Docker-Images.
+* **1068 Tests im Backend und 61 in der Oberfläche**, alle ohne Netzwerk
+  lauffähig — dazu ein Durchstich im echten Browser (Playwright, echtes
+  Backend, Wegwerf-Datenbank). Die CI prüft `ruff`, die Testsuite auf Python
+  3.11/3.12/3.13 mit Abdeckungsschwelle *und* der Abdeckung der geänderten
+  Zeilen, `eslint`, `tsc`, Vitest, den Frontend-Build, beide Docker-Images,
+  CodeQL und bekannte Lücken in den Abhängigkeiten.
+* **Der API-Client wird gemessen.** Die 950 Zeilen handgeschriebene Typen in
+  `api.ts` kannte das Backend nicht — ein umbenanntes Feld fiel erst im
+  Browser auf, und zwar als `undefined`. Jetzt erzeugt das OpenAPI-Schema
+  Typen, `api-vertrag.ts` behauptet auf Typ-Ebene, dass beide zusammenpassen,
+  und die CI prüft, dass die erzeugten Typen aktuell sind.
+* **Dev-Container** für den Weg vom Klon zum laufenden Stand in einem Schritt
+  (`.devcontainer/`), Commit-Haken für den Linter (`.pre-commit-config.yaml`).
 
 ---
 
@@ -423,7 +511,7 @@ verdecken.
 
 **1. Einen Kanal einrichten — zuerst.** Unter *Kanäle* → **Kanal hinzufügen**.
 Ohne Kanal meldet sich SparBit nie, auch nicht bei einem Preisfehler; es
-sammelt dann nur still vor sich hin. Elf Kanäle stehen zur Wahl, beliebig
+sammelt dann nur still vor sich hin. Zwölf Kanäle stehen zur Wahl, beliebig
 viele parallel:
 
 * **Desktop-Meldungen** — einschalten, einmal erlauben, fertig. Kein Bot,
@@ -431,8 +519,10 @@ viele parallel:
 * **Telegram, Discord, Slack, Matrix, Gotify, Pushover, ntfy, E-Mail,
   Webhook** — [siehe unten](docs/benachrichtigungen.md). Für einen
   Server ist Telegram oder ntfy die naheliegende Wahl.
-* **Apprise** — wenn dein Dienst oben nicht dabei ist: Signal, Home
-  Assistant, Mastodon, MQTT und über hundert weitere über eine Adresszeile.
+* **Home Assistant** — über MQTT; der Sensor erscheint drüben von selbst,
+  ohne dass du dort eine Automation bauen musst.
+* **Apprise** — wenn dein Dienst oben nicht dabei ist: Signal, Mastodon,
+  Teams und über hundert weitere über eine Adresszeile.
 
 Danach **Test senden** drücken. Kommt nichts an, stimmt die Konfiguration
 nicht — das jetzt zu merken ist besser als beim ersten Preisfehler.
@@ -458,6 +548,13 @@ dort aus — drosseln hilft nicht, es macht ihn nur unzuverlässig.
 Rechts siehst du beim Tippen, wie viele der letzten 500 Deals die Regel
 getroffen hätte — samt Beispielen und den Deals, die *knapp* daneben lagen.
 Damit tunst du Regeln ohne Rauschen.
+
+**5. Wenn etwas nicht ankommt.** Steht ein Fund im Feed, war aber nicht auf
+dem Handy: die Detailansicht öffnen und **„Warum kam das nicht an?"** drücken.
+Dahinter läuft derselbe Weg ab, den die Zustellung nimmt, und jede Stufe sagt,
+ob sie durchlässt. In neun von zehn Fällen ist die Antwort „die Regel hat
+keinen Kanal" oder „ein Stichwort ist anders geschrieben" — beides steht dann
+da, statt dass man es sucht.
 
 > **Geduld beim Urteil.** Preisurteil und Preisfehler-Erkennung brauchen einen
 > eigenen Preisverlauf. In den ersten Tagen steht öfter „zu wenig Daten" da —
@@ -493,6 +590,16 @@ Ehrlich benannt statt verschwiegen — die vollständige Liste steht in
   wie die Quelle es gemeldet hat.
 * **Die 18+-Quellen sind ungeprüft wie alle anderen.** Ein falscher Pfad heilt
   sich inzwischen selbst, aber die vorbelegten Namen sind geraten.
+* **Die englische Übersetzung ist nicht vollständig.** Navigation, Anmeldung,
+  Deal-Karten, Preisurteile und die gemeinsamen Bedienelemente sind übersetzt,
+  die Einstellungsseiten (Regeln, Kanäle, Quellen, System) noch nicht — dort
+  steht viel erklärender Fließtext. Fehlt ein Eintrag, erscheint der deutsche
+  Text statt eines leeren Feldes; der Weg zum Weitermachen steht in
+  [docs/entwicklung.md](docs/entwicklung.md).
+* **Die Warengruppen kennen, was ihnen jemand beigebracht hat.** Zwölf Gruppen
+  aus Stichwörtern; was kein Wort verrät, bleibt ohne Gruppe. Ein optionales
+  lokales Modell kann den Rest einteilen — es ist aus, bis du es einschaltest,
+  und was von ihm kommt, wird als Schätzung gekennzeichnet.
 
 ---
 

@@ -32,12 +32,15 @@ Rechner oder auf einem VPS mit HTTPS davor. Die Annahmen:
 |---|---|
 | argon2 für Passwörter | Ausgelesene Datenbank |
 | Anmeldebremse, in der Datenbank | Durchprobieren, auch über Neustarts hinweg |
-| Zweiter Faktor (TOTP, RFC 6238) | Wiederverwendete Passwörter aus fremden Datenlecks |
+| Zweiter Faktor (TOTP, RFC 6238), auf Wunsch Pflicht für Admins | Wiederverwendete Passwörter aus fremden Datenlecks |
+| Bremse für die Endpunkte, die nach draußen greifen | SparBit als Verstärker gegen fremde Server — und die gesperrte IP danach |
 | Signiertes Session-Cookie, `httponly`, `samesite=lax` | Diebstahl per JavaScript, einfache CSRF |
 | Netzschutz vor jedem ausgehenden Abruf | SSRF — auch über Weiterleitungen (siehe unten) |
 | Obergrenze beim Lesen, auf entpackte Bytes | Zip-Bomben, endlose Antworten |
 | Content-Security-Policy und Kopfzeilen | Eingeschleuste Skripte, Framing |
 | Prüfung beim Entpacken des Release-Archivs | Präparierte Archive (`../`, Symlinks) |
+| Anlagenweite Einstellungen nur für Admins | Ein Gast, der die Währungskurse der ganzen Anlage verstellt |
+| Signierte Container-Images (sigstore, schlüssellos) | Ein untergeschobenes Image aus der Registry |
 | Verschlüsselte Sicherungen (AES-256-GCM, scrypt) | Sicherungsdatei in fremden Händen |
 | API-Token einzeln zurückziehbar | Verlorenes Gerät |
 

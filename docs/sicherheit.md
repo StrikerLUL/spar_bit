@@ -123,6 +123,38 @@ Der aktuelle Stand steht in [../SECURITY.md](../SECURITY.md). Kurz:
 * **Content-Security-Policy** auf beiden Auslieferungswegen (nginx und
   Backend). Vorher hatte der lokale Start gar keine Kopfzeilen.
 * **Verschlüsselte Sicherungen** (AES-256-GCM, Schlüssel per scrypt).
+* **Zweiter Faktor als Pflicht für Administratoren**, abschaltbar, Vorgabe
+  aus. Ein Admin-Konto kann Quellen umstellen, Updates einspielen und
+  Sicherungen herunterladen — und in denen stehen die Geheimnisse aller
+  Konten. Gesperrt werden nur die Admin-Funktionen: anmelden und den zweiten
+  Faktor einrichten geht weiter, sonst wäre die Pflicht eine Aussperrung
+  statt einer Hürde. Einschalten darf sie nur, wer selbst schon einen hat —
+  sonst sperrt sich der einzige Administrator im selben Klick aus, und die
+  Einstellung zum Zurücknehmen ist genau eine der gesperrten.
+* **Anlagenweite Einstellungen sind Admin-Sache.** `PUT /api/settings` hing
+  am Router statt an einer Rolle; damit konnte ein **Gast**, der laut
+  Beschreibung nur zusehen darf, die Währungskurse der ganzen Anlage ändern,
+  die Preisfehler-Schwelle verstellen und das Passwort der Sicherungen
+  setzen. Dasselbe galt für Bilder-Aufräumen, Quellen-Snooze und die
+  Schwellenübernahme. Eine eigene Testdatei zählt die anlagenweiten
+  Endpunkte jetzt auf, damit der nächste nicht wieder durchrutscht.
+* **Bremse für die Endpunkte, die nach draußen greifen** — „Quelle testen",
+  Feed-Suche, Sammeleingabe der Wunschliste, Kanal-Test. Ein Aufruf hier löst
+  mehrere Abrufe bei einem fremden Shop aus. Wer den Knopf in einer Schleife
+  drückt (oder ein Skript daran hängt), macht aus SparBit einen Verstärker:
+  eine Anfrage rein, zwanzig Anfragen an einen fremden Server raus. Das fällt
+  nicht auf SparBit zurück, sondern auf die IP des VPS. Gezählt wird je
+  Konto, die Absage nennt die Wartezeit in `Retry-After`.
+* **CORS mit `*` gibt keine Cookies mehr frei.** Die Sternchen-Schreibweise
+  sieht harmlos aus („ich will es nur schnell testen") und ist genau dort
+  nicht harmlos: Starlette spiegelt dann jede Herkunft zurück, und eine
+  beliebige fremde Seite dürfte angemeldete Anfragen stellen — der
+  `SameSite=Lax`-Schutz des Cookies nützt dabei nichts mehr. SparBit warnt
+  im Protokoll und lässt Cookies für fremde Herkünfte weg.
+* **Veraltete Wechselkurse sind jetzt sichtbar.** Kein Angriff, aber ein
+  stiller Fehler: eine Regel „max. 20 €" greift bei Fremdwährungen von Jahr
+  zu Jahr weiter daneben, ohne dass irgendwo etwas rot wird. Das Alter steht
+  im UI, in `/api/health` und in den Metriken.
 
 ## Wenn etwas klemmt
 

@@ -73,7 +73,39 @@ fragil.
 | CheapShark | JSON | `cheapshark.com/api/1.0/deals` + `/stores` | nein | 30 Min. | Preise in **USD** |
 | IsThereAnyDeal | JSON | `api.isthereanydeal.com/deals/v2` | **ja** | 30 Min. | Doku: docs.isthereanydeal.com |
 | GG.deals | JSON | `api.gg.deals/v1/deals/list/` | **ja** | 1 Std. | Zugang wird einzeln freigeschaltet |
+| Slickdeals (US) | RSS | `feeds.slickdeals.net/slickdeals/frontpage` | nein | 20 Min. | Preise in **USD** |
+| OzBargain (AU) | RSS | `ozbargain.com.au/deals/feed` | nein | 20 Min. | Preise in **AUD** |
 | Eigene Feeds | RSS | frei eintragbar | nein | 15 Min. | für Geizhals-Wunschlisten u. Ä. |
+
+### Die beiden internationalen Quellen
+
+Warum überhaupt: SparBit rechnet ohnehin in EUR um, und die
+Preisfehler-Erkennung braucht Gegenmeinungen aus mehreren Quellen. Beides
+wird besser, je mehr Märkte dieselbe Ware melden — gerade bei Elektronik,
+wo ein Preisfehler oft zuerst anderswo auffällt. OzBargain ist wegen der
+Zeitzone oft die erste Quelle, die einen weltweiten Preisfehler meldet.
+
+Die Währung wird dabei **nicht geraten**: steht im Titel ein
+Währungszeichen, gewinnt das, sonst gilt die Vorgabe der Quelle (USD bzw.
+AUD). Ohne diese Festlegung liefe ein „$ 199" als EUR durch jede
+Preisregel. Beide Adressen sind im UI änderbar — viele dieser Seiten
+bieten auch Feeds je Kategorie an.
+
+### Ein Endpunkt, der nicht zu den Deals gehört
+
+| Zweck | Endpoint | Key | Intervall |
+|---|---|---|---|
+| Wechselkurse | `www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml` | nein | 1× täglich |
+
+Das ist der einzige ausgehende Abruf, den SparBit **von sich aus** macht —
+alles andere sind Quellen, die du eingeschaltet hast, und Kanäle, die du
+eingerichtet hast. Rund 3 KB, kein Schlüssel, kein Konto, keine Cookies.
+
+Der Grund: ein fester Kurs im Code altert still. Niemand bekommt eine
+Fehlermeldung, wenn „max. 20 €" seit einem Jahr bei 21,40 € zuschlägt —
+die Regel greift einfach ein bisschen daneben. Abschalten lässt sich der
+Abruf unter *Benachrichtigungen → Währung & Pause*; dann gilt, was du dort
+einträgst, und das UI sagt weiterhin, wie alt es ist.
 
 ### Zu den beiden Key-Quellen
 
