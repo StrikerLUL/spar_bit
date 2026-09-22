@@ -106,8 +106,9 @@ export function RuleEditor({
         {/* --- Definition --- */}
         <div className="space-y-5">
           <div className="space-y-1.5">
-            <Label>Name</Label>
+            <Label htmlFor="regel-name">Name</Label>
             <Input
+              id="regel-name"
               value={draft.name}
               autoFocus
               placeholder="z. B. Gratis-Spiele oder LEGO unter 30 €"
@@ -117,8 +118,9 @@ export function RuleEditor({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Priorität</Label>
+              <Label htmlFor="regel-prio">Priorität</Label>
               <Select
+                id="regel-prio"
                 value={draft.priority}
                 onChange={(e) => set("priority", e.target.value as RuleDraft["priority"])}
               >
@@ -183,7 +185,7 @@ export function RuleEditor({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Preisfehler-Verdacht</Label>
+            <Label id="regel-preisfehler">Preisfehler-Verdacht</Label>
             <Select
               value={draft.min_fehler_score ? String(draft.min_fehler_score) : ""}
               onChange={(e) =>
@@ -204,8 +206,9 @@ export function RuleEditor({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Mindestens dieses Preisurteil</Label>
+            <Label htmlFor="regel-urteil">Mindestens dieses Preisurteil</Label>
             <Select
+              id="regel-urteil"
               value={draft.min_urteil ?? ""}
               onChange={(e) => set("min_urteil", e.target.value || null)}
             >
@@ -222,11 +225,12 @@ export function RuleEditor({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Quellen</Label>
+            <Label id="regel-quellen">Quellen</Label>
             <p className="text-xs text-muted-foreground">
               Keine Auswahl = alle Quellen.
             </p>
-            <div className="flex flex-wrap gap-1.5 pt-1">
+            <div className="flex flex-wrap gap-1.5 pt-1" role="group"
+                 aria-labelledby="regel-quellen">
               {sources?.map((source) => {
                 const active = draft.sources.includes(source.id);
                 return (
@@ -253,7 +257,7 @@ export function RuleEditor({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Warengruppen</Label>
+            <Label id="regel-warengruppen">Warengruppen</Label>
             <p className="text-xs leading-relaxed text-muted-foreground">
               Keine Auswahl = alle. Nicht dasselbe wie die Quelle: hier geht es
               darum, <em>was</em> der Artikel ist, nicht woher er kommt.
@@ -261,7 +265,8 @@ export function RuleEditor({
               erkennbar ist, bleibt ohne Gruppe und fällt bei einer Auswahl
               heraus.
             </p>
-            <div className="flex flex-wrap gap-1.5 pt-1">
+            <div className="flex flex-wrap gap-1.5 pt-1" role="group"
+                 aria-labelledby="regel-warengruppen">
               {WARENGRUPPEN.map(({ id, label }) => {
                 const aktiv = draft.warengruppen.includes(id);
                 return (
@@ -296,7 +301,7 @@ export function RuleEditor({
           />
 
           <div className="space-y-1.5">
-            <Label>Benachrichtigen über</Label>
+            <Label id="regel-kanaele">Benachrichtigen über</Label>
             {!channels?.length ? (
               <p className="text-xs text-warning">
                 Noch kein Kanal eingerichtet — ohne Kanal wird nichts zugestellt.
@@ -460,10 +465,16 @@ export function ListField({
   value: string[];
   onChange: (value: string[]) => void;
 }) {
+  // Aus der Beschriftung eine id ableiten: die Felder heissen "Keywords",
+  // "Blacklist" und so weiter, das ist eindeutig genug - und eine id von
+  // aussen durchzureichen waere an jeder Aufrufstelle eine Gelegenheit,
+  // sie zu vergessen.
+  const kennung = `feld-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label htmlFor={kennung}>{label}</Label>
       <Textarea
+        id={kennung}
         rows={3}
         value={listToLines(value)}
         onChange={(e) => onChange(linesToList(e.target.value))}
@@ -486,12 +497,14 @@ export function NumberField({
   value: number | null;
   onChange: (value: number | null) => void;
 }) {
+  const kennung = `zahl-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">
+      <Label htmlFor={kennung} className="text-xs">
         {label} <span className="text-muted-foreground">({suffix})</span>
       </Label>
       <Input
+        id={kennung}
         type="number"
         min={0}
         step="any"

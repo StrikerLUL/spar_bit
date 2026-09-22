@@ -6,33 +6,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-const BENUTZER = "durchstich";
-const PASSWORT = "einGutesPasswort1";
-
-test.describe.configure({ mode: "serial" });
-
-test("ein frisch installiertes SparBit führt durch die Einrichtung", async ({ page }) => {
-  await page.goto("/");
-
-  // Es gibt kein Standard-Passwort: der erste Start ist ein Setup.
-  const bereitsEingerichtet = await page
-    .getByLabel(/^Benutzername$/).isVisible()
-    .then(() => page.getByLabel(/Passwort wiederholen/).isVisible().catch(() => false));
-
-  if (bereitsEingerichtet) {
-    await page.getByLabel(/^Benutzername$/).fill(BENUTZER);
-    await page.getByLabel("Passwort", { exact: true }).fill(PASSWORT);
-    await page.getByLabel(/Passwort wiederholen/).fill(PASSWORT);
-    await page.getByRole("button", { name: /Konto anlegen/ }).click();
-  } else {
-    await page.getByLabel(/^Benutzername$/).fill(BENUTZER);
-    await page.getByLabel("Passwort", { exact: true }).fill(PASSWORT);
-    await page.getByRole("button", { name: /^Anmelden$/ }).click();
-  }
-
-  // Danach steht die Anwendung - erkennbar an der Navigation.
-  await expect(page.getByRole("link", { name: "Feed" })).toBeVisible();
-});
+/* Angemeldet wird in anmeldung.setup.ts - siehe playwright.config.ts. */
 
 test("die Navigation führt auf jede Seite", async ({ page }) => {
   await page.goto("/");
@@ -51,19 +25,33 @@ test("die Navigation führt auf jede Seite", async ({ page }) => {
   }
 });
 
-test("eine Regel lässt sich anlegen und wieder löschen", async ({ page }) => {
+test("eine Regel lässt sich anlegen", async ({ page }) => {
   await page.goto("/regeln");
 
   await page.getByRole("button", { name: /Neue Regel|Regel anlegen/ }).first().click();
-  await page.getByLabel(/^Name/).fill("Durchstich-Regel");
+
+  /* Ab hier alles im Dialog suchen. „Regel anlegen" steht auch auf dem
+   * Knopf der leeren Seite dahinter — der liegt im DOM vorn, ist aber
+   * vom Dialog verdeckt, und ein Klick darauf läuft in einen Timeout
+   * mit der Meldung „intercepts pointer events". Die zeigt dann auf den
+   * Dialog und nicht auf die Ursache. */
+  const dialog = page.getByRole("dialog");
+
+  await dialog.getByLabel(/^Name/).fill("Durchstich-Regel");
 
   // Die Live-Vorschau ist der Kern des Editors: ohne sie baut man Regeln
   // blind. Dass sie überhaupt etwas sagt, gehört in den Durchstich.
-  await expect(page.getByText(/der letzten|Treffer|getroffen/i).first())
+  await expect(dialog.getByText(/Treffer|getroffen|der letzten/i).first())
     .toBeVisible({ timeout: 10_000 });
 
-  await page.getByRole("button", { name: /^Speichern|Anlegen$/ }).first().click();
-  await expect(page.getByText("Durchstich-Regel")).toBeVisible();
+  await dialog.getByRole("button", { name: /Regel anlegen|Speichern/ }).click();
+
+  // Der Dialog geht zu, die Regel steht in der Liste. Die Überschrift
+  // und nicht irgendein Text: der Name steht auch in der Begründung
+  // darunter, und getByText fände dann zwei Stellen.
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Durchstich-Regel" }))
+    .toBeVisible();
 });
 
 test("die Oberfläche lässt sich auf Englisch stellen", async ({ page }) => {

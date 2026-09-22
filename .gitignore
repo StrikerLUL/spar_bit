@@ -55,6 +55,7 @@ backend/tests/fixtures/live/
 frontend/playwright-report/
 frontend/test-results/
 frontend/.e2e-daten/
+frontend/e2e/.auth/
 frontend/coverage/
 
 # Das OpenAPI-Schema ist ein Zwischenschritt: erzeugt aus dem Backend,
