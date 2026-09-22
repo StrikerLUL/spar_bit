@@ -14,22 +14,30 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, desc, select
 
+from . import backup as backup_mod
 from . import erwachsen as erwachsen_mod
-from . import gratischeck
+from . import gratischeck, pricefehler
 from .config import settings
 from .db import SessionLocal, get_setting, session_scope
 from .events import broker
 from .http import NotModified, PoliteClient, RateLimited
 from .images import aufraeumen as bilder_aufraeumen
 from .images import hole_fuer_deals
-from .verdict import aktualisiere as urteile_aktualisieren
 from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
-from .pipeline import (check_price_alarms, dispatch, dispatch_alarms,
-                       dispatch_watchdog,
-                       dispatch_preisfehler, ingest, match_rules, send_digest)
-from . import pricefehler
+from .pipeline import (
+    check_price_alarms,
+    dispatch,
+    dispatch_ablauf,
+    dispatch_alarms,
+    dispatch_preisfehler,
+    dispatch_watchdog,
+    ingest,
+    match_rules,
+    send_digest,
+)
 from .sources import all_sources, get_source
 from .sources.base import FetchContext
+from .verdict import aktualisiere as urteile_aktualisieren
 
 log = logging.getLogger(__name__)
 
@@ -326,7 +334,7 @@ def _erwachsen_frei() -> bool:
     try:
         with SessionLocal() as db:
             return erwachsen_mod.ist_aktiv(db)
-    except Exception:                       # noqa: BLE001 - im Zweifel zu
+    except Exception:
         return False
 
 
@@ -516,11 +524,51 @@ def cleanup_job() -> None:
         log.error("Aufraeumen fehlgeschlagen: %s", exc)
 
 
+async def ablauf_job() -> None:
+    """Erinnern, was bald endet.
+
+    Laeuft alle 30 Minuten: haeufig genug, dass eine Frist von sechs
+    Stunden nicht durchrutscht, selten genug, um niemanden zu nerven.
+    """
+    try:
+        with session_scope() as db:
+            gesendet = await dispatch_ablauf(db, get_http())
+            if gesendet:
+                log.info("Fristmeldungen verschickt: %d", gesendet)
+    except Exception as exc:
+        log.error("Fristmeldung fehlgeschlagen: %s", exc)
+
+
+async def backup_job() -> None:
+    """Taegliche Sicherung ins Datenverzeichnis, mit Rotation.
+
+    Der Knopf im UI gab es schon - aber er hilft nur dem, der daran
+    denkt. Eine Sicherung, die niemand ausloest, ist keine.
+    """
+    try:
+        with session_scope() as db:
+            if not get_setting(db, "backup_taeglich", True):
+                return
+            behalten = int(get_setting(db, "backup_behalten", 7) or 7)
+            passwort = str(get_setting(db, "backup_passwort") or "")
+            pfad = await asyncio.to_thread(backup_mod.schreibe_datei, db, passwort)
+            entfernt = await asyncio.to_thread(backup_mod.raeume_auf, behalten)
+        log.info("Sicherung geschrieben: %s (%d alte entfernt)", pfad.name, entfernt)
+        broker.publish("backup", {"datei": pfad.name})
+    except Exception as exc:
+        log.error("Sicherung fehlgeschlagen: %s", exc)
+
+
 def start() -> None:
     ensure_source_rows()
     sync_jobs()
     scheduler.add_job(digest_job, IntervalTrigger(hours=1), id="digest",
                       max_instances=1, coalesce=True)
+    scheduler.add_job(ablauf_job, IntervalTrigger(minutes=30), id="ablauf",
+                      replace_existing=True, max_instances=1)
+    scheduler.add_job(backup_job, IntervalTrigger(hours=24), id="backup",
+                      replace_existing=True, max_instances=1,
+                      next_run_time=utcnow() + timedelta(minutes=5))
     scheduler.add_job(cleanup_job, IntervalTrigger(hours=6), id="cleanup",
                       max_instances=1, coalesce=True)
     scheduler.add_job(watch_job, IntervalTrigger(minutes=10), id="watch",

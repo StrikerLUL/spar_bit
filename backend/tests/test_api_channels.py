@@ -19,20 +19,25 @@ def client(tmp_path, monkeypatch):
         yield c
 
 
-def test_alle_neun_typen_werden_angeboten(client):
+def test_alle_typen_werden_angeboten(client):
     typen = client.get("/api/channels/types").json()
     assert {t["type"] for t in typen} == {
         "discord", "slack", "matrix", "gotify", "pushover",
-        "telegram", "ntfy", "smtp", "webhook"}
+        "telegram", "ntfy", "smtp", "webhook", "browser", "apprise"}
 
 
 def test_jeder_typ_beschreibt_sich(client):
+    # Web Push hat bewusst kein Feld: seine "Konfiguration" ist die
+    # Erlaubnis im Browser, nicht ein Eintrag im Formular.
+    ohne_felder = {"browser"}
     for typ in client.get("/api/channels/types").json():
         assert typ["display_name"] and typ["beschreibung"], typ["type"]
+        assert isinstance(typ["supports_buttons"], bool)
+        if typ["type"] in ohne_felder:
+            continue
         assert typ["options_schema"], typ["type"]
         # Ohne Pflichtfeld koennte man einen leeren Kanal speichern.
         assert any(o["pflicht"] for o in typ["options_schema"]), typ["type"]
-        assert isinstance(typ["supports_buttons"], bool)
 
 
 def test_telegram_token_kommt_maskiert_zurueck(client):
@@ -71,6 +76,7 @@ def test_leeres_feld_behaelt_das_gespeicherte_geheimnis(client):
         "config": {**angelegt["config"], "chat_id": "43"}})
 
     from sqlalchemy import select
+
     from app.db import SessionLocal
     from app.models import Channel
     with SessionLocal() as db:

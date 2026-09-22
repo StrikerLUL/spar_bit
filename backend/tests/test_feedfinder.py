@@ -8,8 +8,7 @@ Feed oder wenigstens eine brauchbare Auskunft wird.
 import pytest
 
 from app import feedfinder
-from app.feedfinder import (KeinFeed, finde_feeds, hole, ist_feed, ist_wand,
-                            seitentitel, suche)
+from app.feedfinder import KeinFeed, finde_feeds, hole, ist_feed, ist_wand, seitentitel, suche
 
 # Nachgebaut nach der echten Fehlermeldung: dieselbe DOCTYPE-Zeile, dieselben
 # Klassennamen der Pepper-Oberflaeche.
@@ -378,10 +377,10 @@ async def test_gefundene_adresse_wird_zurueckgeschrieben(tmp_path, monkeypatch):
     from conftest import lade_app_neu
     lade_app_neu()
 
+    from app import scheduler
     from app.db import SessionLocal, init_db, set_setting
     from app.erwachsen import AKTIV
     from app.models import SourceConfig
-    from app import scheduler
 
     init_db()
     scheduler.ensure_source_rows()

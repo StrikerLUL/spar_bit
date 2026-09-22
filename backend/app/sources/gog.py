@@ -6,8 +6,7 @@ weich behandelt: faellt er aus, liefert die Quelle trotzdem den Katalog.
 """
 from __future__ import annotations
 
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
 
 
 class GOG(Source):

@@ -395,8 +395,14 @@ def find_prices(text: str) -> list[tuple[float, int, str | None]]:
 # --- Ergebnis --------------------------------------------------------------
 
 class ParsedPrice:
-    __slots__ = ("preis", "originalpreis", "rabatt_prozent", "waehrung",
-                 "ist_gratis", "gratis_einschraenkung")
+    __slots__ = (
+        "gratis_einschraenkung",
+        "ist_gratis",
+        "originalpreis",
+        "preis",
+        "rabatt_prozent",
+        "waehrung",
+    )
 
     def __init__(self, preis=None, originalpreis=None, rabatt_prozent=None,
                  waehrung=None, ist_gratis=False, gratis_einschraenkung=None):

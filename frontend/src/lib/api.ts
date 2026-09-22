@@ -51,10 +51,29 @@ const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
 
 // --- Typen ---------------------------------------------------------------
 
+export interface Benutzer {
+  id: number;
+  username: string;
+  /** admin | mitglied | gast */
+  rolle: string;
+  aktiv: boolean;
+  erstellt: string;
+  zuletzt_angemeldet: string | null;
+  zweifaktor: boolean;
+  ich: boolean;
+}
+
+export interface ZweiFaktorStatus {
+  aktiv: boolean;
+  vorbereitet: boolean;
+  ersatzcodes_uebrig: number;
+}
+
 export interface AuthStatus {
   setup_done: boolean;
   logged_in: boolean;
   username: string | null;
+  rolle: string | null;
 }
 
 export interface GratisBefund {
@@ -155,6 +174,7 @@ export interface Deal {
 }
 
 export interface WatchItem {
+  liste_id: number | null;
   id: number;
   name: string;
   url: string;
@@ -474,6 +494,43 @@ export interface SavedSearch {
   filter: Record<string, unknown>;
 }
 
+export interface WatchListe {
+  id: number;
+  name: string;
+  beschreibung: string | null;
+  budget: number | null;
+  farbe: string | null;
+  anzahl: number;
+  summe_aktuell: number;
+  summe_ziel: number | null;
+  ohne_preis: number;
+  budget_rest: number | null;
+  ziel_erreicht: number;
+}
+
+export interface Sparbilanz {
+  tage: number;
+  ersparnis_eur: number;
+  beobachtete_deals: number;
+  mit_verlauf: number;
+  ohne_verlauf: number;
+  gratis_mitgenommen: number;
+  claims: number;
+  hinweis: string;
+  top: {
+    id: number; titel: string; url: string; haendler: string | null;
+    preis: number | null; gespart: number;
+  }[];
+}
+
+export interface PushGeraet {
+  id: number;
+  geraet: string;
+  erstellt_am: string;
+  zuletzt_ok: string | null;
+  host: string;
+}
+
 export interface AppSettings {
   waehrungskurse: Record<string, number>;
   aktive_kurse: Record<string, number>;
@@ -482,6 +539,27 @@ export interface AppSettings {
   preisfehler_waechter: boolean;
   /** Ab wie vielen Punkten gemeldet wird (30-100). */
   preisfehler_schwelle: number;
+  /** Taegliche Sicherung ins Datenverzeichnis. */
+  backup_taeglich: boolean;
+  /** Wie viele Sicherungen aufgehoben werden. */
+  backup_behalten: number;
+  /** Nur die Auskunft, ob eines gesetzt ist - das Passwort selbst bleibt drin. */
+  backup_passwort_gesetzt?: boolean;
+  /** Beim Speichern: neues Passwort, "-" loescht es, leer laesst es stehen. */
+  backup_passwort?: string;
+}
+
+export interface BackupDatei {
+  name: string;
+  bytes: number;
+  erstellt: string;
+  verschluesselt: boolean;
+}
+
+export interface BackupListe {
+  ordner: string;
+  dateien: BackupDatei[];
+  verschluesselung_moeglich: boolean;
 }
 
 export interface PreisfehlerListe {
@@ -621,11 +699,26 @@ export const api = {
     status: () => get<AuthStatus>("/auth/status"),
     setup: (username: string, password: string) =>
       post<{ ok: boolean }>("/auth/setup", { username, password }),
-    login: (username: string, password: string) =>
-      post<{ ok: boolean }>("/auth/login", { username, password }),
+    login: (username: string, password: string, code?: string) =>
+      post<{ ok: boolean }>("/auth/login", { username, password, code }),
     logout: () => post<{ ok: boolean }>("/auth/logout"),
     changePassword: (old_password: string, new_password: string) =>
       post<{ ok: boolean }>("/auth/password", { old_password, new_password }),
+    benutzer: () => get<Benutzer[]>("/auth/benutzer"),
+    benutzerAnlegen: (body: { username: string; password: string; rolle: string }) =>
+      post<Benutzer>("/auth/benutzer", body),
+    benutzerAendern: (id: number, body: { rolle?: string; aktiv?: boolean;
+                                          neues_passwort?: string }) =>
+      patch<Benutzer>(`/auth/benutzer/${id}`, body),
+    benutzerLoeschen: (id: number) =>
+      del<{ ok: boolean; geloescht: string }>(`/auth/benutzer/${id}`),
+    zweifaktor: () => get<ZweiFaktorStatus>("/auth/zweifaktor"),
+    zweifaktorStart: () =>
+      post<{ geheimnis: string; otpauth: string }>("/auth/zweifaktor/start"),
+    zweifaktorBestaetigen: (code: string) =>
+      post<{ ok: boolean; ersatzcodes: string[] }>("/auth/zweifaktor/bestaetigen", { code }),
+    zweifaktorAus: (password: string) =>
+      post<{ ok: boolean }>("/auth/zweifaktor/aus", { password }),
   },
   deals: {
     list: (params: Record<string, string | number | boolean | undefined>) => {
@@ -654,6 +747,9 @@ export const api = {
       get<PreisfehlerListe>(`/preisfehler?tage=${tage}&nur_heiss=${nurHeiss}`),
     pruefen: (id: number) => post<Fehlerurteil>(`/preisfehler/${id}/pruefen`),
     auswertung: () => get<PreisfehlerAuswertung>("/preisfehler/auswertung"),
+    schwelleUebernehmen: () =>
+      post<{ ok: boolean; vorher: number; jetzt: number; grund: string }>(
+        "/preisfehler/schwelle-uebernehmen"),
     rueckmeldung: (id: number, urteil: "echt" | "fehlalarm") =>
       post<{ ok: boolean; urteil_mensch: string | null }>(
         `/preisfehler/${id}/rueckmeldung`, { urteil }),
@@ -698,6 +794,13 @@ export const api = {
     logs: (level = "ALL", limit = 300) =>
       get<LogLine[]>(`/system/logs?level=${level}&limit=${limit}`),
     backupUrl: "/api/system/backup",
+    backupsListe: () => get<BackupListe>("/system/backups"),
+    backupJetzt: () => post<{ ok: boolean; datei: string; bytes: number; alte_entfernt: number }>(
+      "/system/backups"),
+    backupLoeschen: (name: string) =>
+      del<{ ok: boolean }>(`/system/backups/${encodeURIComponent(name)}`),
+    backupDateiUrl: (name: string) =>
+      `/api/system/backups/${encodeURIComponent(name)}`,
     probleme: () => get<ProblemStatus>("/system/probleme"),
     problemeMelden: (an: boolean) =>
       put<{ ok: boolean; an: boolean }>("/system/probleme/melden", { an }),
@@ -737,11 +840,35 @@ export const api = {
       post<SavedSearch>("/searches", { name, filter }),
     remove: (id: number) => del<{ ok: boolean }>(`/searches/${id}`),
   },
+  bilanz: (tage = 365) => get<Sparbilanz>(`/bilanz?tage=${tage}`),
+  kalenderUrl: (token: string, nurGratis = false) =>
+    `/api/kalender.ics?token=${encodeURIComponent(token)}${nurGratis ? "&nur_gratis=true" : ""}`,
+  regeln: {
+    export: () => get<{ format: string; version: number; regeln: unknown[] }>(
+      "/rules/export"),
+    import: (regeln: unknown[], aktiv = false, ersetzen = false) =>
+      post<{ ok: boolean; angelegt: string[]; uebersprungen: string[]; hinweis: string }>(
+        "/rules/import", { regeln, aktiv, ersetzen }),
+  },
+  opml: {
+    exportUrl: "/api/sources/opml/export",
+    import: (inhalt: string, ziel = "custom_feed") =>
+      post<{ ok: boolean; gefunden: number; neu: number; schon_da: number;
+             quelle: string; aktiv: boolean }>(
+        "/sources/opml/import", { inhalt, ziel }),
+  },
+  push: {
+    schluessel: () => get<{ verfuegbar: boolean; schluessel: string | null;
+                            grund?: string; geraete?: number }>("/push/schluessel"),
+    anmelden: (body: { endpunkt: string; p256dh: string; auth: string; geraet: string }) =>
+      post<{ ok: boolean; neu: boolean; id: number }>("/push/abo", body),
+    abos: () => get<PushGeraet[]>("/push/abos"),
+    entfernen: (id: number) => del<{ ok: boolean }>(`/push/abo/${id}`),
+  },
   settings: {
     get: () => get<AppSettings>("/settings"),
-    set: (body: { waehrungskurse: Record<string, number>;
-                  benachrichtigungen_pausiert: boolean }) =>
-      put<AppSettings>("/settings", body),
+    /** Teil-Update: was nicht mitkommt, bleibt unveraendert stehen. */
+    set: (body: Partial<AppSettings>) => put<AppSettings>("/settings", body),
   },
   bilder: {
     status: () => get<BilderStatus>("/bilder-status"),
@@ -756,6 +883,17 @@ export const api = {
     remove: (id: number) => del<{ ok: boolean }>(`/watch/${id}`),
     pruefen: (id: number) => post<WatchTest>(`/watch/${id}/pruefen`),
     testen: (url: string) => post<WatchTest>("/watch-test", { url }),
+    listen: () => get<WatchListe[]>("/listen"),
+    listeAnlegen: (body: { name: string; budget?: number | null;
+                           beschreibung?: string }) =>
+      post<WatchListe>("/listen", body),
+    listeAendern: (id: number, body: { name: string; budget?: number | null;
+                                       beschreibung?: string }) =>
+      patch<WatchListe>(`/listen/${id}`, body),
+    listeLoeschen: (id: number) =>
+      del<{ ok: boolean; artikel_behalten: number }>(`/listen/${id}`),
+    steam: (profil: string, ziel_preis?: number | null, gleich_pruefen = false) =>
+      post<SammelErgebnis>("/watch/steam", { profil, ziel_preis, gleich_pruefen }),
     sammel: (urls: string, ziel_preis?: number | null, intervall_minuten?: number) =>
       post<SammelErgebnis>("/watch/sammel",
         { urls, ziel_preis: ziel_preis ?? null,
@@ -783,7 +921,23 @@ export const api = {
   snooze: (sourceId: string, stunden: number) =>
     post<{ id: string; snooze_until: string | null }>(
       `/sources/${sourceId}/snooze?stunden=${stunden}`),
-  restore: (payload: unknown) => post<Record<string, unknown>>("/system/restore", payload),
+  restore: (payload: unknown, passwort?: string) =>
+    post<Record<string, unknown>>("/system/restore",
+      passwort ? { daten: payload, passwort } : payload),
+  /** Verschluesselte Sicherung holen - kommt als Datei zurueck, nicht als Ansicht. */
+  backupVerschluesselt: async (passwort: string, umfang = "voll") => {
+    const antwort = await fetch("/api/system/backup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ passwort, umfang }),
+    });
+    if (!antwort.ok) {
+      const fehler = await antwort.json().catch(() => ({ detail: antwort.statusText }));
+      throw new Error(fehler.detail || "Sicherung fehlgeschlagen");
+    }
+    return antwort.blob();
+  },
   csvUrl: (params: Record<string, boolean>) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) if (v) q.set(k, "true");

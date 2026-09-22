@@ -1,6 +1,6 @@
 """Integrationstest: Quelle -> Dedupe -> DB -> Regel -> Match. Ohne Netzwerk."""
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Deal, DealOffer, Match, PriceHistory, Rule

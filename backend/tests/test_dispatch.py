@@ -9,7 +9,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Channel, Deal, Match, NotificationLog, Rule, utcnow
-from app.notify.base import _CHANNELS, Channel as KanalBasis
+from app.notify.base import _CHANNELS
+from app.notify.base import Channel as KanalBasis
 from app.pipeline import buendele, dispatch
 
 

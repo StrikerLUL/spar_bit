@@ -1,13 +1,15 @@
 import {
-  AlertTriangle, ArrowUpCircle, BadgeCheck, CheckCircle2, Copy, Download,
+  AlertTriangle, ArrowUpCircle, BadgeCheck, CalendarClock, CheckCircle2, Copy,
+  Download, Users,
   HardDrive, Image, Keyboard, Lock, Puzzle, RefreshCw, ScrollText, ShieldCheck,
   Trash2, Upload, XCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
-  api, type ApiTokenInfo, type BilderStatus, type ErwachsenStatus,
-  type GratisCheckStatus, type LogLine, type ProblemStatus, type SystemInfo,
-  type UpdateStatus,
+  api, type ApiTokenInfo, type AppSettings, type BackupListe, type Benutzer,
+  type BilderStatus,
+  type ErwachsenStatus, type GratisCheckStatus, type LogLine,
+  type ProblemStatus, type SystemInfo, type UpdateStatus, type ZweiFaktorStatus,
 } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { useToast } from "@/components/Toast";
@@ -15,8 +17,8 @@ import {
   cn, formatBytes, formatDateTime, formatDuration, timeAgo,
 } from "@/lib/utils";
 import {
-  Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Select,
-  Skeleton, Switch,
+  Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Label,
+  Select, Skeleton, Switch,
 } from "@/components/ui";
 import { PageHeader } from "@/components/Layout";
 
@@ -31,6 +33,10 @@ const LEVEL_STYLES: Record<string, string> = {
 export function System({ liveLogs }: { liveLogs: LogLine[] }) {
   const { data: info, loading, reload } = useAsync<SystemInfo>(
     () => api.system.info(), []);
+  // Die eigene Rolle entscheidet, was auf dieser Seite überhaupt
+  // bedienbar ist - ein Mitglied sieht die Konten, ändert sie aber nicht.
+  const { data: status } = useAsync(() => api.auth.status(), []);
+  const rolle = status?.rolle ?? null;
   const [level, setLevel] = React.useState("ALL");
   const { data: logs, reload: reloadLogs } = useAsync<LogLine[]>(
     () => api.system.logs(level), [level]);
@@ -155,27 +161,13 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Backup</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Vollständiger Export als JSON: Regeln, Kanäle, Quellen-Konfiguration
-                und Deals. <strong className="text-warning">Enthält deine API-Keys
-                und Kanal-Tokens</strong> — behandle die Datei wie ein Passwort.
-              </p>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => window.open(api.system.backupUrl, "_blank")}
-              >
-                <Download className="h-4 w-4" />
-                Backup herunterladen
-              </Button>
-              <RestoreButton />
-            </CardContent>
-          </Card>
+          <BenutzerCard meineRolle={rolle} />
+
+          <ZweiFaktorCard />
+
+          <BackupCard />
+
+          <KalenderCard />
 
           <ErweiterungCard />
 
@@ -654,8 +646,415 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 );
 
 
-/** Backup zurueckspielen. Regeln, Kanaele und Quellen-Konfiguration werden
- *  ersetzt - gesammelte Deals bleiben, die kommen ohnehin wieder rein. */
+/** Konten im Haushalt.
+ *
+ *  Sichtbar für alle — wer zusammen wohnt, weiß ohnehin, wer mitliest.
+ *  Ändern darf nur ein Admin. Abschalten statt löschen ist die
+ *  vorsichtige Variante: Regeln und Wunschliste bleiben erhalten. */
+function BenutzerCard({ meineRolle }: { meineRolle: string | null }) {
+  const toast = useToast();
+  const { data, reload } = useAsync<Benutzer[]>(() => api.auth.benutzer(), []);
+  const [offen, setOffen] = React.useState(false);
+  const [name, setName] = React.useState("");
+  const [passwort, setPasswort] = React.useState("");
+  const [rolle, setRolle] = React.useState("mitglied");
+  const admin = meineRolle === "admin";
+
+  if (!data) return <Skeleton className="h-40" />;
+
+  const anlegen = async () => {
+    try {
+      await api.auth.benutzerAnlegen({ username: name, password: passwort, rolle });
+      setName("");
+      setPasswort("");
+      setOffen(false);
+      reload();
+      toast.push("success", "Konto angelegt",
+        "Eigene Regeln, Kanäle und Wunschliste — getrennt von deinen.");
+    } catch (err) {
+      toast.push("error", "Anlegen fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  const aendern = async (id: number, patch: { rolle?: string; aktiv?: boolean }) => {
+    try {
+      await api.auth.benutzerAendern(id, patch);
+      reload();
+    } catch (err) {
+      toast.push("error", "Nicht möglich", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="h-4 w-4 text-primary" />
+          Konten
+          <Badge variant="outline">{data.length}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ul className="space-y-2">
+          {data.map((u) => (
+            <li key={u.id} className="flex items-center justify-between gap-2 text-xs">
+              <span className={cn("truncate", !u.aktiv && "text-muted-foreground line-through")}>
+                {u.username}
+                {u.ich && <span className="ml-1 text-muted-foreground">(du)</span>}
+                {u.zweifaktor && <span className="ml-1" title="Zweiter Faktor aktiv">🔒</span>}
+              </span>
+              {admin && !u.ich ? (
+                <div className="flex shrink-0 items-center gap-1">
+                  <Select value={u.rolle} className="h-7 w-28 text-xs"
+                          onChange={(e) => void aendern(u.id, { rolle: e.target.value })}>
+                    <option value="admin">Admin</option>
+                    <option value="mitglied">Mitglied</option>
+                    <option value="gast">Gast</option>
+                  </Select>
+                  <Switch checked={u.aktiv} label="Konto aktiv"
+                          onChange={(an) => void aendern(u.id, { aktiv: an })} />
+                </div>
+              ) : (
+                <Badge variant="outline">{u.rolle}</Badge>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {admin && (offen ? (
+          <div className="space-y-2 border-t border-border pt-3">
+            <Input value={name} placeholder="Benutzername"
+                   onChange={(e) => setName(e.target.value)} />
+            <Input type="password" value={passwort}
+                   placeholder="Passwort (mind. 10 Zeichen)"
+                   autoComplete="new-password"
+                   onChange={(e) => setPasswort(e.target.value)} />
+            <Select value={rolle} onChange={(e) => setRolle(e.target.value)}>
+              <option value="mitglied">Mitglied — eigene Regeln und Wunschliste</option>
+              <option value="gast">Gast — darf nur zusehen</option>
+              <option value="admin">Admin — verwaltet Quellen und Konten</option>
+            </Select>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => void anlegen()}
+                      disabled={name.length < 3 || passwort.length < 10}>
+                Anlegen
+              </Button>
+              <Button variant="ghost" onClick={() => setOffen(false)}>Abbrechen</Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="outline" className="w-full" onClick={() => setOffen(true)}>
+            <Users className="h-4 w-4" />
+            Konto hinzufügen
+          </Button>
+        ))}
+
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Jedes Konto hat eigene Regeln, Kanäle, Wunschlisten und gelernte
+          Vorlieben. Gemeinsam bleiben Quellen, gesammelte Deals und die
+          Systemeinstellungen.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/** Zweiter Faktor per Authenticator-App.
+ *
+ *  Scharf wird er erst, wenn ein Code aus der App wirklich stimmt -
+ *  sonst sperrt sich aus, wessen App das Geheimnis nie bekommen hat. */
+function ZweiFaktorCard() {
+  const toast = useToast();
+  const { data, reload } = useAsync<ZweiFaktorStatus>(
+    () => api.auth.zweifaktor(), []);
+  const [einrichtung, setEinrichtung] = React.useState<
+    { geheimnis: string; otpauth: string } | null>(null);
+  const [code, setCode] = React.useState("");
+  const [ersatz, setErsatz] = React.useState<string[] | null>(null);
+
+  if (!data) return <Skeleton className="h-40" />;
+
+  const starten = async () => {
+    try {
+      setEinrichtung(await api.auth.zweifaktorStart());
+    } catch (err) {
+      toast.push("error", "Einrichten fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  const bestaetigen = async () => {
+    try {
+      const antwort = await api.auth.zweifaktorBestaetigen(code);
+      setErsatz(antwort.ersatzcodes);
+      setEinrichtung(null);
+      setCode("");
+      reload();
+    } catch (err) {
+      toast.push("error", "Code stimmt nicht", (err as Error).message);
+    }
+  };
+
+  const abschalten = async () => {
+    const passwort = window.prompt("Zum Abschalten dein Passwort:");
+    if (!passwort) return;
+    try {
+      await api.auth.zweifaktorAus(passwort);
+      setErsatz(null);
+      reload();
+      toast.push("success", "Zweiter Faktor aus");
+    } catch (err) {
+      toast.push("error", "Abschalten fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className={cn("h-4 w-4", data.aktiv ? "text-success" : "text-muted-foreground")} />
+          Zweiter Faktor
+          {data.aktiv && <Badge variant="success">aktiv</Badge>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!data.aktiv && !einrichtung && (
+          <>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Ein Passwort schützt so gut, wie es geheim bleibt. Steht SparBit
+              unter einer Domain im Netz, reicht ein wiederverwendetes Passwort
+              aus einem fremden Datenleck — dagegen hilft keine Anmeldebremse.
+            </p>
+            <Button variant="outline" className="w-full" onClick={() => void starten()}>
+              <Lock className="h-4 w-4" />
+              Einrichten
+            </Button>
+          </>
+        )}
+
+        {einrichtung && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              In der Authenticator-App hinzufügen — Adresse scannen oder den
+              Schlüssel von Hand eintippen:
+            </p>
+            <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]">
+              {einrichtung.geheimnis}
+            </code>
+            <a href={einrichtung.otpauth}
+               className="block truncate text-xs text-primary hover:underline"
+               title={einrichtung.otpauth}>
+              Direkt in der App öffnen
+            </a>
+            <Input
+              value={code}
+              inputMode="numeric"
+              placeholder="Code aus der App"
+              onChange={(e) => setCode(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button className="flex-1" disabled={code.length < 6}
+                      onClick={() => void bestaetigen()}>
+                Bestätigen
+              </Button>
+              <Button variant="ghost" onClick={() => setEinrichtung(null)}>
+                Abbrechen
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {ersatz && (
+          <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3">
+            <p className="text-xs font-medium text-warning">
+              Ersatzcodes — jetzt aufschreiben. Sie werden nie wieder angezeigt.
+            </p>
+            <div className="grid grid-cols-2 gap-1 font-mono text-xs">
+              {ersatz.map((c) => <span key={c}>{c}</span>)}
+            </div>
+            <Button variant="ghost" size="sm" className="w-full"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(ersatz.join("\n"));
+                      toast.push("success", "Kopiert");
+                    }}>
+              <Copy className="h-3.5 w-3.5" />
+              Kopieren
+            </Button>
+          </div>
+        )}
+
+        {data.aktiv && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Aktiv. Noch {data.ersatzcodes_uebrig} Ersatzcodes übrig.
+            </p>
+            <Button variant="ghost" className="w-full" onClick={() => void abschalten()}>
+              Abschalten
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/** Sicherung: herunterladen, einspielen, automatische Laeufe ansehen.
+ *
+ *  Eine Sicherung enthaelt Bot-Token, API-Schluessel und Passwort-Hashes.
+ *  Darum steht das Passwortfeld gleich daneben und nicht in einem Menue,
+ *  das niemand findet. */
+function BackupCard() {
+  const toast = useToast();
+  const [passwort, setPasswort] = React.useState("");
+  const [umfang, setUmfang] = React.useState("voll");
+  const [laedt, setLaedt] = React.useState(false);
+  const { data: liste, reload } = useAsync<BackupListe>(
+    () => api.system.backupsListe(), []);
+  const [einstellungen, setEinstellungen] = React.useState<AppSettings | null>(null);
+
+  React.useEffect(() => {
+    api.settings.get().then(setEinstellungen).catch(() => undefined);
+  }, []);
+
+  const herunterladen = async () => {
+    if (!passwort) {
+      window.open(`${api.system.backupUrl}?umfang=${umfang}`, "_blank");
+      return;
+    }
+    setLaedt(true);
+    try {
+      const blob = await api.backupVerschluesselt(passwort, umfang);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sparbit-backup-${new Date().toISOString().slice(0, 10)}.json.enc`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.push("success", "Verschlüsselte Sicherung geladen",
+        "Ohne das Passwort lässt sie sich nicht mehr öffnen — gut aufheben.");
+    } catch (err) {
+      toast.push("error", "Sicherung fehlgeschlagen", (err as Error).message);
+    } finally {
+      setLaedt(false);
+    }
+  };
+
+  const jetztSichern = async () => {
+    try {
+      const bericht = await api.system.backupJetzt();
+      toast.push("success", "Sicherung geschrieben",
+        `${bericht.datei}${bericht.alte_entfernt ? `, ${bericht.alte_entfernt} alte entfernt` : ""}`);
+      reload();
+    } catch (err) {
+      toast.push("error", "Sicherung fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <HardDrive className="h-4 w-4 text-primary" />
+          Sicherung
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Vollständig: Regeln, Kanäle, Quellen, Wunschliste, Preisverlauf,
+          gelernte Interaktionen und Deals. <strong className="text-warning">
+          Enthält API-Keys und Kanal-Tokens</strong> — mit Passwort wird die
+          Datei verschlüsselt (AES-256).
+        </p>
+
+        <Select value={umfang} onChange={(e) => setUmfang(e.target.value)}>
+          <option value="voll">Alles</option>
+          <option value="einstellungen">Nur Einstellungen (für den Umzug)</option>
+        </Select>
+
+        <Input
+          type="password"
+          placeholder={liste?.verschluesselung_moeglich
+            ? "Passwort (optional, verschlüsselt die Datei)"
+            : "Verschlüsselung nicht verfügbar"}
+          value={passwort}
+          disabled={liste ? !liste.verschluesselung_moeglich : false}
+          onChange={(e) => setPasswort(e.target.value)}
+          autoComplete="new-password"
+        />
+
+        <Button variant="outline" className="w-full" loading={laedt}
+                onClick={() => void herunterladen()}>
+          <Download className="h-4 w-4" />
+          Herunterladen
+        </Button>
+
+        <RestoreButton />
+
+        <div className="space-y-2 border-t border-border pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium">Automatisch im Datenordner</span>
+            <Button variant="ghost" size="sm" onClick={() => void jetztSichern()}>
+              <RefreshCw className="h-3.5 w-3.5" />
+              Jetzt
+            </Button>
+          </div>
+          {einstellungen && (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">
+                Täglich, {einstellungen.backup_behalten} aufheben
+                {einstellungen.backup_passwort_gesetzt ? " (verschlüsselt)" : ""}
+              </span>
+              <Switch
+                checked={einstellungen.backup_taeglich}
+                onChange={async (an) => {
+                  await api.settings.set({ backup_taeglich: an });
+                  setEinstellungen({ ...einstellungen, backup_taeglich: an });
+                }}
+              />
+            </div>
+          )}
+          {!liste?.dateien.length ? (
+            <p className="text-xs text-muted-foreground">
+              Noch keine — der tägliche Lauf legt sie unter{" "}
+              <code className="text-[11px]">{liste?.ordner ?? "data/backups"}</code> ab.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {liste.dateien.slice(0, 5).map((datei) => (
+                <li key={datei.name}
+                    className="flex items-center justify-between gap-2 text-xs">
+                  <a href={api.system.backupDateiUrl(datei.name)}
+                     className="truncate text-primary hover:underline"
+                     title={datei.name}>
+                    {datei.verschluesselt ? "🔒 " : ""}{timeAgo(datei.erstellt)}
+                  </a>
+                  <span className="shrink-0 text-muted-foreground">
+                    {formatBytes(datei.bytes)}
+                  </span>
+                  <button
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    title="Löschen"
+                    onClick={async () => {
+                      await api.system.backupLoeschen(datei.name);
+                      reload();
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/** Sicherung zurueckspielen. Konfiguration wird ersetzt, gesammelte Daten
+ *  werden ergaenzt - was seit der Sicherung dazukam, bleibt stehen. */
 function RestoreButton() {
   const toast = useToast();
   const input = React.useRef<HTMLInputElement>(null);
@@ -665,10 +1064,17 @@ function RestoreButton() {
     setLaeuft(true);
     try {
       const inhalt = JSON.parse(await datei.text());
-      const bericht = await api.restore(inhalt) as Record<string, number>;
-      toast.push("success", "Backup eingespielt",
-        `${bericht.regeln} Regeln, ${bericht.kanaele} Kanäle, `
-        + `${bericht.quellen} Quellen. Seite neu laden.`);
+      let passwort: string | undefined;
+      if (inhalt?.sparbit_backup === "verschluesselt") {
+        passwort = window.prompt(
+          "Diese Sicherung ist verschlüsselt. Passwort:") ?? undefined;
+        if (!passwort) { setLaeuft(false); return; }
+      }
+      const bericht = await api.restore(inhalt, passwort) as Record<string, number>;
+      toast.push("success", "Sicherung eingespielt",
+        `${bericht.regeln} Regeln, ${bericht.kanaele} Kanäle, ${bericht.quellen} Quellen, `
+        + `${bericht.deals} Deals, ${bericht.wunschliste} Wunschartikel, `
+        + `${bericht.interaktionen} gelernte Spuren. Seite neu laden.`);
     } catch (err) {
       toast.push("error", "Einspielen fehlgeschlagen", (err as Error).message);
     } finally {
@@ -682,7 +1088,7 @@ function RestoreButton() {
       <input
         ref={input}
         type="file"
-        accept="application/json,.json"
+        accept="application/json,.json,.enc"
         className="hidden"
         onChange={(e) => {
           const datei = e.target.files?.[0];
@@ -695,14 +1101,15 @@ function RestoreButton() {
         loading={laeuft}
         onClick={() => {
           if (window.confirm(
-            "Backup einspielen? Regeln, Kanäle und Quellen-Einstellungen "
-            + "werden dabei ersetzt. Gesammelte Deals bleiben erhalten.")) {
+            "Sicherung einspielen? Regeln, Kanäle und gespeicherte Suchen "
+            + "werden ersetzt. Deals, Wunschliste und Verlauf werden ergänzt — "
+            + "was seitdem dazukam, bleibt stehen.")) {
             input.current?.click();
           }
         }}
       >
         <Upload className="h-4 w-4" />
-        Backup einspielen
+        Sicherung einspielen
       </Button>
     </>
   );
@@ -761,6 +1168,88 @@ function BilderCard() {
           <Trash2 className="h-3.5 w-3.5" />
           Verwaiste Bilder entfernen
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+/** Fristen als abonnierbarer Kalender.
+ *
+ *  Ein Gratis-Spiel mit Frist ist ein Termin. In einer Liste sieht man
+ *  ihn erst, wenn man die Liste aufmacht — im Kalender sagt er selbst
+ *  Bescheid. */
+function KalenderCard() {
+  const toast = useToast();
+  const { data: tokens, reload } = useAsync<ApiTokenInfo[]>(
+    () => api.tokens.list(), []);
+  const [adresse, setAdresse] = React.useState<string | null>(null);
+  const [nurGratis, setNurGratis] = React.useState(false);
+
+  const adresseHolen = async () => {
+    try {
+      // Ein eigenes Token für den Kalender: zurückziehbar, ohne die
+      // Browser-Erweiterung mit abzuschalten.
+      const ergebnis = await api.tokens.create("Kalender");
+      setAdresse(`${window.location.origin}${api.kalenderUrl(ergebnis.token, nurGratis)}`);
+      reload();
+    } catch (err) {
+      toast.push("error", "Anlegen fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <CalendarClock className="h-4 w-4 text-primary" />
+          Fristen im Kalender
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Angebote mit Ablaufdatum als Kalender-Abo — mit Erinnerung sechs
+          Stunden vorher. Funktioniert in Apple Kalender, Google Kalender,
+          Thunderbird und allem, was ICS abonnieren kann.
+        </p>
+
+        <div className="flex items-center justify-between gap-3">
+          <Label>Nur Gratis-Sachen</Label>
+          <Switch checked={nurGratis} onChange={setNurGratis}
+                  label="Nur Gratis-Sachen" />
+        </div>
+
+        {adresse ? (
+          <div className="space-y-2">
+            <code className="block break-all rounded-md bg-muted px-2 py-1.5 text-[11px]">
+              {adresse}
+            </code>
+            <Button variant="ghost" size="sm" className="w-full"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(adresse);
+                      toast.push("success", "Kopiert",
+                        "Im Kalender unter „Abonnement hinzufügen“ einfügen.");
+                    }}>
+              <Copy className="h-3.5 w-3.5" />
+              Adresse kopieren
+            </Button>
+            <p className="text-xs text-warning">
+              Wer die Adresse hat, sieht deine Fristen — nicht weitergeben.
+              Zurückziehen geht unten bei den Schlüsseln.
+            </p>
+          </div>
+        ) : (
+          <Button variant="outline" className="w-full"
+                  onClick={() => void adresseHolen()}>
+            <CalendarClock className="h-4 w-4" />
+            Kalender-Adresse erzeugen
+          </Button>
+        )}
+        {!!tokens?.length && (
+          <p className="text-xs text-muted-foreground">
+            {tokens.length} Schlüssel vergeben.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

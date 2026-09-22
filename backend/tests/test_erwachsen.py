@@ -218,7 +218,8 @@ async def test_zustellung_haelt_18plus_zurueck(tmp_path, monkeypatch):
     from app.db import SessionLocal, init_db, set_setting
     init_db()                       # sonst gibt es die Tabellen noch nicht
     from app.erwachsen import AKTIV, MELDEN
-    from app.models import Channel, Deal as D, Rule
+    from app.models import Channel, Rule
+    from app.models import Deal as D
     from app.pipeline import dispatch
 
     gesendet = []
@@ -228,7 +229,8 @@ async def test_zustellung_haelt_18plus_zurueck(tmp_path, monkeypatch):
             gesendet.append(note.titel)
             return True
 
-    monkeypatch.setattr("app.pipeline.get_channel", lambda typ: Kanal())
+    # Dort ersetzen, wo der Versand nachschlaegt - nicht am Paket.
+    monkeypatch.setattr("app.pipeline.versand.get_channel", lambda typ: Kanal())
 
     with SessionLocal() as db:
         set_setting(db, AKTIV, True)

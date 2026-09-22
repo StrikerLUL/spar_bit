@@ -3,27 +3,37 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import logging
-from collections import defaultdict
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from ..auth import current_user
-from ..images import aufraeumen as bilder_aufraeumen
-from ..images import bild_verzeichnis, statistik as bild_statistik
+from ..auth import current_user, darf_schreiben
+from ..besitz import gehoert_mir, nur_meine
 from ..currency import DEFAULT_RATES, get_rates, set_rates, to_eur
 from ..db import get_db, get_setting, set_setting
 from ..gratischeck import LABEL as GRATIS_LABEL
-from ..models import (Channel, Deal, DealOffer, Match, PriceHistory, Rule,
-                      SavedSearch, SourceConfig, utcnow)
-from ..pricefehler import (HEISS as PF_HEISS, SCHWELLE_HEISS,
-                           VERDACHT as PF_VERDACHT, bewerte_deal)
+from ..images import aufraeumen as bilder_aufraeumen
+from ..images import bild_verzeichnis
+from ..images import statistik as bild_statistik
+from ..models import (
+    Deal,
+    DealOffer,
+    Match,
+    PriceHistory,
+    Rule,
+    SavedSearch,
+    SourceConfig,
+    User,
+    utcnow,
+)
+from ..pricefehler import HEISS as PF_HEISS
+from ..pricefehler import SCHWELLE_HEISS, bewerte_deal
+from ..pricefehler import VERDACHT as PF_VERDACHT
 
 log = logging.getLogger(__name__)
 
@@ -276,44 +286,45 @@ def export_csv(nur_gratis: bool = False, nur_gemerkt: bool = False,
     )
 
 
-@router.post("/system/restore")
-def restore(payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
-    """Backup einspielen. Regeln, Kanaele und Quellen-Konfiguration werden
-    ersetzt; gesammelte Deals bleiben unangetastet - die kommen ohnehin
-    wieder rein."""
-    if not isinstance(payload, dict) or "version" not in payload:
-        raise HTTPException(400, "Das sieht nicht nach einem SparBit-Backup aus.")
+# --- Sparbilanz ------------------------------------------------------------
 
-    bericht = {"regeln": 0, "kanaele": 0, "quellen": 0}
+@router.get("/bilanz")
+def bilanz(tage: int = Query(365, ge=7, le=3650),
+           db: Session = Depends(get_db)) -> dict:
+    """Was das Ganze gebracht hat.
 
-    if isinstance(payload.get("regeln"), list):
-        db.query(Rule).delete()
-        for row in payload["regeln"]:
-            row = {k: v for k, v in row.items() if k != "id"}
-            db.add(Rule(**row))
-            bericht["regeln"] += 1
+    Die Daten dafuer liegen seit dem ersten Tag da - beantwortet hat die
+    Frage nur nie jemand.
+    """
+    from ..bilanz import berechne
+    return berechne(db, tage)
 
-    if isinstance(payload.get("kanaele"), list):
-        db.query(Channel).delete()
-        for row in payload["kanaele"]:
-            row = {k: v for k, v in row.items() if k != "id"}
-            db.add(Channel(**row))
-            bericht["kanaele"] += 1
 
-    if isinstance(payload.get("quellen"), list):
-        for row in payload["quellen"]:
-            cfg = db.get(SourceConfig, row.get("id"))
-            if cfg is None:
-                continue      # Quelle gibt es in dieser Version nicht mehr
-            for key in ("enabled", "interval_seconds", "api_key", "options",
-                        "verification"):
-                if key in row:
-                    setattr(cfg, key, row[key])
-            bericht["quellen"] += 1
+# --- Kalender --------------------------------------------------------------
 
-    db.commit()
-    log.info("Backup eingespielt: %s", bericht)
-    return {"ok": True, **bericht}
+kalender_router = APIRouter(prefix="/api", tags=["kalender"])
+
+
+@kalender_router.get("/kalender.ics")
+def kalender(token: str = Query(..., min_length=10),
+             nur_gratis: bool = False,
+             db: Session = Depends(get_db)) -> Response:
+    """Fristen als abonnierbarer Kalender.
+
+    Das Token steht in der Adresse und nicht im Header, weil eine
+    Kalender-App keinen mitschicken kann - sie holt die Datei stumpf per
+    GET. Darum ein API-Token, das sich einzeln zurueckziehen laesst,
+    statt des Sitzungs-Cookies.
+    """
+    from ..kalender import feed
+    from ..tokens import pruefe as pruefe_token
+
+    if pruefe_token(db, token) is None:
+        raise HTTPException(401, "Token ungültig oder zurückgezogen")
+    return Response(content=feed(db, nur_gratis),
+                    media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition":
+                             'inline; filename="sparbit.ics"'})
 
 
 # --- Gespeicherte Suchen ---------------------------------------------------
@@ -324,14 +335,17 @@ class SavedSearchBody(BaseModel):
 
 
 @router.get("/searches")
-def list_searches(db: Session = Depends(get_db)) -> list[dict]:
+def list_searches(db: Session = Depends(get_db),
+                  user: User = Depends(current_user)) -> list[dict]:
+    stmt = nur_meine(select(SavedSearch), SavedSearch, user).order_by(SavedSearch.id)
     return [{"id": s.id, "name": s.name, "filter": s.filter}
-            for s in db.scalars(select(SavedSearch).order_by(SavedSearch.id))]
+            for s in db.scalars(stmt)]
 
 
 @router.post("/searches")
-def create_search(body: SavedSearchBody, db: Session = Depends(get_db)) -> dict:
-    row = SavedSearch(name=body.name, filter=body.filter)
+def create_search(body: SavedSearchBody, db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
+    row = SavedSearch(name=body.name, filter=body.filter, benutzer_id=user.id)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -339,9 +353,10 @@ def create_search(body: SavedSearchBody, db: Session = Depends(get_db)) -> dict:
 
 
 @router.delete("/searches/{search_id}")
-def delete_search(search_id: int, db: Session = Depends(get_db)) -> dict:
+def delete_search(search_id: int, db: Session = Depends(get_db),
+                  user: User = Depends(darf_schreiben)) -> dict:
     row = db.get(SavedSearch, search_id)
-    if row is None:
+    if row is None or not gehoert_mir(row, user):
         raise HTTPException(404, "Suche nicht gefunden")
     db.delete(row)
     db.commit()
@@ -351,13 +366,26 @@ def delete_search(search_id: int, db: Session = Depends(get_db)) -> dict:
 # --- Allgemeine Einstellungen ---------------------------------------------
 
 class GeneralSettings(BaseModel):
-    waehrungskurse: dict[str, float] = {}
-    benachrichtigungen_pausiert: bool = False
+    """Alle Felder optional - was nicht mitkommt, bleibt stehen.
+
+    Vorher hatte jedes Feld einen Default, und PUT schrieb sie alle. Wer
+    im Kanal-Bereich einen Waehrungskurs speicherte, setzte damit
+    unbemerkt die Preisfehler-Schwelle auf 70 zurueck: die Seite schickte
+    nur zwei Felder, der Rest kam aus den Defaults. Ein Teil-Update kann
+    das nicht passieren.
+    """
+    waehrungskurse: dict[str, float] | None = None
+    benachrichtigungen_pausiert: bool | None = None
     # Der Preisfehler-Waechter meldet unabhaengig von Regeln und Ruhezeit.
     # Abschaltbar, weil "weckt dich nachts" eine Entscheidung ist, die man
     # selbst treffen sollte.
-    preisfehler_waechter: bool = True
-    preisfehler_schwelle: int = 70
+    preisfehler_waechter: bool | None = None
+    preisfehler_schwelle: int | None = None
+    # Taegliche Sicherung ins Datenverzeichnis. Ein Passwort verschluesselt
+    # sie - sie enthaelt Bot-Token und Passwort-Hashes.
+    backup_taeglich: bool | None = None
+    backup_behalten: int | None = None
+    backup_passwort: str | None = None
 
 
 @router.get("/settings")
@@ -369,18 +397,35 @@ def get_settings(db: Session = Depends(get_db)) -> dict:
         "preisfehler_waechter": bool(get_setting(db, "preisfehler_waechter", True)),
         "preisfehler_schwelle": int(get_setting(db, "preisfehler_schwelle",
                                                 SCHWELLE_HEISS)),
+        "backup_taeglich": bool(get_setting(db, "backup_taeglich", True)),
+        "backup_behalten": int(get_setting(db, "backup_behalten", 7) or 7),
+        # Das Passwort selbst geht nie wieder raus - nur ob eines gesetzt ist.
+        "backup_passwort_gesetzt": bool(get_setting(db, "backup_passwort")),
     }
 
 
 @router.put("/settings")
 def put_settings(body: GeneralSettings, db: Session = Depends(get_db)) -> dict:
-    set_setting(db, "currency_rates", body.waehrungskurse)
-    set_setting(db, "notifications_paused", body.benachrichtigungen_pausiert)
-    set_setting(db, "preisfehler_waechter", body.preisfehler_waechter)
-    set_setting(db, "preisfehler_schwelle",
-                max(30, min(100, int(body.preisfehler_schwelle))))
+    if body.waehrungskurse is not None:
+        set_setting(db, "currency_rates", body.waehrungskurse)
+        set_rates(body.waehrungskurse)
+    if body.benachrichtigungen_pausiert is not None:
+        set_setting(db, "notifications_paused", body.benachrichtigungen_pausiert)
+    if body.preisfehler_waechter is not None:
+        set_setting(db, "preisfehler_waechter", body.preisfehler_waechter)
+    if body.preisfehler_schwelle is not None:
+        set_setting(db, "preisfehler_schwelle",
+                    max(30, min(100, int(body.preisfehler_schwelle))))
+    if body.backup_taeglich is not None:
+        set_setting(db, "backup_taeglich", body.backup_taeglich)
+    if body.backup_behalten is not None:
+        set_setting(db, "backup_behalten", max(1, min(90, int(body.backup_behalten))))
+    # "-" loescht das Passwort, leer laesst es stehen: sonst wuerde jedes
+    # Speichern anderer Einstellungen die Verschluesselung abschalten.
+    if body.backup_passwort:
+        set_setting(db, "backup_passwort",
+                    "" if body.backup_passwort == "-" else body.backup_passwort)
     db.commit()
-    set_rates(body.waehrungskurse)
     return get_settings(db)
 
 
@@ -498,6 +543,33 @@ def preisfehler_auswertung(db: Session = Depends(get_db)) -> dict:
     from ..pricefehler import bewerte_rueckmeldungen
 
     return bewerte_rueckmeldungen(db)
+
+
+@router.post("/preisfehler/schwelle-uebernehmen")
+def schwelle_uebernehmen(db: Session = Depends(get_db)) -> dict:
+    """Den Vorschlag der Eichung uebernehmen.
+
+    Die Auswertung schlug bisher vor und blieb dabei - verstellen musste
+    man selbst, an einer anderen Stelle, mit dem Wert im Kopf. Ein Knopf
+    daneben ist dasselbe in einem Schritt, und weil er den alten Wert
+    zurueckgibt, bleibt der Weg zurueck offen.
+    """
+    from ..pricefehler import bewerte_rueckmeldungen
+
+    auswertung = bewerte_rueckmeldungen(db)
+    vorschlag = auswertung.get("vorschlag")
+    if not vorschlag:
+        raise HTTPException(409, auswertung.get("vorschlag_grund")
+                            or "Es gibt gerade nichts zu übernehmen.")
+
+    vorher = int(get_setting(db, "preisfehler_schwelle", SCHWELLE_HEISS)
+                 or SCHWELLE_HEISS)
+    set_setting(db, "preisfehler_schwelle", int(vorschlag))
+    db.commit()
+    log.info("Preisfehler-Schwelle von %d auf %d gesetzt (Eichung)",
+             vorher, vorschlag)
+    return {"ok": True, "vorher": vorher, "jetzt": int(vorschlag),
+            "grund": auswertung.get("vorschlag_grund")}
 
 
 @router.post("/preisfehler/{deal_id}/pruefen")

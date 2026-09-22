@@ -8,7 +8,7 @@ from __future__ import annotations
 import enum
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -69,7 +69,7 @@ class DealItem(BaseModel):
         if self.veroeffentlicht_am is not None and self.veroeffentlicht_am.tzinfo is None:
             object.__setattr__(
                 self, "veroeffentlicht_am",
-                self.veroeffentlicht_am.replace(tzinfo=timezone.utc),
+                self.veroeffentlicht_am.replace(tzinfo=UTC),
             )
         # Rabatt aus Preisen ableiten, wenn die Quelle ihn nicht liefert.
         if (self.rabatt_prozent is None and self.preis is not None
@@ -158,7 +158,7 @@ class Source(ABC):
         t0 = time.monotonic()
         try:
             items = await self.fetch(ctx)
-        except Exception as exc:  # noqa: BLE001 - bewusst breit
+        except Exception as exc:
             return HealthResult(
                 ok=False,
                 detail=f"{type(exc).__name__}: {exc}"[:400],

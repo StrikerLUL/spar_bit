@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -123,7 +123,7 @@ def scan_job() -> int:
                 log.debug("Claimer-Log %s nicht lesbar: %s", path, exc)
                 continue
 
-            mtime = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, UTC)
             for ev in parse_events(text, path.name):
                 fp = hashlib.sha256(
                     f"{ev['platform']}|{ev['titel'].lower()}|{ev['status']}"
@@ -149,7 +149,7 @@ def status() -> dict:
         "log_vorhanden": bool(files),
         "dateien": [f.name for f in files],
         "letzte_aenderung": (
-            datetime.fromtimestamp(newest.stat().st_mtime, timezone.utc).isoformat()
+            datetime.fromtimestamp(newest.stat().st_mtime, UTC).isoformat()
             if newest else None
         ),
     }

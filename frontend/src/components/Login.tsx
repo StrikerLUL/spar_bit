@@ -18,6 +18,9 @@ export function Login({
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [sperreBis, setSperreBis] = React.useState(0);
+  // Wird eingeblendet, sobald das Passwort stimmt und nur der Code fehlt (428).
+  const [codeNoetig, setCodeNoetig] = React.useState(false);
+  const [code, setCode] = React.useState("");
 
   // Countdown, damit man nicht ins Leere klickt, sondern sieht wie lange noch.
   React.useEffect(() => {
@@ -39,9 +42,15 @@ export function Login({
     setBusy(true);
     try {
       if (setupMode) await api.auth.setup(username, password);
-      else await api.auth.login(username, password);
+      else await api.auth.login(username, password, code || undefined);
       onDone();
     } catch (err) {
+      if (err instanceof ApiError && err.status === 428) {
+        // Passwort stimmt, es fehlt nur der zweite Faktor.
+        setCodeNoetig(true);
+        setError(null);
+        return;
+      }
       setError((err as Error).message);
       if (err instanceof ApiError && err.status === 429 && err.retryAfter) {
         setSperreBis(err.retryAfter);
@@ -96,6 +105,24 @@ export function Login({
                 <p className="text-xs text-warning">Mindestens 10 Zeichen.</p>
               )}
             </div>
+            {codeNoetig && (
+              <div className="space-y-1.5">
+                <Label htmlFor="code">Code aus der Authenticator-App</Label>
+                <Input
+                  id="code"
+                  value={code}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  autoFocus
+                  required
+                  onChange={(e) => setCode(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Handy nicht zur Hand? Ein Ersatzcode geht auch.
+                </p>
+              </div>
+            )}
             {setupMode && (
               <div className="space-y-1.5">
                 <Label htmlFor="confirm">Passwort wiederholen</Label>

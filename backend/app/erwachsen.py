@@ -157,7 +157,7 @@ def einstufen(titel: str, beschreibung: str | None = None,
 
 def quelle_ist_18(source_id: str) -> bool:
     """Gehoert diese Quellen-ID zum 18+-Bereich?"""
-    from .sources import Category, get_source          # spaet, wegen Importlage
+    from .sources import Category, get_source  # spaet, wegen Importlage
     src = get_source(source_id)
     return bool(src and src.category is Category.ERWACHSEN)
 

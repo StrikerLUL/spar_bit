@@ -5,10 +5,9 @@ Host + Query sind als Option editierbar, falls Epic den Endpoint verschiebt.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
 
 _STORE_BASE = "https://store.epicgames.com/de/p/"
 
@@ -55,7 +54,7 @@ class EpicFreeGames(Source):
             .get("searchStore", {})
             .get("elements", [])
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         out: list[DealItem] = []
 
         for el in elements:
@@ -78,7 +77,7 @@ class EpicFreeGames(Source):
             free = discount_pct == 0
 
             price_info = (el.get("price") or {}).get("totalPrice") or {}
-            decimals = price_info.get("currencyCode") and price_info.get("decimals", 2) or 2
+            decimals = (price_info.get("currencyCode") and price_info.get("decimals", 2)) or 2
             orig_cents = price_info.get("originalPrice")
             disc_cents = price_info.get("discountPrice")
             factor = 10 ** (decimals or 2)

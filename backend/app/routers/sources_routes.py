@@ -3,21 +3,25 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from ..auth import current_user
 from .. import erwachsen as erwachsen_mod
+from ..auth import current_user, nur_admin
 from ..db import get_db
-from ..models import SourceConfig, SourceRun, User, utcnow
+from ..models import SourceConfig, SourceRun, utcnow
 from ..scheduler import build_context, run_source, schedule_source
 from ..sources import all_sources, get_source
 
 log = logging.getLogger(__name__)
+# Lesen darf jeder Angemeldete, aendern nur ein Admin: eine Quelle
+# kostet Anfragen bei einem fremden Server, und wer sie umstellt,
+# entscheidet fuer die ganze Anlage - nicht nur fuer sich.
 router = APIRouter(prefix="/api/sources", tags=["sources"],
                    dependencies=[Depends(current_user)])
+schreib_abhaengig = [Depends(nur_admin)]
 
 
 class FeedSuche(BaseModel):
@@ -99,7 +103,7 @@ def list_sources(db: Session = Depends(get_db)) -> list[dict]:
     return out
 
 
-@router.post("/feed-suche")
+@router.post(dependencies=schreib_abhaengig, path="/feed-suche")
 async def feed_suche(body: FeedSuche) -> dict:
     """Welche Feeds zeichnet diese Adresse aus?
 
@@ -142,7 +146,7 @@ def source_runs(source_id: str, limit: int = 30,
              "error": r.error} for r in rows]
 
 
-@router.patch("/{source_id}")
+@router.patch(dependencies=schreib_abhaengig, path="/{source_id}")
 def update_source(source_id: str, body: SourceUpdate,
                   db: Session = Depends(get_db)) -> dict:
     src = get_source(source_id)
@@ -170,7 +174,7 @@ def update_source(source_id: str, body: SourceUpdate,
     return _serialize(src, cfg, {})
 
 
-@router.post("/{source_id}/test")
+@router.post(dependencies=schreib_abhaengig, path="/{source_id}/test")
 async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
     """'Jetzt testen' - health_check mit Live-Ergebnis, ohne zu speichern."""
     src = get_source(source_id)
@@ -210,7 +214,7 @@ async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
     }
 
 
-@router.post("/{source_id}/run")
+@router.post(dependencies=schreib_abhaengig, path="/{source_id}/run")
 async def run_now(source_id: str, db: Session = Depends(get_db)) -> dict:
     if get_source(source_id) is None:
         raise HTTPException(404, "Quelle unbekannt")
@@ -218,7 +222,7 @@ async def run_now(source_id: str, db: Session = Depends(get_db)) -> dict:
     return await run_source(source_id, manual=True)
 
 
-@router.post("/{source_id}/reset")
+@router.post(dependencies=schreib_abhaengig, path="/{source_id}/reset")
 def reset_breaker(source_id: str, db: Session = Depends(get_db)) -> dict:
     cfg = db.get(SourceConfig, source_id)
     if cfg is None:
@@ -228,3 +232,95 @@ def reset_breaker(source_id: str, db: Session = Depends(get_db)) -> dict:
     cfg.last_error = None
     db.commit()
     return {"ok": True}
+
+
+# --- OPML: Feeds mitbringen und mitnehmen ---------------------------------
+
+OPML_QUELLEN = ("custom_feed", "erwachsen_feeds")
+
+
+@router.get("/opml/export")
+def opml_export(db: Session = Depends(get_db)) -> Response:
+    """Die eigenen Feeds als OPML.
+
+    Das Format, in dem jeder Feedreader seine Abos hat. Wer SparBit
+    umzieht oder seine Liste anderswo weiterpflegen will, soll sie nicht
+    abtippen muessen.
+    """
+    import xml.etree.ElementTree as ET
+    from datetime import UTC, datetime
+
+    opml = ET.Element("opml", version="2.0")
+    kopf = ET.SubElement(opml, "head")
+    ET.SubElement(kopf, "title").text = "SparBit — eigene Feeds"
+    ET.SubElement(kopf, "dateCreated").text = datetime.now(UTC).strftime(
+        "%a, %d %b %Y %H:%M:%S +0000")
+    koerper = ET.SubElement(opml, "body")
+
+    anzahl = 0
+    for cfg in db.scalars(select(SourceConfig).where(
+            SourceConfig.id.in_(OPML_QUELLEN))):
+        for schluessel in ("feeds", "eigene_feeds"):
+            for url in (cfg.options or {}).get(schluessel) or []:
+                if not str(url).strip():
+                    continue
+                ET.SubElement(koerper, "outline", type="rss",
+                              text=str(url), title=str(url),
+                              xmlUrl=str(url))
+                anzahl += 1
+
+    roh = ET.tostring(opml, encoding="utf-8", xml_declaration=True)
+    return Response(content=roh, media_type="text/x-opml; charset=utf-8",
+                    headers={"Content-Disposition":
+                             'attachment; filename="sparbit-feeds.opml"',
+                             "X-SparBit-Feeds": str(anzahl)})
+
+
+class OpmlImport(BaseModel):
+    inhalt: str = Field(min_length=10, max_length=2_000_000)
+    ziel: str = "custom_feed"
+
+
+@router.post(dependencies=schreib_abhaengig, path="/opml/import")
+def opml_import(body: OpmlImport, db: Session = Depends(get_db)) -> dict:
+    """OPML aus einem Feedreader einlesen.
+
+    Was schon drinsteht, bleibt unberuehrt - zweimal importieren legt
+    keine Dubletten an.
+    """
+    import xml.etree.ElementTree as ET
+
+    if body.ziel not in OPML_QUELLEN:
+        raise HTTPException(400, "Unbekanntes Ziel für den Import.")
+
+    try:
+        baum = ET.fromstring(body.inhalt)
+    except ET.ParseError as exc:
+        raise HTTPException(400, f"Das ist kein gültiges OPML: {exc}") from None
+
+    gefunden: list[str] = []
+    for knoten in baum.iter("outline"):
+        url = (knoten.get("xmlUrl") or knoten.get("xmlurl") or "").strip()
+        if url.lower().startswith(("http://", "https://")) and url not in gefunden:
+            gefunden.append(url)
+
+    if not gefunden:
+        raise HTTPException(400, "In der Datei steht kein einziger Feed "
+                                 "(gesucht wird das Attribut xmlUrl).")
+
+    cfg = db.get(SourceConfig, body.ziel)
+    if cfg is None:
+        raise HTTPException(404, "Diese Quelle gibt es nicht.")
+
+    optionen = dict(cfg.options or {})
+    schluessel = "feeds" if "feeds" in optionen or body.ziel == "custom_feed" \
+        else "eigene_feeds"
+    bestand = [str(f) for f in optionen.get(schluessel) or []]
+    neu = [u for u in gefunden if u not in bestand]
+    optionen[schluessel] = bestand + neu
+    cfg.options = optionen
+    db.commit()
+
+    return {"ok": True, "gefunden": len(gefunden), "neu": len(neu),
+            "schon_da": len(gefunden) - len(neu),
+            "quelle": body.ziel, "aktiv": bool(cfg.enabled)}

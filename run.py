@@ -28,6 +28,7 @@ import time
 import venv
 import webbrowser
 from pathlib import Path
+from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent
 BACKEND = ROOT / "backend"
@@ -51,7 +52,7 @@ def warn(msg: str) -> None:    print(f"  {_c('!', '33')} {msg}")
 def fail(msg: str) -> None:    print(f"  {_c('✗', '31')} {msg}")
 
 
-def die(msg: str, hint: str = "") -> "NoReturn":  # type: ignore[valid-type]
+def die(msg: str, hint: str = "") -> NoReturn:  # type: ignore[valid-type]
     fail(msg)
     if hint:
         print(f"\n    {hint}\n")
@@ -126,6 +127,92 @@ def install_deps(python: Path, force: bool = False) -> None:
     ok("Abhaengigkeiten installiert")
 
 
+RELEASE_API = "https://api.github.com/repos/StrikerLUL/spar_bit/releases/latest"
+DIST_ARCHIV = "frontend-dist.tar.gz"
+
+
+def _sicher_entpacken(archiv: Path, ziel: Path) -> None:
+    """tar entpacken, ohne aus dem Zielordner auszubrechen.
+
+    Ein Archiv darf Pfade wie ../../etc/cron.d enthalten; tarfile folgt dem
+    bereitwillig. Python 3.12 bringt dafuer einen Filter mit, 3.11 nicht -
+    darum wird hier in beiden Faellen selbst geprueft.
+    """
+    import tarfile
+
+    ziel = ziel.resolve()
+    with tarfile.open(archiv, "r:gz") as tf:
+        for member in tf.getmembers():
+            if not (member.isfile() or member.isdir()):
+                raise ValueError(f"Archiv enthaelt {member.name} - kein normaler Eintrag")
+            pfad = (ziel / member.name).resolve()
+            if not pfad.is_relative_to(ziel):
+                raise ValueError(f"Archiv will nach {member.name} schreiben")
+        try:
+            tf.extractall(ziel, filter="data")       # ab Python 3.12
+        except TypeError:
+            tf.extractall(ziel)                      # geprueft, s.o.
+
+
+def hole_dist_aus_release() -> bool:
+    """Gebaute Oberflaeche aus dem letzten GitHub-Release holen.
+
+    Sie liegt bewusst nicht mehr im Repository - minifizierte Bundles
+    erzeugen dort nur unlesbare Unterschiede. Wer kein Node hat, bekommt
+    sie hier fertig; schlaegt es fehl, sagt das Skript was zu tun ist.
+    """
+    import hashlib
+    import json
+    import tempfile
+    import urllib.error
+    import urllib.request
+
+    def hole(url: str, accept: str = "application/octet-stream") -> bytes:
+        req = urllib.request.Request(url, headers={
+            "Accept": accept,
+            "User-Agent": "SparBit-Setup",
+        })
+        with urllib.request.urlopen(req, timeout=60) as antwort:
+            return antwort.read()
+
+    try:
+        daten = json.loads(hole(RELEASE_API, "application/vnd.github+json"))
+        assets = {a["name"]: a["browser_download_url"] for a in daten.get("assets", [])}
+        if DIST_ARCHIV not in assets:
+            warn(f"Das Release {daten.get('tag_name', '?')} enthaelt kein {DIST_ARCHIV}.")
+            return False
+
+        rohdaten = hole(assets[DIST_ARCHIV])
+
+        # Pruefsumme, wenn das Release eine mitliefert.
+        pruef = assets.get(DIST_ARCHIV + ".sha256")
+        if pruef:
+            erwartet = hole(pruef).decode("utf-8", "replace").split()[0].strip()
+            tatsaechlich = hashlib.sha256(rohdaten).hexdigest()
+            if erwartet != tatsaechlich:
+                fail("Pruefsumme des Archivs stimmt nicht - Download verworfen.")
+                return False
+        else:
+            warn("Das Release liefert keine Pruefsumme mit.")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            archiv = Path(tmp) / DIST_ARCHIV
+            archiv.write_bytes(rohdaten)
+            _sicher_entpacken(archiv, FRONTEND)
+    except urllib.error.URLError as exc:
+        warn(f"Download fehlgeschlagen: {exc.reason}")
+        return False
+    except Exception as exc:
+        warn(f"Konnte die fertige Oberflaeche nicht holen: {exc}")
+        return False
+
+    if not (FRONTEND / "dist" / "index.html").exists():
+        warn("Archiv entpackt, aber keine index.html darin gefunden.")
+        return False
+    ok(f"Fertige Oberflaeche aus Release {daten.get('tag_name', '?')} geholt")
+    return True
+
+
 def build_frontend(force: bool = False) -> bool:
     """Weboberflaeche bauen. Liefert True, wenn danach ein dist/ existiert."""
     dist_index = FRONTEND / "dist" / "index.html"
@@ -137,8 +224,13 @@ def build_frontend(force: bool = False) -> bool:
         if dist_index.exists():
             return True
         warn("Node.js/npm nicht gefunden - die Weboberflaeche kann nicht gebaut werden.")
+        info("Ich versuche stattdessen, die fertige Oberflaeche zu holen ...")
+        if hole_dist_aus_release():
+            return True
         info("Node holen: https://nodejs.org  (LTS reicht)")
         info("Danach nochmal 'python run.py' starten.")
+        info("Oder das Archiv 'frontend-dist.tar.gz' aus dem letzten Release "
+             "von Hand nach frontend/ entpacken.")
         return False
 
     step("Weboberflaeche bauen")
@@ -174,7 +266,7 @@ def banner(url: str, dev: bool) -> None:
     print()
     print(f"   Oberflaeche:  {_c(url, '1;36')}")
     if dev:
-        print(f"   Modus:        Entwicklung (laedt bei Aenderungen neu)")
+        print("   Modus:        Entwicklung (laedt bei Aenderungen neu)")
     print(f"   Beenden mit:  {_c('Strg+C', '1')}")
     print()
 

@@ -105,6 +105,7 @@ def test_zeitstempel_behalten_ihre_zeitzone(db):
     Preisfehler-Wächters.
     """
     from datetime import timedelta
+
     from app.models import SourceConfig, utcnow
 
     with db() as sitzung:
@@ -127,8 +128,9 @@ def test_zeitstempel_behalten_ihre_zeitzone(db):
 @pytest.mark.asyncio
 async def test_offener_schutzschalter_ueberspringt_statt_zu_werfen(db, quelle_id):
     from datetime import timedelta
-    from app.models import SourceConfig, utcnow
+
     from app import scheduler as sched_neu
+    from app.models import SourceConfig, utcnow
 
     with db() as sitzung:
         sitzung.add(SourceConfig(id=quelle_id, enabled=True,

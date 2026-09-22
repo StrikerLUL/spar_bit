@@ -1,14 +1,25 @@
 """Preisurteil. Der gemeldete Rabatt taugt nichts - der eigene Verlauf schon."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.verdict import (BESTPREIS, GUT, MIN_PUNKTE, NORMAL, SEHR_GUT, TEURER,
-                         UNBEKANNT, UVP_FRAGWUERDIG, bewerte, euro, mindestens)
+from app.verdict import (
+    BESTPREIS,
+    GUT,
+    MIN_PUNKTE,
+    NORMAL,
+    SEHR_GUT,
+    TEURER,
+    UNBEKANNT,
+    UVP_FRAGWUERDIG,
+    bewerte,
+    euro,
+    mindestens,
+)
 
 
 def verlauf(preise: list[float], abstand_tage: int = 3):
-    jetzt = datetime.now(timezone.utc)
+    jetzt = datetime.now(UTC)
     return [(p, jetzt - timedelta(days=(len(preise) - i) * abstand_tage))
             for i, p in enumerate(preise)]
 

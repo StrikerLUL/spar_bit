@@ -1,0 +1,64 @@
+# Werkzeug-Einstellungen fuer SparBit. Kein Paket - das Backend laeuft aus
+# dem Quellbaum. Hier steht nur, wie Linter, Tests und Abdeckung arbeiten.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["frontend", "browser-extension", ".venv", "venv", "data"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "W",    # warnings
+    "I",    # import-Reihenfolge
+    "UP",   # veraltete Schreibweisen
+    "B",    # haeufige Fallen (bugbear)
+    "C4",   # ueberfluessige comprehensions
+    "SIM",  # offensichtliche Vereinfachungen
+    "RUF",  # ruff-eigene Regeln
+]
+ignore = [
+    "E501",    # Zeilenlaenge: der Bestand haelt 79-100, das reicht
+    "B008",    # Depends() im Default ist bei FastAPI genau richtig
+    "RUF001",  # deutsche Texte enthalten legitime Sonderzeichen
+    "RUF002",
+    "RUF003",
+    "SIM105",  # try/except/pass ist oft lesbarer als contextlib.suppress
+    "SIM102",  # verschachteltes if, wo der zweite Zweig einen Kommentar traegt
+    "SIM108",  # Ternaer ist nicht immer lesbarer
+    "C408",    # dict(...) statt {...} ist hier Absicht
+    "C416",    # dict-comprehension liest sich in den Faellen besser
+    "RUF005",  # a + [b] statt [*a, b] - Geschmack, kein Fehler
+    "RUF012",  # Klassen-Defaults der Quellen/Kanaele sind bewusst Dicts
+    "UP042",   # str+Enum nach StrEnum umbauen aendert die Serialisierung
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests duerfen unbenutzte Importe fuer Fixtures haben und lange Zeilen.
+"backend/tests/*" = ["B011", "SIM117"]
+# Das Demo-Skript muss Umgebungsvariablen und sys.path setzen, BEVOR es
+# "app" importiert - sonst laege die Demo-Datenbank im echten Datenordner.
+"backend/tools/demodaten.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore::DeprecationWarning:anyio.*",
+]
+
+[tool.coverage.run]
+source = ["backend/app"]
+omit = ["backend/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+# Ehrlich statt schoen: die Schwelle steht dort, wo die Abdeckung heute ist.
+# Sie darf steigen, aber nicht fallen - dafuer ist sie da.
+fail_under = 75
+show_missing = true
+skip_covered = true

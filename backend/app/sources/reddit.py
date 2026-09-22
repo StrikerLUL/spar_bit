@@ -37,10 +37,8 @@ import re
 from .. import feedfinder
 from ..http import RateLimited
 from ..priceparse import parse_price_text
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
-from .rssutil import (entry_body, entry_datetime, first_image, parse_feed,
-                      strip_html)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
+from .rssutil import entry_body, entry_datetime, first_image, parse_feed, strip_html
 
 # r/GameDeals-Konvention: "[Steam] Titel (75% off / 4,99€)"
 _STORE_RE = re.compile(r"^\s*\[([^\]]{1,40})\]")

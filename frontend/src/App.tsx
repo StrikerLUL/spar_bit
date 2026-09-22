@@ -35,7 +35,8 @@ export default function App() {
     api.auth
       .status()
       .then(setAuth)
-      .catch(() => setAuth({ setup_done: true, logged_in: false, username: null }));
+      .catch(() => setAuth({ setup_done: true, logged_in: false,
+                             username: null, rolle: null }));
   }, []);
 
   React.useEffect(refreshAuth, [refreshAuth]);

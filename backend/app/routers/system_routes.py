@@ -4,31 +4,41 @@ import asyncio
 import json
 import platform
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import (APIRouter, Depends, Header, HTTPException, Query,
-                     Request)
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..auth import current_user
-from ..config import settings
+from .. import backup as backup_mod
+from .. import claimer as claimer_mod
 from .. import erwachsen as erwachsen_mod
-from .. import gratischeck
+from .. import gratischeck, updater
+from ..auth import current_user, nur_admin
+from ..config import settings
 from ..db import get_db, get_setting, set_setting
 from ..events import broker
 from ..logging_setup import recent_logs
-from .. import updater
-from ..models import (Channel, ClaimEvent, Deal, Match, NotificationLog, Rule,
-                      SourceConfig, SourceRun)
-from .. import claimer as claimer_mod
+from ..models import (
+    Channel,
+    ClaimEvent,
+    Deal,
+    Match,
+    Rule,
+    SourceConfig,
+    SourceRun,
+)
 
 router = APIRouter(prefix="/api/system", tags=["system"],
                    dependencies=[Depends(current_user)])
+# Eine Sicherung enthaelt die Geheimnisse aller Konten, ein Restore
+# ueberschreibt ihre Regeln, und ein Update betrifft die ganze Anlage.
+# Das ist nichts, was ein einzelnes Mitglied entscheiden sollte.
+nur_fuer_admins = [Depends(nur_admin)]
 
-STARTED_AT = datetime.now(timezone.utc)
+STARTED_AT = datetime.now(UTC)
 
 
 @router.get("/info")
@@ -37,12 +47,19 @@ def info(db: Session = Depends(get_db)) -> dict:
     wal = settings.db_path.with_suffix(".db-wal")
     if wal.exists():
         db_bytes += wal.stat().st_size
+    from .. import migrations
+    from ..db import engine
+
     return {
         "version": "1.0.0",
         "python": sys.version.split()[0],
+        # Damit sichtbar ist, auf welchem Stand diese Datenbank steht -
+        # vorher liess sich das nur am Vorhandensein einzelner Spalten raten.
+        "schema_stand": migrations.version(engine),
+        "schema_neuester": migrations.neuester_stand(),
         "platform": platform.platform(),
         "gestartet": STARTED_AT,
-        "laufzeit_sekunden": int((datetime.now(timezone.utc) - STARTED_AT).total_seconds()),
+        "laufzeit_sekunden": int((datetime.now(UTC) - STARTED_AT).total_seconds()),
         "db_pfad": str(settings.db_path),
         "db_groesse_bytes": db_bytes,
         "db_groesse_mb": round(db_bytes / 1024 / 1024, 2),
@@ -64,33 +81,121 @@ def logs(limit: int = Query(300, le=2000), level: str = "ALL") -> list[dict]:
     return recent_logs(limit, level)
 
 
-@router.get("/backup")
-def backup(db: Session = Depends(get_db)) -> JSONResponse:
-    """Vollstaendiger JSON-Export. API-Keys und Kanal-Secrets bleiben drin -
-    das ist ein Backup, kein Teilen-Export. Datei entsprechend behandeln."""
-    def rows(model, fields):
-        return [{f: getattr(r, f) for f in fields} for r in db.scalars(select(model))]
+@router.get("/backup", dependencies=nur_fuer_admins)
+def backup(umfang: str = Query("voll", pattern="^(voll|einstellungen)$"),
+           db: Session = Depends(get_db)) -> JSONResponse:
+    """Vollstaendige Sicherung als JSON.
 
-    data = {
-        "exportiert_am": datetime.now(timezone.utc).isoformat(),
-        "version": "1.0.0",
-        "regeln": rows(Rule, ["id", "name", "enabled", "priority", "keywords",
-                              "required_keywords", "blacklist", "max_preis",
-                              "min_rabatt_prozent", "nur_gratis", "min_temperatur",
-                              "sources", "kategorien", "haendler", "channels"]),
-        "kanaele": rows(Channel, ["id", "type", "name", "enabled", "config"]),
-        "quellen": rows(SourceConfig, ["id", "enabled", "interval_seconds",
-                                       "api_key", "options", "verification"]),
-        "deals": rows(Deal, ["id", "titel", "url", "preis", "originalpreis",
-                             "rabatt_prozent", "waehrung", "ist_gratis",
-                             "haendler", "quelle", "first_seen", "bookmarked"]),
-        "claims": rows(ClaimEvent, ["platform", "titel", "status", "seen_at"]),
-    }
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    Enthaelt API-Schluessel, Kanal-Geheimnisse und Passwort-Hashes - das
+    ist eine Sicherung, kein Teilen-Export. Wer sie aus der Hand gibt,
+    nimmt den Weg ueber POST /api/system/backup mit Passwort.
+    """
+    daten = backup_mod.erstelle(db, umfang=umfang)
+    stempel = datetime.now(UTC).strftime("%Y%m%d-%H%M")
     return JSONResponse(
-        content=json.loads(json.dumps(data, default=str)),
-        headers={"Content-Disposition": f'attachment; filename="sparbit-backup-{stamp}.json"'},
+        content=json.loads(backup_mod.als_json(daten)),
+        headers={"Content-Disposition":
+                 f'attachment; filename="sparbit-backup-{stempel}.json"'},
     )
+
+
+class BackupWunsch(BaseModel):
+    umfang: str = "voll"
+    passwort: str = ""
+
+
+@router.post("/backup", dependencies=nur_fuer_admins)
+def backup_verschluesselt(body: BackupWunsch,
+                          db: Session = Depends(get_db)) -> JSONResponse:
+    """Sicherung mit Passwort. Ohne Passwort dasselbe wie GET."""
+    umfang = body.umfang if body.umfang in ("voll", "einstellungen") else "voll"
+    daten = backup_mod.erstelle(db, umfang=umfang)
+    stempel = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+
+    if not body.passwort:
+        return JSONResponse(
+            content=json.loads(backup_mod.als_json(daten)),
+            headers={"Content-Disposition":
+                     f'attachment; filename="sparbit-backup-{stempel}.json"'})
+
+    if len(body.passwort) < 8:
+        raise HTTPException(400, "Das Passwort braucht mindestens 8 Zeichen.")
+    try:
+        huelle = backup_mod.verschluessele(
+            backup_mod.als_json(daten).encode("utf-8"), body.passwort)
+    except backup_mod.VerschluesselungFehlt as exc:
+        raise HTTPException(501, str(exc)) from exc
+    return JSONResponse(
+        content=huelle,
+        headers={"Content-Disposition":
+                 f'attachment; filename="sparbit-backup-{stempel}.json.enc"'})
+
+
+@router.post("/restore", dependencies=nur_fuer_admins)
+def restore(payload: dict = Body(...), db: Session = Depends(get_db)) -> dict:
+    """Sicherung einspielen.
+
+    Nimmt die Datei so, wie sie exportiert wurde - offen oder
+    verschluesselt. Fuer den verschluesselten Fall kommt das Passwort in
+    einer Huelle: {"daten": <Datei>, "passwort": "..."}.
+    """
+    passwort = ""
+    if isinstance(payload, dict) and "daten" in payload:
+        passwort = str(payload.get("passwort") or "")
+        payload = payload["daten"]
+
+    if backup_mod.ist_verschluesselt(payload):
+        if not passwort:
+            raise HTTPException(400, "Diese Sicherung ist verschluesselt - "
+                                     "bitte das Passwort mitgeben.")
+        try:
+            payload = backup_mod.entschluessele(payload, passwort)
+        except backup_mod.VerschluesselungFehlt as exc:
+            raise HTTPException(501, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    try:
+        return {"ok": True, **backup_mod.spiele_ein(db, payload)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/backups", dependencies=nur_fuer_admins)
+def backups_liste() -> dict:
+    """Die automatisch geschriebenen Sicherungen im Datenverzeichnis."""
+    return {
+        "ordner": str(backup_mod.ordner()),
+        "dateien": backup_mod.vorhandene(),
+        "verschluesselung_moeglich": backup_mod.verschluesselung_verfuegbar(),
+    }
+
+
+@router.post("/backups", dependencies=nur_fuer_admins)
+def backup_jetzt(db: Session = Depends(get_db)) -> dict:
+    """Jetzt eine Sicherung in den Ordner schreiben."""
+    passwort = str(get_setting(db, "backup_passwort") or "")
+    pfad = backup_mod.schreibe_datei(db, passwort)
+    entfernt = backup_mod.raeume_auf(int(get_setting(db, "backup_behalten", 7) or 7))
+    return {"ok": True, "datei": pfad.name, "bytes": pfad.stat().st_size,
+            "alte_entfernt": entfernt}
+
+
+@router.get("/backups/{name}", dependencies=nur_fuer_admins)
+def backup_holen(name: str) -> FileResponse:
+    pfad = (backup_mod.ordner() / name).resolve()
+    if not pfad.is_relative_to(backup_mod.ordner().resolve()) or not pfad.is_file():
+        raise HTTPException(404, "Diese Sicherung gibt es nicht.")
+    return FileResponse(pfad, media_type="application/json", filename=pfad.name)
+
+
+@router.delete("/backups/{name}", dependencies=nur_fuer_admins)
+def backup_loeschen(name: str) -> dict:
+    pfad = (backup_mod.ordner() / name).resolve()
+    if not pfad.is_relative_to(backup_mod.ordner().resolve()) or not pfad.is_file():
+        raise HTTPException(404, "Diese Sicherung gibt es nicht.")
+    pfad.unlink()
+    return {"ok": True}
 
 
 # --- Selbstueberwachung ----------------------------------------------------
@@ -186,7 +291,7 @@ class GratisCheck(BaseModel):
 def gratischeck_status(db: Session = Depends(get_db)) -> dict:
     from datetime import timedelta
 
-    seit = datetime.now(timezone.utc) - timedelta(days=7)
+    seit = datetime.now(UTC) - timedelta(days=7)
     zeilen = db.execute(
         select(Deal.check_status, func.count(Deal.id))
         .where(Deal.check_am >= seit).group_by(Deal.check_status)).all()
@@ -283,7 +388,7 @@ async def events(request: Request, _user=Depends(current_user)) -> StreamingResp
                     break
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=20.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": heartbeat\n\n"
                     continue
                 event = json.loads(payload)

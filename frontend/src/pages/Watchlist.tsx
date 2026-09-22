@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import {
-  api, type SammelErgebnis, type WatchItem, type WatchTest,
+  api, type SammelErgebnis, type WatchItem, type WatchListe, type WatchTest,
 } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { cn, formatPrice, timeAgo } from "@/lib/utils";
@@ -22,6 +22,8 @@ export function Watchlist() {
   const [anlegen, setAnlegen] = React.useState(false);
   const [sammel, setSammel] = React.useState(false);
   const [detail, setDetail] = React.useState<number | null>(null);
+  // null = alles zeigen. Wer keine Listen anlegt, merkt von ihnen nichts.
+  const [liste, setListe] = React.useState<number | null>(null);
 
   return (
     <>
@@ -61,12 +63,17 @@ export function Watchlist() {
           />
         </Card>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {data.map((eintrag) => (
-            <WatchCard key={eintrag.id} eintrag={eintrag} onChanged={reload}
-                       onOpen={() => setDetail(eintrag.id)} />
-          ))}
-        </div>
+        <>
+          <ListenLeiste gewaehlt={liste} onWaehlen={setListe} />
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {data
+              .filter((e) => liste === null || e.liste_id === liste)
+              .map((eintrag) => (
+                <WatchCard key={eintrag.id} eintrag={eintrag} onChanged={reload}
+                           onOpen={() => setDetail(eintrag.id)} />
+              ))}
+          </div>
+        </>
       )}
 
       {anlegen && (
@@ -411,6 +418,7 @@ function SammelDialog({ onClose, onFertig }: {
   const toast = useToast();
   const [urls, setUrls] = React.useState("");
   const [ziel, setZiel] = React.useState("");
+  const [steam, setSteam] = React.useState("");
   const [laeuft, setLaeuft] = React.useState(false);
   const [ergebnis, setErgebnis] = React.useState<SammelErgebnis | null>(null);
 
@@ -422,7 +430,9 @@ function SammelDialog({ onClose, onFertig }: {
   const starten = async () => {
     setLaeuft(true);
     try {
-      const raus = await api.watch.sammel(urls, ziel ? Number(ziel) : null);
+      const raus = steam.trim()
+        ? await api.watch.steam(steam.trim(), ziel ? Number(ziel) : null)
+        : await api.watch.sammel(urls, ziel ? Number(ziel) : null);
       setErgebnis(raus);
       onFertig();
     } catch (err) {
@@ -484,8 +494,10 @@ function SammelDialog({ onClose, onFertig }: {
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
-          <Button onClick={starten} loading={laeuft} disabled={anzahl === 0}>
-            {anzahl > 0 ? `${anzahl} aufnehmen` : "Aufnehmen"}
+          <Button onClick={starten} loading={laeuft}
+                  disabled={anzahl === 0 && !steam.trim()}>
+            {steam.trim() ? "Von Steam holen"
+              : anzahl > 0 ? `${anzahl} aufnehmen` : "Aufnehmen"}
           </Button>
         </>
       }
@@ -518,12 +530,163 @@ function SammelDialog({ onClose, onFertig }: {
           </p>
         </div>
 
+        <div className="space-y-1.5 border-t border-border pt-4">
+          <Label htmlFor="steam-profil">…oder Steam-Wunschliste übernehmen</Label>
+          <Input
+            id="steam-profil"
+            value={steam}
+            placeholder="Profilname, Steam-ID oder Adresse der Wunschliste"
+            onChange={(e) => setSteam(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Braucht keinen API-Schlüssel. Unter <em>Profil → Privatsphäre</em> muss
+            „Spieledetails" auf <em>öffentlich</em> stehen.
+          </p>
+        </div>
+
         {laeuft && (
           <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Jede Seite wird einzeln geholt — das dauert ein paar Sekunden.
+            {steam.trim()
+              ? "Wunschliste wird gelesen …"
+              : "Jede Seite wird einzeln geholt — das dauert ein paar Sekunden."}
           </p>
         )}
       </div>
     </Dialog>
+  );
+}
+
+
+/** Listen als Leiste: trennt, was getrennt gehört, und sagt beim Budget,
+ *  ob es noch reicht. Ohne angelegte Liste bleibt sie ein schlanker
+ *  Knopf — die Seite soll nicht komplizierter werden, nur weil es die
+ *  Funktion gibt. */
+function ListenLeiste({
+  gewaehlt, onWaehlen,
+}: {
+  gewaehlt: number | null;
+  onWaehlen: (id: number | null) => void;
+}) {
+  const toast = useToast();
+  const { data, reload } = useAsync<WatchListe[]>(() => api.watch.listen(), []);
+  const [neu, setNeu] = React.useState(false);
+  const [name, setName] = React.useState("");
+  const [budget, setBudget] = React.useState("");
+
+  const anlegen = async () => {
+    if (!name.trim()) return;
+    try {
+      await api.watch.listeAnlegen({
+        name: name.trim(),
+        budget: budget ? Number(budget) : null,
+      });
+      setName("");
+      setBudget("");
+      setNeu(false);
+      reload();
+    } catch (err) {
+      toast.push("error", "Anlegen fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  return (
+    <div className="mb-4 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => onWaehlen(null)}
+          className={cn("rounded-full border px-3 py-1 text-xs transition",
+            gewaehlt === null
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border text-muted-foreground hover:text-foreground")}
+        >
+          Alles
+        </button>
+        {data?.map((l) => (
+          <button
+            key={l.id}
+            onClick={() => onWaehlen(l.id)}
+            title={l.beschreibung ?? undefined}
+            className={cn("rounded-full border px-3 py-1 text-xs transition",
+              gewaehlt === l.id
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:text-foreground")}
+          >
+            {l.name}
+            <span className="ml-1.5 opacity-60">{l.anzahl}</span>
+            {l.budget_rest !== null && (
+              <span className={cn("ml-1.5 tabular",
+                l.budget_rest < 0 ? "text-destructive" : "text-success")}>
+                {l.budget_rest < 0 ? "−" : "+"}{formatPrice(Math.abs(l.budget_rest))}
+              </span>
+            )}
+          </button>
+        ))}
+        <button
+          onClick={() => setNeu((v) => !v)}
+          className="rounded-full border border-dashed border-border px-3 py-1
+                     text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Plus className="mr-1 inline h-3 w-3" />
+          Liste
+        </button>
+      </div>
+
+      {neu && (
+        <div className="flex flex-wrap items-end gap-2 rounded-md border
+                        border-border bg-card/50 p-3">
+          <div className="min-w-40 flex-1 space-y-1">
+            <Label htmlFor="listen-name">Name</Label>
+            <Input id="listen-name" value={name} placeholder="z. B. Weihnachten"
+                   onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="w-32 space-y-1">
+            <Label htmlFor="listen-budget">Budget</Label>
+            <Input id="listen-budget" type="number" step="0.01" value={budget}
+                   placeholder="optional"
+                   onChange={(e) => setBudget(e.target.value)} />
+          </div>
+          <Button onClick={() => void anlegen()} disabled={!name.trim()}>
+            Anlegen
+          </Button>
+        </div>
+      )}
+
+      {gewaehlt !== null && data?.find((l) => l.id === gewaehlt) && (
+        <ListenKopf
+          liste={data.find((l) => l.id === gewaehlt)!}
+          onWeg={() => { onWaehlen(null); reload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function ListenKopf({ liste, onWeg }: { liste: WatchListe; onWeg: () => void }) {
+  const toast = useToast();
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md
+                    border border-border bg-card/50 px-3 py-2 text-xs">
+      <span className="text-muted-foreground">
+        {liste.anzahl} Artikel · Summe {formatPrice(liste.summe_aktuell)}
+        {liste.ohne_preis > 0 && ` · ${liste.ohne_preis} ohne Preis`}
+        {liste.ziel_erreicht > 0 && ` · ${liste.ziel_erreicht} am Zielpreis`}
+        {liste.budget !== null && ` · Budget ${formatPrice(liste.budget)}`}
+      </span>
+      <button
+        className="text-muted-foreground hover:text-destructive"
+        onClick={async () => {
+          if (!window.confirm(
+            `Liste „${liste.name}“ löschen? Die Artikel darin bleiben erhalten `
+            + "und liegen danach wieder in der allgemeinen Wunschliste.")) return;
+          const bericht = await api.watch.listeLoeschen(liste.id);
+          toast.push("success", "Liste gelöscht",
+            `${bericht.artikel_behalten} Artikel behalten.`);
+          onWeg();
+        }}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }

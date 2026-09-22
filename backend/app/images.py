@@ -30,7 +30,7 @@ ERLAUBTE_TYPEN = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 GLEICHZEITIG = 4                     # Hoeflichkeit gegenueber den Bildservern
 
 try:
-    from PIL import Image            # type: ignore
+    from PIL import Image  # type: ignore
     PILLOW = True
 except ImportError:                  # pragma: no cover - haengt von der Umgebung ab
     PILLOW = False

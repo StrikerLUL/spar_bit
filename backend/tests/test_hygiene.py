@@ -10,8 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import hygiene
-from app.models import (Base, Deal, Interaction, Match, Rule, SourceConfig,
-                        utcnow)
+from app.models import Base, Deal, Interaction, Match, Rule, SourceConfig, utcnow
 
 
 @pytest.fixture

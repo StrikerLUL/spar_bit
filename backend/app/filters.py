@@ -8,8 +8,9 @@ ist.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 # Ein "Deal-aehnliches" Objekt: DB-Model oder DealItem. Beides hat diese Felder.
 
@@ -35,7 +36,7 @@ class RuleSpec:
     erwachsen: bool = False
 
     @classmethod
-    def from_model(cls, rule: Any) -> "RuleSpec":
+    def from_model(cls, rule: Any) -> RuleSpec:
         return cls(
             keywords=list(rule.keywords or []),
             required_keywords=list(rule.required_keywords or []),

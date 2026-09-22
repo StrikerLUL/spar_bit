@@ -20,6 +20,10 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# Messdatei von pytest-cov - entsteht bei jedem Lauf neu.
+.coverage
+.coverage.*
+htmlcov/
 *.egg-info/
 
 # Node
@@ -27,9 +31,11 @@ node_modules/
 .vite/
 *.tsbuildinfo
 
-# frontend/dist wird BEWUSST mitgeliefert: so genuegt Python zum Starten,
-# Node.js ist nur zum Neubauen noetig (python run.py --rebuild).
-# Andere dist-Ordner bleiben draussen.
+# Gebaute Oberflaeche gehoert nicht in die Versionsverwaltung: minifizierte
+# Bundles erzeugen unlesbare Unterschiede und Konflikte bei jedem Commit.
+# Wer kein Node hat, bekommt sie fertig - run.py holt das Archiv aus dem
+# letzten Release (Workflow .github/workflows/release.yml).
+frontend/dist/
 /dist/
 backend/dist/
 

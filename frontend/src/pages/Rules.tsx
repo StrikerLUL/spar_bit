@@ -1,6 +1,6 @@
 import {
-  BellOff, CheckCircle2, Lightbulb, Plus, SlidersHorizontal, Stethoscope,
-  Target, Trash2, VolumeX, XCircle, Zap,
+  BellOff, CheckCircle2, Lightbulb, Plus, Share2, SlidersHorizontal,
+  Stethoscope, Target, Trash2, Upload, VolumeX, XCircle, Zap,
 } from "lucide-react";
 import * as React from "react";
 import {
@@ -118,10 +118,13 @@ export function Rules() {
         title="Regeln"
         description="Beim Bauen siehst du sofort, wie viele der letzten 500 Deals die Regel getroffen hätte — so tunst du sie rauschfrei."
         action={
-          <Button onClick={() => setEditing({ rule: { ...EMPTY_RULE } })}>
-            <Plus className="h-4 w-4" />
-            Neue Regel
-          </Button>
+          <div className="flex gap-2">
+            <TeilenKnopf onFertig={reload} />
+            <Button onClick={() => setEditing({ rule: { ...EMPTY_RULE } })}>
+              <Plus className="h-4 w-4" />
+              Neue Regel
+            </Button>
+          </div>
         }
       />
 
@@ -852,4 +855,69 @@ function BefundZeichen({ art }: { art: HygieneBefund["art"] }) {
   if (art === "regel_ohne_kanal") return <BellOff className={cn(stil, "text-warning")} />;
   if (art === "quelle_rauschen") return <VolumeX className={cn(stil, "text-muted-foreground")} />;
   return <XCircle className={cn(stil, "text-muted-foreground")} />;
+}
+
+
+/** Regeln mitnehmen und mitbringen.
+ *
+ *  Eine gute Regel ist Arbeit, und bisher blieb sie in der Installation,
+ *  in der sie gebaut wurde. Eingespielte Regeln kommen ausgeschaltet an:
+ *  eine fremde Regel, die sofort losmeldet, ist der schnellste Weg zu
+ *  einem stummgeschalteten Kanal. */
+function TeilenKnopf({ onFertig }: { onFertig: () => void }) {
+  const toast = useToast();
+  const datei = React.useRef<HTMLInputElement>(null);
+
+  const herunterladen = async () => {
+    try {
+      const daten = await api.regeln.export();
+      const blob = new Blob([JSON.stringify(daten, null, 2)],
+        { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "sparbit-regeln.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.push("error", "Export fehlgeschlagen", (err as Error).message);
+    }
+  };
+
+  const einlesen = async (f: File) => {
+    try {
+      const inhalt = JSON.parse(await f.text());
+      const regeln = Array.isArray(inhalt) ? inhalt : inhalt.regeln;
+      const bericht = await api.regeln.import(regeln);
+      toast.push("success", `${bericht.angelegt.length} Regeln eingesetzt`,
+        bericht.hinweis
+        + (bericht.uebersprungen.length
+          ? ` ${bericht.uebersprungen.length} gab es schon.` : ""));
+      onFertig();
+    } catch (err) {
+      toast.push("error", "Import fehlgeschlagen", (err as Error).message);
+    } finally {
+      if (datei.current) datei.current.value = "";
+    }
+  };
+
+  return (
+    <>
+      <input ref={datei} type="file" accept="application/json,.json"
+             className="hidden"
+             onChange={(e) => {
+               const f = e.target.files?.[0];
+               if (f) void einlesen(f);
+             }} />
+      <Button variant="outline" onClick={() => void herunterladen()}
+              title="Regeln als Datei sichern oder weitergeben">
+        <Share2 className="h-4 w-4" />
+        Teilen
+      </Button>
+      <Button variant="ghost" onClick={() => datei.current?.click()}
+              title="Regeln aus einer Datei einsetzen">
+        <Upload className="h-4 w-4" />
+      </Button>
+    </>
+  );
 }

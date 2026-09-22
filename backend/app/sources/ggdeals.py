@@ -8,8 +8,7 @@ Key/Zugang: https://gg.deals/de/api/
 """
 from __future__ import annotations
 
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
 
 
 class GGDeals(Source):

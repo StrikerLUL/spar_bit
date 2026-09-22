@@ -4,8 +4,7 @@ Verifizierungsstand: UNVERIFIED. Preise sind USD (CheapShark rechnet nicht um).
 """
 from __future__ import annotations
 
-from .base import (Category, DealItem, FetchContext, OptionSpec, Source,
-                   Verification, register)
+from .base import Category, DealItem, FetchContext, OptionSpec, Source, Verification, register
 
 _REDIRECT = "https://www.cheapshark.com/redirect?dealID={id}"
 

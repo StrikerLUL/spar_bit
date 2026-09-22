@@ -67,17 +67,23 @@ async def sende(typ: str, config: dict, meldung=None, antwort=None):
 
 # --- Alle Kanaele gemeinsam ------------------------------------------------
 
-def test_neun_kanaele_registriert():
+# Kanaele, die absichtlich kein Feld haben: was Web Push braucht, ist
+# kein Eintrag im Formular, sondern eine Erlaubnis im Browser.
+OHNE_FELDER = {"browser"}
+
+
+def test_alle_kanaele_registriert():
     typen = {c.type for c in all_channels()}
     assert typen == {"telegram", "discord", "slack", "matrix", "gotify",
-                     "pushover", "ntfy", "smtp", "webhook"}
+                     "pushover", "ntfy", "smtp", "webhook", "browser", "apprise"}
 
 
 @pytest.mark.parametrize("kanal", all_channels(), ids=lambda c: c.type)
 def test_jeder_kanal_beschreibt_sich(kanal):
     """Ohne Beschreibung und Feldliste kann das UI nichts anzeigen."""
     assert kanal.display_name and kanal.beschreibung
-    assert kanal.options_schema
+    if kanal.type not in OHNE_FELDER:
+        assert kanal.options_schema
     for feld in kanal.options_schema:
         assert feld.key and feld.label and feld.type
 
@@ -405,7 +411,7 @@ async def test_discord_baut_ein_embed_mit_einem_feld_je_fund():
     aufrufe = await sende_sammel(
         "discord", {"url": "https://discord.com/api/webhooks/1/x"})
     embed = aufrufe[0]["json"]["embeds"][0]
-    assert "5 Funde seit 07:00" == embed["title"]
+    assert embed["title"] == "5 Funde seit 07:00"
     assert len(embed["fields"]) == 5
     # Der Preisfehler steht oben.
     assert embed["fields"][0]["name"].startswith("‼")

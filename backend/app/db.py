@@ -5,9 +5,10 @@ import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event, select, text
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from . import migrations
 from .config import settings
 from .models import Base, Setting
 
@@ -15,15 +16,21 @@ log = logging.getLogger(__name__)
 
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 
-engine = create_engine(
-    settings.db_url,
-    connect_args={"check_same_thread": False, "timeout": 30},
-    pool_pre_ping=True,
-)
+# SQLite braucht zwei Sonderlocken (ein Thread pro Verbindung abschalten,
+# Wartezeit statt "database is locked"), die jede andere Datenbank nicht
+# kennt und mit einem Fehler quittieren wuerde.
+_verbindung = ({"check_same_thread": False, "timeout": 30}
+               if settings.ist_sqlite else {})
+
+engine = create_engine(settings.db_url, connect_args=_verbindung,
+                       pool_pre_ping=True)
 
 
 @event.listens_for(engine, "connect")
 def _sqlite_pragmas(dbapi_conn, _record):
+    """WAL und Konsorten - nur bei SQLite, sonst versteht sie niemand."""
+    if not settings.ist_sqlite:
+        return
     cur = dbapi_conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")       # gleichzeitig lesen + schreiben
     cur.execute("PRAGMA synchronous=NORMAL")
@@ -36,57 +43,27 @@ def _sqlite_pragmas(dbapi_conn, _record):
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
-# Spalten, die nach dem ersten Release dazugekommen sind. SQLite kann
-# ADD COLUMN, also reicht das statt eines Migrations-Frameworks - fuer eine
-# Single-User-App waere Alembic hier mehr Ballast als Nutzen.
-_ADDED_COLUMNS: list[tuple[str, str, str]] = [
-    ("deals", "preis_eur", "FLOAT"),
-    ("deals", "alarm_preis", "FLOAT"),
-    ("deals", "alarm_ausgeloest", "DATETIME"),
-    ("deals", "notiz", "TEXT"),
-    ("source_configs", "snooze_until", "DATETIME"),
-    ("deals", "bild_lokal", "VARCHAR(128)"),
-    ("deals", "urteil", "VARCHAR(24)"),
-    ("deals", "urteil_text", "TEXT"),
-    ("deals", "urteil_am", "DATETIME"),
-    ("rules", "min_urteil", "VARCHAR(24)"),
-    ("deals", "fehler_score", "INTEGER DEFAULT 0"),
-    ("deals", "fehler_stufe", "VARCHAR(16)"),
-    ("deals", "fehler_gruende", "JSON"),
-    ("deals", "fehler_erwartet_eur", "FLOAT"),
-    ("deals", "fehler_am", "DATETIME"),
-    ("deals", "fehler_gemeldet_am", "DATETIME"),
-    ("rules", "min_fehler_score", "INTEGER"),
-    ("deals", "fehler_indizien", "JSON"),
-    ("deals", "fehler_urteil_mensch", "VARCHAR(16)"),
-    ("deals", "fehler_urteil_am", "DATETIME"),
-    ("deals", "erwachsen", "BOOLEAN DEFAULT 0"),
-    ("deals", "erwachsen_grund", "TEXT"),
-    ("deals", "check_status", "VARCHAR(16)"),
-    ("deals", "check_text", "TEXT"),
-    ("deals", "check_preis_eur", "FLOAT"),
-    ("deals", "check_am", "DATETIME"),
-    ("deals", "gratis_hinweis", "VARCHAR(64)"),
-    ("rules", "erwachsen", "BOOLEAN DEFAULT 0"),
-]
-
-
-def _migrate(conn) -> None:
-    """Fehlende Spalten nachziehen. Idempotent - laeuft bei jedem Start."""
-    for table, column, ddl in _ADDED_COLUMNS:
-        exists = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-        if not exists:
-            continue                      # Tabelle legt create_all gleich neu an
-        if any(row[1] == column for row in exists):
-            continue
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-        log.info("Migration: Spalte %s.%s ergaenzt", table, column)
-
-
 def init_db() -> None:
-    with engine.begin() as conn:
-        _migrate(conn)
+    """Datenbank startklar machen: Tabellen, Migrationen, Volltextindex.
+
+    Reihenfolge mit Absicht: create_all legt fehlende Tabellen an (und
+    bei einer neuen Datenbank gleich alles), danach ziehen die
+    Migrationen an den *bestehenden* Tabellen nach, was ihnen fehlt.
+    Umgekehrt haette ein Schritt, der eine gerade erst eingefuehrte
+    Tabelle braucht, ins Leere gegriffen.
+    """
+    with engine.connect() as conn:
+        frisch = migrations.datenbank_ist_leer(conn)
+
     Base.metadata.create_all(engine)
+
+    if frisch:
+        migrations.stempeln(engine)
+    else:
+        gelaufen = migrations.migriere(engine)
+        if gelaufen:
+            log.info("Schema auf Stand %d gebracht (%d Schritte)",
+                     migrations.version(engine), len(gelaufen))
 
     # Volltextindex nach create_all, damit die deals-Tabelle sicher existiert.
     from .search import einrichten, fts_verfuegbar
