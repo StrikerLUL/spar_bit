@@ -37,6 +37,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests duerfen unbenutzte Importe fuer Fixtures haben und lange Zeilen.
 "backend/tests/*" = ["B011", "SIM117"]
+# Das Demo-Skript muss Umgebungsvariablen und sys.path setzen, BEVOR es
+# "app" importiert - sonst laege die Demo-Datenbank im echten Datenordner.
+"backend/tools/demodaten.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
