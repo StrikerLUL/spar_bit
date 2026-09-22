@@ -158,6 +158,25 @@ function WatchCard({
         )}
       </div>
 
+      {/* Versand gehoert neben den Preis: 195 € plus 9,90 € sind teurer
+          als 199 € versandkostenfrei, und ohne diese Zeile vergleicht man
+          zwei Zahlen, die nicht dasselbe meinen. */}
+      {eintrag.versandkosten != null && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {eintrag.versandkosten > 0
+            ? <>zzgl. {formatPrice(eintrag.versandkosten, eintrag.waehrung)} Versand
+                {eintrag.gesamtpreis != null && (
+                  <> — zusammen{" "}
+                    <span className="font-medium text-foreground/80">
+                      {formatPrice(eintrag.gesamtpreis, eintrag.waehrung)}
+                    </span>
+                  </>
+                )}
+              </>
+            : <>versandkostenfrei</>}
+        </p>
+      )}
+
       {eintrag.bester_preis != null && eintrag.letzter_preis != null
         && eintrag.bester_preis < eintrag.letzter_preis && (
         <p className="mt-1 text-xs text-muted-foreground">

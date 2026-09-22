@@ -16,6 +16,7 @@ import { BackupCard } from "@/pages/system/Sicherung";
 import {
   ErwachsenCard, ErweiterungCard, GratisCheckCard, KalenderCard,
 } from "@/pages/system/Bereiche";
+import { SicherheitCard, WerkzeugeCard } from "@/pages/system/Werkzeuge";
 import { LEVEL_STYLES, Row } from "@/pages/system/gemeinsam";
 
 export function System({ liveLogs }: { liveLogs: LogLine[] }) {
@@ -153,6 +154,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
 
           <ZweiFaktorCard />
 
+          <SicherheitCard />
+
           <BackupCard />
 
           <KalenderCard />
@@ -160,6 +163,8 @@ export function System({ liveLogs }: { liveLogs: LogLine[] }) {
           <ErweiterungCard />
 
           <BilderCard />
+
+          <WerkzeugeCard />
 
           <Card>
             <CardHeader>

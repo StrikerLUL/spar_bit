@@ -67,6 +67,11 @@ export interface ZweiFaktorStatus {
   aktiv: boolean;
   vorbereitet: boolean;
   ersatzcodes_uebrig: number;
+  /** Verlangt diese Anlage von ihren Administratoren einen zweiten Faktor? */
+  pflicht_fuer_admins?: boolean;
+  /** Ich bin Admin, die Pflicht gilt, und ich habe noch keinen -
+   *  sichtbar, bevor der naechste Klick in einem 403 endet. */
+  faellig?: boolean;
 }
 
 export interface AuthStatus {
@@ -193,6 +198,11 @@ export interface WatchItem {
   intervall_minuten: number;
   letzter_preis: number | null;
   waehrung: string;
+  /** Versandkosten, falls der Shop sie auszeichnet. null heisst
+   *  "steht nicht da" - nicht "kostenlos". */
+  versandkosten?: number | null;
+  /** Preis plus Versand, soweit bekannt. */
+  gesamtpreis?: number | null;
   bester_preis: number | null;
   bild: string | null;
   haendler: string | null;
@@ -201,8 +211,12 @@ export interface WatchItem {
   letzter_fehler: string | null;
   fehler_in_folge: number;
   erstellt_am: string;
+  /** Diesen Artikel ueber den Render-Dienst holen (fuer Shops, die den
+   *  Preis erst per JavaScript einsetzen). Ohne Dienst wirkungslos. */
+  rendern?: boolean;
   ziel_erreicht: boolean;
-  verlauf: Array<{ ts: string; preis: number; waehrung: string }>;
+  verlauf: Array<{ ts: string; preis: number; versand?: number | null;
+                   waehrung: string }>;
   erster_abruf?: { ok: boolean; preis?: number; verfahren?: string; fehler?: string };
 }
 
@@ -469,6 +483,39 @@ export interface HaendlerStat {
   schnitt_rabatt: number;
 }
 
+/** Was hier anfaellt, nach Ware sortiert - nicht nach Quelle. */
+export interface WarengruppeStat {
+  warengruppe: string | null;
+  label: string;
+  anzahl: number;
+  schnitt_rabatt: number;
+  /** Wie viele davon wirklich guenstig waren (Bestpreis oder sehr gut). */
+  gute_preise: number;
+}
+
+/** Warum ein Fund nicht angekommen ist - siehe backend/app/diagnose.py. */
+export interface DiagnoseStufe {
+  name: string;
+  stand: "durch" | "gestoppt" | "hinweis";
+  text: string;
+  /** Was man dagegen tun kann. */
+  rat?: string;
+  /** Liegt diese Stufe auf dem Weg, den der Fund wirklich genommen
+   *  haette? Es gibt zwei (Regeln und Preisfehler-Waechter), und eine
+   *  Stufe des einen sagt nichts ueber den anderen. */
+  blockiert: boolean;
+  details?: Array<Record<string, string | null>>;
+}
+
+export interface Diagnose {
+  deal_id: number;
+  titel: string;
+  zugestellt: boolean;
+  weg: "regel" | "preisfehler" | "keiner";
+  fazit: string;
+  stufen: DiagnoseStufe[];
+}
+
 export interface PricePoint {
   ts: string;
   preis: number;
@@ -560,6 +607,23 @@ export interface AppSettings {
   backup_passwort_gesetzt?: boolean;
   /** Beim Speichern: neues Passwort, "-" loescht es, leer laesst es stehen. */
   backup_passwort?: string;
+
+  /** Datum des zuletzt uebernommenen EZB-Kursstands (ISO), sonst null. */
+  waehrung_stand?: string | null;
+  /** Wie alt dieser Stand ist. null = noch nie geholt. */
+  waehrung_alter_tage?: number | null;
+  /** Ab 90 Tagen true - dann rechnen Preisgrenzen bei Fremdwaehrung ungenau. */
+  waehrung_veraltet?: boolean;
+  /** Taeglicher Abruf bei der EZB. Der einzige Abruf, den SparBit von
+   *  sich aus macht - abschaltbar. */
+  waehrung_automatisch?: boolean;
+  /** Verlangt diese Anlage von ihren Administratoren einen zweiten Faktor? */
+  zweifaktor_pflicht?: boolean;
+  /** Adresse eines Render-Dienstes fuer JavaScript-Shops, mit {url}. */
+  render_url?: string;
+  /** Adresse eines lokalen Ollama fuer unerkannte Warengruppen. Leer = aus. */
+  ollama_url?: string;
+  ollama_modell?: string;
 }
 
 export interface BackupDatei {
@@ -752,6 +816,9 @@ export const api = {
     pruefen: (id: number) =>
       post<{ befund: GratisBefund; korrigiert: boolean; deal: Deal }>(
         `/deals/${id}/pruefen`),
+    /** Warum kam dieser Fund nicht an? Die Gegenrichtung zur Vorschau
+     *  im Regel-Editor. */
+    diagnose: (id: number) => get<Diagnose>(`/deals/${id}/diagnose`),
   },
   stats: () => get<Stats>("/stats"),
   hygiene: () => get<Hygiene>("/hygiene"),
@@ -842,6 +909,8 @@ export const api = {
       `/stats/timeline?tage=${tage}`),
     quellen: (tage = 30) => get<QuellenStat[]>(`/stats/quellen?tage=${tage}`),
     haendler: () => get<HaendlerStat[]>("/stats/haendler"),
+    warengruppen: (tage = 30) =>
+      get<WarengruppeStat[]>(`/stats/warengruppen?tage=${tage}`),
   },
   detail: (id: number) => get<DealDetail>(`/deals/${id}/detail`),
   alarm: (id: number, ziel_preis: number | null, notiz?: string | null) =>

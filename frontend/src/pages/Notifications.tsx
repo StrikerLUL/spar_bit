@@ -1,5 +1,6 @@
 import {
-  Bell, BellRing, CheckCircle2, Clock, Coins, Monitor, Pause, Play, Plus, Send,
+  AlertTriangle, Bell, BellRing, CheckCircle2, Clock, Coins, Monitor, Pause,
+  Play, Plus, Send,
   Trash2, XCircle,
 } from "lucide-react";
 import * as React from "react";
@@ -668,14 +669,24 @@ function EinstellungenCard() {
 
   if (loading || !data) return <Skeleton className="h-64" />;
 
-  const speichern = async (pausiert = data.benachrichtigungen_pausiert) => {
+  const speichern = async (
+    pausiert = data.benachrichtigungen_pausiert,
+    /* Nur die Felder mitschicken, die gemeint sind: ein Schalter für die
+     * Automatik soll nicht nebenbei die Kurse überschreiben. */
+    weiteres: Partial<AppSettings> = {},
+  ) => {
     try {
       await api.settings.set({
-        waehrungskurse: Object.fromEntries(
-          Object.entries(kurse)
-            .map(([k, v]) => [k, Number(v)])
-            .filter(([, v]) => Number.isFinite(v as number) && (v as number) > 0)),
+        ...(weiteres.waehrung_automatisch === undefined
+          ? {
+            waehrungskurse: Object.fromEntries(
+              Object.entries(kurse)
+                .map(([k, v]) => [k, Number(v)])
+                .filter(([, v]) => Number.isFinite(v as number) && (v as number) > 0)),
+          }
+          : {}),
         benachrichtigungen_pausiert: pausiert,
+        ...weiteres,
       });
       toast.push("success", "Gespeichert");
       reload();
@@ -714,14 +725,68 @@ function EinstellungenCard() {
         <div className="space-y-2 border-t border-border pt-3">
           <Label>Wechselkurse (1 Einheit in €)</Label>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            CheapShark liefert USD, HotUKDeals GBP. Damit „max. 20 €" überall
-            gleich greift, rechnet SparBit alles in Euro um.
+            CheapShark liefert USD, HotUKDeals GBP, OzBargain AUD. Damit
+            „max. 20 €" überall gleich greift, rechnet SparBit alles in Euro um.
           </p>
+
+          {/* Der Stand gehoert neben die Zahlen. Ein Kurs ohne Datum sieht
+              aus wie einer von heute - und ein veralteter Kurs ist der
+              einzige Fehler hier, der sich nie von selbst meldet. */}
+          <div className={cn(
+            "flex items-start gap-2 rounded-md border px-2.5 py-2 text-xs",
+            data.waehrung_veraltet
+              ? "border-warning/40 bg-warning/10"
+              : "border-border bg-muted/40",
+          )}>
+            {data.waehrung_veraltet
+              ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+              : <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" aria-hidden />}
+            <div className="min-w-0">
+              {data.waehrung_stand ? (
+                <p>
+                  Stand: {formatDateTime(data.waehrung_stand)}
+                  {data.waehrung_alter_tage != null && (
+                    <span className="text-muted-foreground">
+                      {" "}({data.waehrung_alter_tage} Tage alt)
+                    </span>
+                  )}
+                </p>
+              ) : (
+                <p>Noch nie geholt — es gelten die festen Werte aus dem Code.</p>
+              )}
+              {data.waehrung_veraltet && (
+                <p className="mt-0.5 text-muted-foreground">
+                  Preisgrenzen greifen bei Fremdwährungen entsprechend daneben.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-start justify-between gap-3 pt-1">
+            <div className="min-w-0">
+              <Label id="kurse-auto-label">Täglich bei der EZB holen</Label>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                Eine Datei, kein Schlüssel, kein Konto — der einzige Abruf,
+                den SparBit von sich aus macht. Aus heißt: es gilt, was hier
+                unten steht.
+              </p>
+            </div>
+            <Switch
+              labelledBy="kurse-auto-label"
+              checked={data.waehrung_automatisch ?? true}
+              onChange={(an) => speichern(undefined, { waehrung_automatisch: an })}
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-2 pt-1">
-            {["USD", "GBP", "CHF", "PLN"].map((code) => (
+            {["USD", "GBP", "CHF", "PLN", "AUD"].map((code) => (
               <div key={code} className="flex items-center gap-2">
-                <span className="w-9 text-xs text-muted-foreground">{code}</span>
+                <Label htmlFor={`kurs-${code}`}
+                       className="w-9 text-xs text-muted-foreground">
+                  {code}
+                </Label>
                 <Input
+                  id={`kurs-${code}`}
                   type="number" step="0.01" min="0"
                   value={kurse[code] ?? ""}
                   onChange={(e) => setKurse((c) => ({ ...c, [code]: e.target.value }))}
@@ -732,8 +797,12 @@ function EinstellungenCard() {
           </div>
           <Button size="sm" variant="outline" className="w-full"
                   onClick={() => speichern()}>
-            Kurse speichern
+            Kurse von Hand speichern
           </Button>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Von Hand gesetzte Kurse gelten ab sofort als aktueller Stand — der
+            nächste Abruf überschreibt sie wieder, solange er eingeschaltet ist.
+          </p>
         </div>
       </CardContent>
     </Card>

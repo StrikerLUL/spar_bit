@@ -196,6 +196,17 @@ export function ZweiFaktorCard() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Bevor der naechste Admin-Klick in einem 403 endet. Ohne diesen
+            Hinweis sieht die Pflicht aus wie ein Defekt: die Oberflaeche
+            ist da, die Knoepfe gehen nicht. */}
+        {data.faellig && (
+          <p role="alert" className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs leading-relaxed">
+            Diese Anlage verlangt von Administratoren einen zweiten Faktor.
+            Bis er eingerichtet ist, bleiben die Admin-Funktionen gesperrt —
+            anmelden und zusehen geht weiter.
+          </p>
+        )}
+
         {!data.aktiv && !einrichtung && (
           <>
             <p className="text-xs leading-relaxed text-muted-foreground">
