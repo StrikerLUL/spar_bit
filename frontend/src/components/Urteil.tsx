@@ -1,4 +1,5 @@
 import { Award, HelpCircle, ThumbsUp, TrendingDown, TrendingUp } from "lucide-react";
+import { useSprache } from "@/lib/i18n";
 import { Badge } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,7 @@ export function UrteilBadge({
   text?: string | null;
   className?: string;
 }) {
+  const { t } = useSprache();
   if (!stufe || stufe === "unbekannt") return null;
   const eintrag = STUFEN[stufe];
   if (!eintrag) return null;
@@ -37,9 +39,11 @@ export function UrteilBadge({
 
   return (
     <Badge variant={variante} className={cn("shadow-sm", className)}
-           title={text ?? label}>
-      <Symbol className="h-3 w-3" />
-      {label}
+           title={text ?? t(label)}>
+      {/* Das Symbol ist Zugabe: das Wort daneben sagt dasselbe, und
+          zweimal dasselbe vorzulesen hilft niemandem. */}
+      <Symbol className="h-3 w-3" aria-hidden />
+      {t(label)}
     </Badge>
   );
 }

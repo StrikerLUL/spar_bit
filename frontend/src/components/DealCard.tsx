@@ -1,5 +1,6 @@
 import { Bookmark, ExternalLink, Flame, LineChart, Store } from "lucide-react";
 import type { Deal } from "@/lib/api";
+import { useSprache } from "@/lib/i18n";
 import {
   bildQuelle, cn, eurHinweis, formatAmount, formatPrice, sourceLabel, timeAgo,
   zeigeStreichpreis,
@@ -26,6 +27,7 @@ export function DealCard({
   onBookmark?: (id: number) => void;
   onOpen?: (id: number) => void;
 }) {
+  const { t } = useSprache();
   const rabatt = deal.rabatt_prozent;
   const streichpreis = zeigeStreichpreis(deal);
   const eur = eurHinweis(deal.preis_eur, deal.waehrung);
@@ -49,7 +51,7 @@ export function DealCard({
           />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground/25">
-            <Store className="h-8 w-8" strokeWidth={1.25} />
+            <Store className="h-8 w-8" strokeWidth={1.25} aria-hidden />
           </div>
         )}
 
@@ -59,7 +61,7 @@ export function DealCard({
           <FehlerBadge stufe={deal.fehler_stufe} score={deal.fehler_score}
                        gruende={deal.fehler_gruende} />
           {deal.ist_gratis ? (
-            <Badge variant="success">Gratis</Badge>
+            <Badge variant="success">{t("gratis")}</Badge>
           ) : rabatt ? (
             <Badge variant="warning" className="tabular">
               −{Math.round(rabatt)}%
@@ -69,7 +71,7 @@ export function DealCard({
           {deal.temperatur != null && deal.temperatur >= 200 && (
             <Badge variant="outline"
                    className="tabular border-border bg-card/90 text-foreground">
-              <Flame className="h-3 w-3" />
+              <Flame className="h-3 w-3" aria-hidden />
               {Math.round(deal.temperatur)}°
             </Badge>
           )}
@@ -79,14 +81,16 @@ export function DealCard({
         {onBookmark && (
           <button
             onClick={() => onBookmark(deal.id)}
-            aria-label={deal.bookmarked ? "Merkung entfernen" : "Merken"}
+            aria-label={t("merken")}
+            aria-pressed={deal.bookmarked}
+            title={t("merken")}
             className={cn(
               "absolute right-2 top-2 rounded-sm border border-border p-1.5",
               "bg-card/90 transition-colors hover:bg-card",
               deal.bookmarked ? "text-primary" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <Bookmark className={cn("h-3.5 w-3.5", deal.bookmarked && "fill-current")} />
+            <Bookmark className={cn("h-3.5 w-3.5", deal.bookmarked && "fill-current")} aria-hidden />
           </button>
         )}
       </div>
@@ -97,7 +101,7 @@ export function DealCard({
             type="button"
             onClick={() => onOpen(deal.id)}
             className="line-clamp-2 text-left text-[13px] font-medium leading-snug transition-colors hover:text-primary"
-            title="Details, Preisverlauf und Preisalarm"
+            title={t("Details")}
           >
             {deal.titel}
           </button>
@@ -121,22 +125,37 @@ export function DealCard({
                 deal.ist_gratis && "text-success",
               )}
             >
-              {deal.ist_gratis ? "gratis" : formatPrice(deal.preis, deal.waehrung)}
+              {deal.ist_gratis ? t("gratis") : formatPrice(deal.preis, deal.waehrung)}
             </span>
             {streichpreis && (
               <span className="tabular text-xs text-muted-foreground line-through decoration-muted-foreground/60">
+                {/* Der Streichpreis ist durchgestrichen - ein Screenreader
+                    sieht das nicht, also steht es im Text davor. */}
+                <span className="sr-only">{t("statt")} </span>
                 {formatAmount(deal.originalpreis, deal.waehrung)}
               </span>
             )}
             {eur && (
               <span className="tabular text-[11px] text-muted-foreground"
-                    title="Umgerechnet mit dem hinterlegten Kurs">
+                    title={t("Umgerechnet mit dem hinterlegten Kurs")}>
                 {eur}
               </span>
             )}
           </div>
 
           <GratisHinweis deal={deal} />
+
+          {/* Ohne den Code stimmt der Preis daneben nicht - er gehoert
+              darum direkt darunter und nicht in die Beschreibung, die
+              gekuerzt wird. */}
+          {deal.gutschein_code && (
+            <p className="text-[11px] leading-relaxed">
+              <span className="text-muted-foreground">{t("Gutschein-Code")}: </span>
+              <code className="rounded-sm border border-border bg-muted/60 px-1 py-0.5 font-mono text-[11px] tracking-wide">
+                {deal.gutschein_code}
+              </code>
+            </p>
+          )}
 
           {deal.passt_weil && deal.passt_weil.length > 0 && (
             <p className="text-[11px] leading-relaxed text-primary/90"
@@ -176,13 +195,13 @@ export function DealCard({
               className="flex-1"
               onClick={() => window.open(deal.url, "_blank", "noopener,noreferrer")}
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Zum Deal
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              {t("Zum Angebot")}
             </Button>
             {onOpen && (
               <Button variant="ghost" size="sm" onClick={() => onOpen(deal.id)}
-                      title="Preisverlauf und Alarm">
-                <LineChart className="h-3.5 w-3.5" />
+                      title={t("Preisalarm")} aria-label={t("Preisalarm")}>
+                <LineChart className="h-3.5 w-3.5" aria-hidden />
               </Button>
             )}
           </div>

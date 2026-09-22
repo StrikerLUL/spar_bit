@@ -6,6 +6,7 @@ import {
 import * as React from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { api, type ErwachsenStatus, type ProblemStatus } from "@/lib/api";
+import { useSprache, type Sprache } from "@/lib/i18n";
 import type { Theme } from "@/lib/theme";
 import { useAsync } from "@/lib/useEvents";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,7 @@ export function Layout({
 }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const location = useLocation();
+  const { t } = useSprache();
 
   // Der 18+-Punkt erscheint nur, wenn der Bereich freigeschaltet ist. Beim
   // Seitenwechsel neu geladen, damit das Umlegen des Schalters unter
@@ -78,6 +80,17 @@ export function Layout({
   // Beim Seitenwechsel das mobile Menü schliessen.
   React.useEffect(() => setMobileOpen(false), [location.pathname]);
 
+  // Fokus in die Schublade holen, sobald sie aufgeht. Ohne das bleibt er
+  // auf dem Knopf dahinter: wer mit der Tastatur bedient, tabbt dann durch
+  // die verdeckte Seite und landet nie im Menü.
+  const schubladeRef = React.useRef<HTMLElement | null>(null);
+  React.useEffect(() => {
+    if (!mobileOpen) return;
+    const erstes = schubladeRef.current?.querySelector<HTMLElement>(
+      "a, button, [tabindex]:not([tabindex='-1'])");
+    erstes?.focus();
+  }, [mobileOpen]);
+
   const gruppen = React.useMemo(() => {
     if (!erwachsen?.an) return NAV;
     return NAV.map((g) =>
@@ -87,11 +100,12 @@ export function Layout({
   }, [erwachsen?.an]);
 
   const navItems = (
-    <nav className="flex flex-col gap-5">
+    <nav className="flex flex-col gap-5" aria-label={t("Menü öffnen")}>
       {gruppen.map(({ gruppe, punkte }) => (
         <div key={gruppe}>
-          <p className="label mb-1.5 px-2.5">{gruppe}</p>
-          <div className="flex flex-col gap-px">
+          <p className="label mb-1.5 px-2.5" id={`nav-${gruppe}`}>{t(gruppe)}</p>
+          <div className="flex flex-col gap-px" role="group"
+               aria-labelledby={`nav-${gruppe}`}>
             {punkte.map(({ to, label, icon: Icon, end }) => (
               <NavLink
                 key={to}
@@ -112,7 +126,7 @@ export function Layout({
                 }
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="truncate">{label}</span>
+                <span className="truncate">{t(label)}</span>
               </NavLink>
             ))}
           </div>
@@ -130,10 +144,11 @@ export function Layout({
           <button
             type="button"
             onClick={onOpenPalette}
+            aria-keyshortcuts="Meta+K Control+K"
             className="flex w-full items-center gap-2 rounded-sm border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <Command className="h-3.5 w-3.5" />
-            Schnellzugriff
+            <Command className="h-3.5 w-3.5" aria-hidden />
+            {t("Schnellzugriff öffnen")}
             <kbd className="ml-auto rounded border border-border px-1 py-0.5 text-[10px]">
               ⌘K
             </kbd>
@@ -147,7 +162,8 @@ export function Layout({
       {/* Mobile-Kopfzeile */}
       <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-card px-4 py-2.5 lg:hidden">
         <Button variant="ghost" size="icon" onClick={() => setMobileOpen(true)}
-          aria-label="Menü öffnen">
+          aria-label={t("Menü öffnen")}
+          aria-expanded={mobileOpen} aria-controls="mobile-menue">
           <Menu className="h-5 w-5" />
         </Button>
         <div className="flex items-center gap-2">
@@ -156,22 +172,25 @@ export function Layout({
         </div>
         <div className="ml-auto flex items-center gap-2">
           <StatusDot status={connected ? "ok" : "error"} pulse={connected} />
-          <span className="text-xs text-muted-foreground">
-            {connected ? "live" : "offline"}
+          <span className="text-xs text-muted-foreground" role="status">
+            {connected ? t("Verbunden") : t("Keine Verbindung")}
           </span>
         </div>
       </header>
 
       {/* Mobile-Schublade */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true"
+             aria-label={t("Menü öffnen")} id="mobile-menue"
+             onKeyDown={(e) => { if (e.key === "Escape") setMobileOpen(false); }}>
           <div className="absolute inset-0 bg-black/65 animate-fade-in"
             onClick={() => setMobileOpen(false)} aria-hidden />
-          <aside className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col border-r border-border bg-card shadow-xl shadow-black/40">
+          <aside ref={schubladeRef}
+            className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col border-r border-border bg-card shadow-xl shadow-black/40">
             <div className="flex items-center justify-between pr-2">
               <Brand />
               <Button variant="ghost" size="icon" onClick={() => setMobileOpen(false)}
-                aria-label="Menü schließen">
+                aria-label={t("Menü schließen")}>
                 <X className="h-5 w-5" />
               </Button>
             </div>
@@ -213,7 +232,14 @@ const Brand = () => (
 const THEMES: Array<{ value: Theme; icon: typeof Sun; label: string }> = [
   { value: "light", icon: Sun, label: "Hell" },
   { value: "dark", icon: Moon, label: "Dunkel" },
-  { value: "system", icon: Monitor, label: "System" },
+  { value: "system", icon: Monitor, label: "Wie im System" },
+];
+
+// Die Sprachnamen stehen in ihrer eigenen Sprache. Wer die Oberflaeche
+// gerade nicht lesen kann, sucht nach "English" und nicht nach "Englisch".
+const SPRACHEN: Array<{ value: Sprache; kurz: string; label: string }> = [
+  { value: "de", kurz: "DE", label: "Deutsch" },
+  { value: "en", kurz: "EN", label: "English" },
 ];
 
 const Footer = ({
@@ -228,21 +254,28 @@ const Footer = ({
   onLogout: () => void;
   theme: Theme;
   setTheme: (theme: Theme) => void;
-}) => (
+}) => {
+  const { sprache, setSprache, t } = useSprache();
+  return (
   <div className="border-t border-border p-3">
-    <div className="mb-2 flex items-center gap-2 px-2 text-xs text-muted-foreground">
+    <div className="mb-2 flex items-center gap-2 px-2 text-xs text-muted-foreground"
+         role="status">
       <StatusDot status={connected ? "ok" : "error"} pulse={connected} />
-      {connected ? "Live verbunden" : "Verbindung getrennt"}
+      {connected ? t("Verbunden") : t("Keine Verbindung")}
     </div>
 
-    <div className="mb-2 flex gap-px rounded-sm border border-border p-px">
+    {/* Thema. role="group" statt loser Knoepfe: ein Screenreader liest
+        sonst drei unverbundene Schalter vor, von denen zwei dasselbe
+        Symbol tragen. */}
+    <div className="mb-2 flex gap-px rounded-sm border border-border p-px"
+         role="group" aria-label={t("Hell") + " / " + t("Dunkel")}>
       {THEMES.map(({ value, icon: Icon, label }) => (
         <button
           key={value}
           type="button"
           onClick={() => setTheme(value)}
-          title={label}
-          aria-label={`Thema: ${label}`}
+          title={t(label)}
+          aria-label={t(label)}
           aria-pressed={theme === value}
           className={cn(
             "flex flex-1 items-center justify-center rounded-[2px] py-1 transition-colors",
@@ -251,20 +284,44 @@ const Footer = ({
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          <Icon className="h-3.5 w-3.5" />
+          <Icon className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      ))}
+    </div>
+
+    <div className="mb-2 flex gap-px rounded-sm border border-border p-px"
+         role="group" aria-label={t("Sprache")}>
+      {SPRACHEN.map(({ value, kurz, label }) => (
+        <button
+          key={value}
+          type="button"
+          lang={value}
+          onClick={() => setSprache(value)}
+          title={label}
+          aria-label={label}
+          aria-pressed={sprache === value}
+          className={cn(
+            "flex-1 rounded-[2px] py-1 text-[11px] font-medium tracking-wide transition-colors",
+            sprache === value
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {kurz}
         </button>
       ))}
     </div>
 
     <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
       <span className="truncate text-sm text-muted-foreground">{username ?? "—"}</span>
-      <Button variant="ghost" size="icon" onClick={onLogout} aria-label="Abmelden"
-        title="Abmelden">
-        <LogOut className="h-4 w-4" />
+      <Button variant="ghost" size="icon" onClick={onLogout} aria-label={t("Abmelden")}
+        title={t("Abmelden")}>
+        <LogOut className="h-4 w-4" aria-hidden />
       </Button>
     </div>
   </div>
-);
+  );
+};
 
 export function PageHeader({
   title,

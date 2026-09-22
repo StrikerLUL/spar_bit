@@ -130,7 +130,17 @@ export interface Deal {
   waehrung: string;
   ist_gratis: boolean;
   haendler: string | null;
+  /** Art der Quelle ("community", "gaming", "reddit") - historisch so
+   *  benannt. Was der Artikel IST, steht in `warengruppe`. */
   kategorie: string | null;
+  /** Warengruppe aus Stichwoertern, siehe backend/app/warengruppe.py.
+   *  null heisst "nicht erkannt" und ist ein gueltiges Ergebnis. */
+  warengruppe?: string | null;
+  warengruppe_label?: string | null;
+  /** Das ausloesende Stichwort, oder "modell" bei einer Schaetzung. */
+  warengruppe_quelle?: string | null;
+  /** Gutschein-Code aus dem Deal-Text, siehe backend/app/gutschein.py. */
+  gutschein_code?: string | null;
   quelle: string;
   temperatur: number | null;
   tags: string[];
@@ -323,7 +333,10 @@ export interface Rule {
   /** Mindestpunktzahl beim Preisfehler-Verdacht (0/null = egal). */
   min_fehler_score: number | null;
   sources: string[];
+  /** Art der Quelle - nicht dasselbe wie `warengruppen`. */
   kategorien: string[];
+  /** Warengruppe der Ware (Elektronik, Haushalt …), leer = alle. */
+  warengruppen: string[];
   haendler: string[];
   /** Ohne dieses Häkchen sieht die Regel 18+-Funde gar nicht. */
   erwachsen: boolean;
