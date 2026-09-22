@@ -13,6 +13,7 @@ from . import (  # noqa: F401
                erwachsen,
                ggdeals,
                gog,
+               international,
                itad,
                pepper,
                reddit,

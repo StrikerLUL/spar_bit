@@ -30,6 +30,7 @@ class RuleSpec:
     min_fehler_score: int | None = None
     sources: list[str] = field(default_factory=list)
     kategorien: list[str] = field(default_factory=list)
+    warengruppen: list[str] = field(default_factory=list)
     haendler: list[str] = field(default_factory=list)
     # Darf die Regel 18+-Funde sehen? Ohne dieses Haekchen nie - eine
     # Regel wie "alles unter 5 Euro" wuerde den ganzen Bereich melden.
@@ -49,6 +50,7 @@ class RuleSpec:
             min_fehler_score=getattr(rule, "min_fehler_score", None),
             sources=list(rule.sources or []),
             kategorien=list(rule.kategorien or []),
+            warengruppen=list(getattr(rule, "warengruppen", None) or []),
             haendler=list(rule.haendler or []),
             erwachsen=bool(getattr(rule, "erwachsen", False)),
         )
@@ -216,6 +218,17 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
         else:
             reasons.append(f"Kategorie '{kat}'")
 
+    if rule.warengruppen:
+        from .warengruppe import GRUPPEN
+        gruppe = (getattr(deal, "warengruppe", "") or "").lower()
+        if gruppe not in _norm_set(rule.warengruppen):
+            # Der Anzeigename statt der ID: "nicht in Auswahl" hilft
+            # nur, wenn dabeisteht, was der Deal denn ist.
+            name = GRUPPEN.get(gruppe) or "ohne Warengruppe"
+            failed.append(f"Warengruppe: {name}")
+        else:
+            reasons.append(f"Warengruppe '{GRUPPEN.get(gruppe, gruppe)}'")
+
     if rule.haendler:
         h = (getattr(deal, "haendler", "") or "").lower()
         wanted = _norm_set(rule.haendler)
@@ -229,7 +242,8 @@ def evaluate(rule: RuleSpec, deal: Any) -> MatchResult:
     if not any([rule.keywords, rule.required_keywords, rule.nur_gratis,
                 rule.max_preis is not None, rule.min_rabatt_prozent is not None,
                 rule.min_temperatur is not None, rule.min_urteil, rule.sources,
-                rule.min_fehler_score, rule.kategorien, rule.haendler]):
+                rule.min_fehler_score, rule.kategorien, rule.haendler,
+                rule.warengruppen]):
         return MatchResult(False, [], ["Regel hat keine Bedingungen"])
 
     return MatchResult(not failed, reasons, failed)

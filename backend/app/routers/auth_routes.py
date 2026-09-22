@@ -149,11 +149,19 @@ class PasswortBody(BaseModel):
 
 
 @router.get("/zweifaktor")
-def zweifaktor_status(user: User = Depends(current_user)) -> dict:
+def zweifaktor_status(db: Session = Depends(get_db),
+                      user: User = Depends(current_user)) -> dict:
+    from ..auth import ADMIN as _ADMIN
+    from ..auth import zweifaktor_pflicht
+    pflicht = zweifaktor_pflicht(db)
     return {
         "aktiv": bool(user.totp_aktiv),
         "vorbereitet": bool(user.totp_geheimnis and not user.totp_aktiv),
         "ersatzcodes_uebrig": len(user.totp_ersatz or []),
+        "pflicht_fuer_admins": pflicht,
+        # Damit die Oberflaeche den Hinweis zeigen kann, *bevor* der
+        # naechste Admin-Klick in einem 403 endet.
+        "faellig": bool(pflicht and user.rolle == _ADMIN and not user.totp_aktiv),
     }
 
 
@@ -201,9 +209,19 @@ def zweifaktor_aus(body: PasswortBody, db: Session = Depends(get_db),
     loszuwerden - sonst schuetzt er genau so lange, wie niemand am
     Rechner sitzt.
     """
-    from ..auth import verify_password
+    from ..auth import ADMIN as _ADMIN
+    from ..auth import verify_password, zweifaktor_pflicht
     if not verify_password(user.password_hash, body.password):
         raise HTTPException(401, "Passwort stimmt nicht.")
+    # Sonst waere die Pflicht ein Vorschlag: einschalten, abschalten,
+    # weiter wie vorher. Wer sie loswerden will, nimmt sie in den
+    # Einstellungen zurueck - und das ist eine bewusste Entscheidung
+    # fuer die ganze Anlage, keine nebenbei.
+    if user.rolle == _ADMIN and zweifaktor_pflicht(db):
+        raise HTTPException(
+            409, "Diese Anlage verlangt von Administratoren einen zweiten "
+                 "Faktor. Erst die Pflicht unter „Logs & System → Sicherheit“ "
+                 "abschalten, dann hier.")
     user.totp_aktiv = False
     user.totp_geheimnis = None
     user.totp_ersatz = []

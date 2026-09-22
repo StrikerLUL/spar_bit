@@ -30,6 +30,24 @@ log = logging.getLogger(__name__)
 MAX_BYTES = 2_000_000          # Produktseiten sind gross; mehr braucht niemand
 MAX_FEHLER = 5                 # danach wird der Eintrag pausiert
 
+# Schluessel in der Settings-Tabelle: Adresse eines Render-Dienstes.
+#
+# Manche Shops setzen den Preis erst per JavaScript ein. Im rohen HTML
+# steht dann nichts, und SparBit sagt ehrlich "kann ich nicht lesen" -
+# das bleibt so. Wer es trotzdem braucht, stellt sich einen
+# Render-Dienst daneben (browserless, ein eigener Playwright-Container)
+# und traegt dessen Adresse hier ein.
+#
+# Bewusst nicht mitgeliefert: ein Browser im Image waere ein halbes
+# Gigabyte und ein eigener Angriffspfad - fuer eine Handvoll Shops, die
+# das Auslesen ohnehin nicht wollen. Wer ihn will, weiss, was er tut.
+SCHLUESSEL_RENDER = "render_url"
+
+# In der Adresse steht {url} fuer die Zieladresse. Beispiele:
+#   http://browserless:3000/content?token=x&url={url}
+#   http://renderer:8080/render?url={url}
+RENDER_PLATZHALTER = "{url}"
+
 
 class NichtGefunden(Exception):
     """Auf der Seite stand kein maschinenlesbarer Preis."""
@@ -43,6 +61,16 @@ class Fund:
     bild: str | None = None
     verfuegbar: bool | None = None
     quelle: str = ""          # welches Verfahren gegriffen hat
+    # Versandkosten, wenn der Shop sie maschinenlesbar angibt. None heisst
+    # "steht nicht da" und nicht "kostenlos" - der Unterschied ist genau
+    # der, an dem zwei Preise unvergleichbar werden: 199 EUR beim einen
+    # und 195 EUR plus 9,90 EUR beim anderen.
+    versand: float | None = None
+
+    @property
+    def gesamt(self) -> float:
+        """Was wirklich zu zahlen ist, soweit bekannt."""
+        return round(self.preis + (self.versand or 0.0), 2)
 
 
 # --- JSON-LD ---------------------------------------------------------------
@@ -94,6 +122,35 @@ def _zahl(wert) -> float | None:
         return None
 
 
+def _versand(angebot: dict) -> float | None:
+    """Versandkosten aus `shippingDetails`, wenn der Shop sie auszeichnet.
+
+    schema.org erlaubt mehrere Lieferoptionen. Genommen wird die
+    guenstigste: sie entspricht dem, was in einem Preisvergleich zaehlt,
+    und wer Express will, rechnet ohnehin selbst.
+
+    Eine ausdrueckliche 0 ist ein Wert, kein fehlender Eintrag - "gratis
+    Versand" ist eine Information, die im UI stehen soll.
+    """
+    roh = angebot.get("shippingDetails")
+    if roh is None:
+        return None
+    kandidaten = roh if isinstance(roh, list) else [roh]
+
+    preise: list[float] = []
+    for eintrag in kandidaten:
+        if not isinstance(eintrag, dict):
+            continue
+        rate = eintrag.get("shippingRate")
+        for zeile in (rate if isinstance(rate, list) else [rate]):
+            if not isinstance(zeile, dict):
+                continue
+            wert = _zahl(zeile.get("value"))
+            if wert is not None and wert >= 0:
+                preise.append(wert)
+    return min(preise) if preise else None
+
+
 def aus_jsonld(quelltext: str) -> Fund | None:
     for block in _JSONLD.findall(quelltext):
         try:
@@ -125,7 +182,8 @@ def aus_jsonld(quelltext: str) -> Fund | None:
             return Fund(preis, waehrung,
                         name=str(produkt.get("name")) if produkt.get("name") else None,
                         bild=str(bild) if bild else None,
-                        verfuegbar=verfuegbar, quelle="JSON-LD")
+                        verfuegbar=verfuegbar, quelle="JSON-LD",
+                        versand=_versand(angebot))
     return None
 
 
@@ -205,7 +263,38 @@ def preis_aus_seite(quelltext: str) -> Fund:
 
 # --- Abruf -----------------------------------------------------------------
 
-async def pruefe(db: Session, eintrag: WatchItem, http) -> Fund | None:
+def render_adresse(vorlage: str | None, ziel: str) -> str | None:
+    """Die Abrufadresse fuer den Render-Dienst, oder None.
+
+    Ohne {url} in der Vorlage gibt es keine Adresse - lieber gar nicht
+    abrufen als den Dienst auf seine eigene Startseite schicken und den
+    leeren Inhalt fuer eine Antwort halten.
+    """
+    vorlage = (vorlage or "").strip()
+    if not vorlage or RENDER_PLATZHALTER not in vorlage:
+        return None
+    from urllib.parse import quote
+    return vorlage.replace(RENDER_PLATZHALTER, quote(ziel, safe=""))
+
+
+async def hole_seite(http, eintrag: WatchItem, render_vorlage: str | None) -> str:
+    """Quelltext der Produktseite - direkt oder ueber den Render-Dienst."""
+    ueber = (render_adresse(render_vorlage, eintrag.url)
+             if getattr(eintrag, "rendern", False) else None)
+    if ueber:
+        # post() statt get(): der Dienst steht ueblicherweise im eigenen
+        # Netz, und get() wuerde am Netzschutz haengenbleiben. Dieselbe
+        # Ausnahme wie bei einem Gotify im Heimnetz - die Adresse hat man
+        # selbst eingetragen.
+        antwort = await http.get_intern(ueber)
+    else:
+        antwort = await http.get(eintrag.url)
+    quelltext = antwort.text
+    return quelltext[:MAX_BYTES] if len(quelltext) > MAX_BYTES else quelltext
+
+
+async def pruefe(db: Session, eintrag: WatchItem, http,
+                 render_vorlage: str | None = None) -> Fund | None:
     """Einen Eintrag abfragen und den Preis festhalten.
 
     Fehler landen am Eintrag statt zu fliegen - ein kaputter Shop darf die
@@ -213,10 +302,7 @@ async def pruefe(db: Session, eintrag: WatchItem, http) -> Fund | None:
     """
     eintrag.letzter_lauf = utcnow()
     try:
-        antwort = await http.get(eintrag.url)
-        quelltext = antwort.text
-        if len(quelltext) > MAX_BYTES:
-            quelltext = quelltext[:MAX_BYTES]
+        quelltext = await hole_seite(http, eintrag, render_vorlage)
         fund = preis_aus_seite(quelltext)
     except Exception as exc:
         eintrag.fehler_in_folge += 1
@@ -233,6 +319,7 @@ async def pruefe(db: Session, eintrag: WatchItem, http) -> Fund | None:
     eintrag.letzter_erfolg = utcnow()
     eintrag.letzter_preis = fund.preis
     eintrag.waehrung = fund.waehrung
+    eintrag.versandkosten = fund.versand
     if fund.bild and not eintrag.bild:
         eintrag.bild = fund.bild
     if not eintrag.haendler:
@@ -245,9 +332,13 @@ async def pruefe(db: Session, eintrag: WatchItem, http) -> Fund | None:
     letzter = db.scalars(
         select(WatchPrice).where(WatchPrice.watch_id == eintrag.id)
         .order_by(WatchPrice.ts.desc()).limit(1)).first()
-    if letzter is None or abs(letzter.preis - fund.preis) > 0.004:
+    # Auch eine reine Versandaenderung ist eine Aenderung: 195 + 9,90
+    # wird 195 + 0, und der Verlauf saehe sonst wie Stillstand aus.
+    versand_anders = (letzter is not None
+                      and abs((letzter.versand or 0.0) - (fund.versand or 0.0)) > 0.004)
+    if letzter is None or abs(letzter.preis - fund.preis) > 0.004 or versand_anders:
         db.add(WatchPrice(watch_id=eintrag.id, preis=fund.preis,
-                          waehrung=fund.waehrung))
+                          waehrung=fund.waehrung, versand=fund.versand))
     db.commit()
     return fund
 

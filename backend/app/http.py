@@ -260,6 +260,20 @@ class PoliteClient:
         kwargs.setdefault("extensions", {"sparbit_intern": True})
         return await self._client.put(url, **kwargs)
 
+    async def get_intern(self, url: str, **kwargs: Any) -> httpx.Response:
+        """GET auf einen Dienst im eigenen Netz, den man selbst eingetragen hat.
+
+        Gegenstueck zu post(): dieselbe Ausnahme vom Netzschutz, nur
+        lesend. Gebraucht vom Render-Dienst der Wunschliste, der
+        ueblicherweise als Nachbarcontainer laeuft und damit auf einer
+        Adresse sitzt, die SparBit sonst nicht anfassen wuerde.
+        """
+        kwargs.setdefault("timeout", 60.0)   # ein Browser braucht laenger
+        kwargs.setdefault("extensions", {"sparbit_intern": True})
+        antwort = await self._client.get(url, **kwargs)
+        antwort.raise_for_status()
+        return antwort
+
     async def get_text(self, url: str, **kwargs: Any) -> str:
         return (await self.get(url, **kwargs)).text
 

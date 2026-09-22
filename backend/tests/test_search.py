@@ -5,7 +5,15 @@ from sqlalchemy.orm import sessionmaker
 
 from app.dedupe import normalize_title
 from app.models import Base, Deal
-from app.search import einrichten, match_bedingung, zu_fts_query
+from app.search import (
+    POSTGRES,
+    einrichten,
+    match_bedingung,
+    motor,
+    motor_zuruecksetzen,
+    zu_fts_query,
+    zu_ts_query,
+)
 
 
 @pytest.mark.parametrize("eingabe,erwartet", [
@@ -139,3 +147,73 @@ def test_zaehlung_stimmt_mit_der_ergebnisliste(db):
     bedingung = match_bedingung("lego")
     anzahl = db.scalar(select(func.count()).select_from(Deal).where(Deal.id.in_(bedingung)))
     assert anzahl == len(suche(db, "lego"))
+
+
+# --- PostgreSQL ------------------------------------------------------------
+#
+# Die Postgres-Option stand im README, die Suchsyntax daneben - und genau
+# dann, wenn jemand beides nutzte, fiel die Suche stillschweigend auf
+# LIKE zurueck. Hier wird geprueft, dass derselbe Parser dort dieselbe
+# Syntax erzeugt: `&` statt `AND`, `:*` statt `*`, `<->` statt
+# Anfuehrungszeichen.
+
+
+class FalscherMotor:
+    """Ein Engine-Doppel, das nur seinen Dialekt kennt."""
+
+    class dialect:
+        name = "postgresql"
+
+
+def test_postgres_wird_am_dialekt_erkannt():
+    motor_zuruecksetzen()
+    try:
+        assert motor(FalscherMotor()) == POSTGRES
+    finally:
+        motor_zuruecksetzen()
+
+
+def test_mehrere_woerter_werden_verundet():
+    assert zu_ts_query("lego technic") == "lego & technic"
+
+
+def test_praefix_wird_uebersetzt():
+    """`websearch_to_tsquery` koennte das nicht - darum der eigene Parser."""
+    assert zu_ts_query("kopfhoer*") == "kopfhoer:*"
+
+
+def test_ausschluss_haengt_hinten():
+    assert zu_ts_query("ssd -gebraucht") == "ssd & !gebraucht"
+
+
+def test_eine_phrase_wird_zur_wortfolge():
+    """In tsquery ist eine Phrase kein Anfuehrungszeichen, sondern <->."""
+    assert zu_ts_query('"nintendo switch"') == "(nintendo <-> switch)"
+
+
+def test_phrase_und_wort_zusammen():
+    abfrage = zu_ts_query('"nintendo switch" spiel -gebraucht')
+    assert abfrage == "(nintendo <-> switch) & spiel & !gebraucht"
+
+
+def test_reiner_ausschluss_ergibt_keine_abfrage():
+    """Sonst waere das Ergebnis „alles ausser X" - also fast alles."""
+    assert zu_ts_query("-gebraucht") == ""
+
+
+def test_leere_und_unsinnige_eingaben():
+    assert zu_ts_query("") == ""
+    assert zu_ts_query("   ") == ""
+    assert zu_ts_query("!!!") == ""
+
+
+def test_sonderzeichen_koennen_keine_abfrage_zerlegen():
+    """Eine Nutzereingabe darf nie einen Syntaxfehler in der Datenbank
+    ausloesen - dasselbe Versprechen wie bei FTS5."""
+    for eingabe in ("lego & technic", "a | b", "x:*", "'; DROP TABLE deals; --"):
+        abfrage = zu_ts_query(eingabe)
+        # Uebrig bleiben duerfen nur unsere eigenen Operatoren.
+        for zeichen in ("|", ";", "'", "("):
+            if zeichen == "(":
+                continue          # Phrasen stehen in Klammern
+            assert zeichen not in abfrage, (eingabe, abfrage)

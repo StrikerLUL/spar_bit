@@ -59,6 +59,11 @@ omit = ["backend/tests/*", "*/__pycache__/*"]
 [tool.coverage.report]
 # Ehrlich statt schoen: die Schwelle steht dort, wo die Abdeckung heute ist.
 # Sie darf steigen, aber nicht fallen - dafuer ist sie da.
-fail_under = 75
+#
+# 75 -> 78, nachdem Telegram-Bot, Token, Berechtigungsmatrix und die
+# neuen Module Tests bekommen haben. Die Gesamtzahl sagt allerdings
+# wenig darueber, ob *neuer* Code getestet ist - dafuer prueft die CI
+# zusaetzlich die Abdeckung der geaenderten Zeilen (diff-cover, 80 %).
+fail_under = 78
 show_missing = true
 skip_covered = true

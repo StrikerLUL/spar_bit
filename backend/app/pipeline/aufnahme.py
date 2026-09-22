@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import erwachsen as erwachsen_mod
+from .. import gutschein, warengruppe
 from ..ablauf import bestimme as ablauf_bestimmen
 from ..currency import to_eur
 from ..dedupe import normalize_title, titles_match, url_hash
@@ -157,9 +158,16 @@ def _ingest_one(db: Session, source_id: str, item: DealItem,
         veroeffentlicht_am=item.veroeffentlicht_am,
         also_from=[],
         gratis_hinweis=(item.roh or {}).get("gratis_hinweis"),
+        # Steht im Text ein Gutschein-Code, gehoert er ins Feld und
+        # damit in die Meldung - im gekuerzten Fliesstext ging er unter,
+        # und ohne ihn ist der Deal an der Kasse nichts wert.
+        gutschein_code=gutschein.finde(item.titel, item.beschreibung),
         roh=item.roh or {},
     )
     erwachsen_mod.markiere(deal, source_id=source_id)
+    gruppe, wort = warengruppe.bestimme(item.titel, item.beschreibung, item.tags)
+    deal.warengruppe = gruppe
+    deal.warengruppe_quelle = wort
     db.add(deal)
     db.flush()
     _merke_angebot(db, deal, item, source_id)

@@ -23,7 +23,8 @@ def test_alle_typen_werden_angeboten(client):
     typen = client.get("/api/channels/types").json()
     assert {t["type"] for t in typen} == {
         "discord", "slack", "matrix", "gotify", "pushover",
-        "telegram", "ntfy", "smtp", "webhook", "browser", "apprise"}
+        "telegram", "ntfy", "smtp", "webhook", "browser", "apprise",
+        "homeassistant"}
 
 
 def test_jeder_typ_beschreibt_sich(client):

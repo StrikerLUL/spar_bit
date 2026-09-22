@@ -1,0 +1,43 @@
+# Der Linter sagt in zwei Sekunden, was die CI in vier Minuten sagt.
+# Absichtlich schmal: nur was schnell ist und niemals etwas umformatiert.
+#
+# Einrichten:
+#   .venv/bin/pip install pre-commit && .venv/bin/pre-commit install
+#
+# Kein "ruff format" und kein Prettier - der Code hier ist von Hand
+# gesetzt (siehe CONTRIBUTING.md), und ein Formatierer wuerde die
+# ausgerichteten Tabellen in den Dicts einebnen.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+        exclude: ^(docs/bilder/|browser-extension/icons/|frontend/package-lock\.json)
+      - id: trailing-whitespace
+        exclude: ^(docs/bilder/|browser-extension/icons/)
+      - id: check-yaml
+        # Die Compose-Datei nutzt Anker, die der einfache Parser nicht mag.
+        args: [--allow-multiple-documents]
+      - id: check-json
+        exclude: ^(frontend/tsconfig.*\.json|\.devcontainer/devcontainer\.json)$
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=800]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: local
+    hooks:
+      # Faengt genau den Fehler, den man nachts macht: eine Zugangsdatei
+      # aus dem Datenordner mit ins Repository legen.
+      - id: keine-datenbank
+        name: Keine Datenbank oder .env einchecken
+        entry: Diese Datei gehoert nicht ins Repository.
+        language: fail
+        files: '(^|/)(\.env|.*\.db|.*\.sqlite3?|\.coverage)$'

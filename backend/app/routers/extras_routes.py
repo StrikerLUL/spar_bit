@@ -9,13 +9,17 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import case, desc, func, select
 from sqlalchemy.orm import Session
 
-from ..auth import current_user, darf_schreiben
+from .. import currency as currency_mod
+from .. import ollama as ollama_mod
+from .. import pricewatch as pricewatch_mod
+from ..auth import ZWEIFAKTOR_PFLICHT, current_user, darf_schreiben, nur_admin
 from ..besitz import gehoert_mir, nur_meine
 from ..currency import DEFAULT_RATES, get_rates, set_rates, to_eur
 from ..db import get_db, get_setting, set_setting
+from ..drosselung import drossel
 from ..gratischeck import LABEL as GRATIS_LABEL
 from ..images import aufraeumen as bilder_aufraeumen
 from ..images import bild_verzeichnis
@@ -34,6 +38,7 @@ from ..models import (
 from ..pricefehler import HEISS as PF_HEISS
 from ..pricefehler import SCHWELLE_HEISS, bewerte_deal
 from ..pricefehler import VERDACHT as PF_VERDACHT
+from ..pricewatch import SCHLUESSEL_RENDER
 
 log = logging.getLogger(__name__)
 
@@ -157,6 +162,53 @@ def haendler_stats(limit: int = Query(12, le=50),
              "schnitt_rabatt": round(float(r[2] or 0), 1)} for r in rows]
 
 
+@router.get("/stats/warengruppen")
+def warengruppen_stats(tage: int = Query(30, ge=1, le=365),
+                       db: Session = Depends(get_db)) -> list[dict]:
+    """Was faellt hier eigentlich an - und was davon war ein guter Preis?
+
+    Die Quellen-Statistik sagt, wo etwas herkommt. Diese sagt, worum es
+    geht. Beides zusammen beantwortet die Frage, die man nach einem
+    halben Jahr stellt: "warum kommen bei mir dauernd Grafikkarten?"
+
+    Deals ohne erkannte Warengruppe stehen ausdruecklich drin, unter
+    `null` - eine Statistik, die nur ihre Treffer zeigt, laesst den
+    Eindruck entstehen, es waere alles eingeteilt.
+    """
+    from ..warengruppe import GRUPPEN, label
+
+    seit = utcnow() - timedelta(days=tage)
+    zeilen = db.execute(
+        select(Deal.warengruppe, func.count(Deal.id),
+               func.avg(Deal.rabatt_prozent),
+               func.sum(case((Deal.urteil.in_(("bestpreis", "sehr_gut")), 1),
+                             else_=0)))
+        .where(Deal.first_seen >= seit, Deal.erwachsen.is_(False))
+        .group_by(Deal.warengruppe)
+        .order_by(desc(func.count(Deal.id)))
+    ).all()
+
+    raus = []
+    for gruppe, anzahl, schnitt, gut in zeilen:
+        raus.append({
+            "warengruppe": gruppe,
+            "label": label(gruppe) or "ohne Warengruppe",
+            "anzahl": int(anzahl or 0),
+            "schnitt_rabatt": round(float(schnitt or 0), 1),
+            # Der interessante Teil: wie viele davon waren wirklich
+            # guenstig, gemessen am eigenen Verlauf.
+            "gute_preise": int(gut or 0),
+        })
+    # Gruppen ohne einen einzigen Fund gehoeren nicht in die Liste, aber
+    # die Namen sollen vollstaendig bekannt sein - dafuer das Feld unten.
+    bekannt = {g for g, *_ in zeilen}
+    for gruppe in GRUPPEN:
+        if gruppe not in bekannt:
+            raus.append({"warengruppe": gruppe, "label": label(gruppe),
+                         "anzahl": 0, "schnitt_rabatt": 0.0, "gute_preise": 0})
+    return raus
+
+
 # --- Deal-Detail und Preisverlauf -----------------------------------------
 
 @router.get("/deals/{deal_id}/detail")
@@ -233,7 +285,7 @@ class AlarmBody(BaseModel):
     notiz: str | None = None
 
 
-@router.put("/deals/{deal_id}/alarm")
+@router.put("/deals/{deal_id}/alarm", dependencies=[Depends(darf_schreiben)])
 def set_alarm(deal_id: int, body: AlarmBody, db: Session = Depends(get_db)) -> dict:
     """Preisalarm setzen oder (mit ziel_preis=null) wieder entfernen."""
     deal = db.get(Deal, deal_id)
@@ -386,13 +438,34 @@ class GeneralSettings(BaseModel):
     backup_taeglich: bool | None = None
     backup_behalten: int | None = None
     backup_passwort: str | None = None
+    waehrung_automatisch: bool | None = None
+    zweifaktor_pflicht: bool | None = None
+    render_url: str | None = None
+    ollama_url: str | None = None
+    ollama_modell: str | None = None
 
 
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db)) -> dict:
+    stand = get_setting(db, currency_mod.SCHLUESSEL_STAND)
     return {
-        "waehrungskurse": get_setting(db, "currency_rates") or DEFAULT_RATES,
+        "waehrungskurse": get_setting(db, currency_mod.SCHLUESSEL_KURSE) or DEFAULT_RATES,
         "aktive_kurse": get_rates(),
+        # Ein Kurs ohne Datum sieht aus wie ein Kurs von heute. Damit das
+        # UI ehrlich sein kann, geht beides raus - und die Einschaetzung
+        # gleich mit, damit sie nicht an zwei Stellen gerechnet wird.
+        "waehrung_stand": stand,
+        "waehrung_alter_tage": currency_mod.alter_in_tagen(stand),
+        "waehrung_veraltet": currency_mod.ist_veraltet(stand),
+        "waehrung_automatisch": bool(get_setting(db, currency_mod.SCHLUESSEL_AUTO, True)),
+        "zweifaktor_pflicht": bool(get_setting(db, ZWEIFAKTOR_PFLICHT, False)),
+        # Beides leer = aus. Die Adressen stehen im Klartext da: sie sind
+        # keine Geheimnisse, sondern Nachbarn im eigenen Netz, und ein
+        # maskiertes Feld waere hier nur laestig.
+        "render_url": str(get_setting(db, SCHLUESSEL_RENDER) or ""),
+        "ollama_url": str(get_setting(db, ollama_mod.SCHLUESSEL_URL) or ""),
+        "ollama_modell": str(get_setting(db, ollama_mod.SCHLUESSEL_MODELL)
+                             or ollama_mod.VORGABE_MODELL),
         "benachrichtigungen_pausiert": bool(get_setting(db, "notifications_paused")),
         "preisfehler_waechter": bool(get_setting(db, "preisfehler_waechter", True)),
         "preisfehler_schwelle": int(get_setting(db, "preisfehler_schwelle",
@@ -404,11 +477,24 @@ def get_settings(db: Session = Depends(get_db)) -> dict:
     }
 
 
-@router.put("/settings")
-def put_settings(body: GeneralSettings, db: Session = Depends(get_db)) -> dict:
+@router.put("/settings",
+            # Was hier steht, gilt fuer die ganze Anlage: Waehrungskurse,
+            # die in jede Preisregel eingehen, die Preisfehler-Schwelle,
+            # das Passwort der Sicherungen. Der Router verlangte bisher
+            # nur "angemeldet" - damit konnte auch ein Gast, der nur
+            # zusehen darf, daran drehen. Das war ein Versehen.
+            dependencies=[Depends(nur_admin)])
+def put_settings(body: GeneralSettings, db: Session = Depends(get_db),
+                 admin: User = Depends(nur_admin)) -> dict:
     if body.waehrungskurse is not None:
-        set_setting(db, "currency_rates", body.waehrungskurse)
-        set_rates(body.waehrungskurse)
+        set_setting(db, currency_mod.SCHLUESSEL_KURSE, body.waehrungskurse)
+        # Von Hand gesetzte Kurse sind ab jetzt der Stand - sonst stuende
+        # daneben weiter das Datum des letzten EZB-Abrufs.
+        set_setting(db, currency_mod.SCHLUESSEL_STAND,
+                    date.today().isoformat())
+        set_rates(body.waehrungskurse, date.today().isoformat())
+    if body.waehrung_automatisch is not None:
+        set_setting(db, currency_mod.SCHLUESSEL_AUTO, body.waehrung_automatisch)
     if body.benachrichtigungen_pausiert is not None:
         set_setting(db, "notifications_paused", body.benachrichtigungen_pausiert)
     if body.preisfehler_waechter is not None:
@@ -425,6 +511,31 @@ def put_settings(body: GeneralSettings, db: Session = Depends(get_db)) -> dict:
     if body.backup_passwort:
         set_setting(db, "backup_passwort",
                     "" if body.backup_passwort == "-" else body.backup_passwort)
+    if body.render_url is not None:
+        vorlage = body.render_url.strip()
+        # Ohne {url} wuerde jeder Abruf auf derselben Adresse landen -
+        # und die leere Antwort saehe aus wie "Shop liefert keinen Preis".
+        if vorlage and pricewatch_mod.RENDER_PLATZHALTER not in vorlage:
+            raise HTTPException(
+                400, "In der Adresse muss {url} vorkommen — dort setzt "
+                     "SparBit die Produktseite ein. Beispiel: "
+                     "http://browserless:3000/content?url={url}")
+        set_setting(db, SCHLUESSEL_RENDER, vorlage)
+    if body.ollama_url is not None:
+        set_setting(db, ollama_mod.SCHLUESSEL_URL, body.ollama_url.strip())
+    if body.ollama_modell is not None:
+        set_setting(db, ollama_mod.SCHLUESSEL_MODELL,
+                    body.ollama_modell.strip() or ollama_mod.VORGABE_MODELL)
+    if body.zweifaktor_pflicht is not None:
+        # Einschalten darf nur, wer selbst schon einen zweiten Faktor hat.
+        # Sonst sperrt sich der einzige Administrator im selben Klick aus
+        # den Admin-Funktionen aus - und die Einstellung, mit der er es
+        # zuruecknehmen koennte, ist genau eine davon.
+        if body.zweifaktor_pflicht and not admin.totp_aktiv:
+            raise HTTPException(
+                409, "Richte erst deinen eigenen zweiten Faktor ein. Sonst "
+                     "sperrst du dich mit dieser Einstellung selbst aus.")
+        set_setting(db, ZWEIFAKTOR_PFLICHT, body.zweifaktor_pflicht)
     db.commit()
     return get_settings(db)
 
@@ -435,12 +546,12 @@ def bilder_status(db: Session = Depends(get_db)) -> dict:
             "aktiv": get_setting(db, "bilder_lokal", True)}
 
 
-@router.post("/bilder-aufraeumen")
+@router.post("/bilder-aufraeumen", dependencies=[Depends(nur_admin)])
 def bilder_putzen(db: Session = Depends(get_db)) -> dict:
     return {"entfernt": bilder_aufraeumen(db)}
 
 
-@router.post("/sources/{source_id}/snooze")
+@router.post("/sources/{source_id}/snooze", dependencies=[Depends(nur_admin)])
 def snooze_source(source_id: str, stunden: float = Query(6, ge=0, le=168),
                   db: Session = Depends(get_db)) -> dict:
     cfg = db.get(SourceConfig, source_id)
@@ -503,7 +614,8 @@ class Rueckmeldung(BaseModel):
     urteil: str          # "echt" | "fehlalarm"
 
 
-@router.post("/preisfehler/{deal_id}/rueckmeldung")
+@router.post("/preisfehler/{deal_id}/rueckmeldung",
+             dependencies=[Depends(darf_schreiben)])
 def preisfehler_rueckmeldung(deal_id: int, body: Rueckmeldung,
                              db: Session = Depends(get_db)) -> dict:
     """War das wirklich ein Preisfehler? Nochmal drücken nimmt es zurück."""
@@ -516,6 +628,22 @@ def preisfehler_rueckmeldung(deal_id: int, body: Rueckmeldung,
     if deal is None:
         raise HTTPException(404, "Deal nicht gefunden")
     return {"ok": True, "urteil_mensch": deal.fehler_urteil_mensch}
+
+
+@router.get("/deals/{deal_id}/diagnose")
+def deal_diagnose(deal_id: int, db: Session = Depends(get_db)) -> dict:
+    """Warum kam dieser Fund nicht an?
+
+    Die Gegenrichtung zur Live-Vorschau im Regel-Editor: dort sieht man
+    zu einer Regel die Deals, hier zu einem Deal die Regeln - und alles
+    Weitere, was zwischen Fund und Handy steht.
+    """
+    from ..diagnose import diagnose
+
+    deal = db.get(Deal, deal_id)
+    if deal is None:
+        raise HTTPException(404, "Deal nicht gefunden")
+    return diagnose(db, deal)
 
 
 @router.get("/hygiene")
@@ -545,7 +673,7 @@ def preisfehler_auswertung(db: Session = Depends(get_db)) -> dict:
     return bewerte_rueckmeldungen(db)
 
 
-@router.post("/preisfehler/schwelle-uebernehmen")
+@router.post("/preisfehler/schwelle-uebernehmen", dependencies=[Depends(nur_admin)])
 def schwelle_uebernehmen(db: Session = Depends(get_db)) -> dict:
     """Den Vorschlag der Eichung uebernehmen.
 
@@ -572,7 +700,9 @@ def schwelle_uebernehmen(db: Session = Depends(get_db)) -> dict:
             "grund": auswertung.get("vorschlag_grund")}
 
 
-@router.post("/preisfehler/{deal_id}/pruefen")
+@router.post("/preisfehler/{deal_id}/pruefen",
+             dependencies=[Depends(darf_schreiben),
+                           Depends(drossel("preisfehler-pruefen", pro_minute=30, stoss=10))])
 def preisfehler_neu_pruefen(deal_id: int, db: Session = Depends(get_db)) -> dict:
     """Einen Deal von Hand neu bewerten.
 
@@ -592,7 +722,8 @@ def preisfehler_neu_pruefen(deal_id: int, db: Session = Depends(get_db)) -> dict
     return urteil.as_dict()
 
 
-@router.post("/preisfehler/{deal_id}/verwerfen")
+@router.post("/preisfehler/{deal_id}/verwerfen",
+             dependencies=[Depends(darf_schreiben)])
 def preisfehler_verwerfen(deal_id: int, db: Session = Depends(get_db)) -> dict:
     """Fehlalarm wegklicken.
 

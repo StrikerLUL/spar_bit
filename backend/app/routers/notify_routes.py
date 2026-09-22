@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..auth import current_user, darf_schreiben
 from ..besitz import gehoert_mir, nur_meine
 from ..db import get_db, get_setting, set_setting
+from ..drosselung import drossel
 from ..models import Channel as ChannelRow
 from ..models import NotificationLog, PushAbo, User
 from ..notify import all_channels, get_channel
@@ -115,7 +116,11 @@ def delete_channel(channel_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
-@router.post("/{channel_id}/test")
+@router.post("/{channel_id}/test",
+             # Jeder Test verschickt wirklich etwas. Eine Schleife hier
+             # bringt nicht SparBit an die Grenze, sondern das Konto beim
+             # Dienst dahinter.
+             dependencies=[Depends(drossel("kanal-test", pro_minute=10, stoss=4))])
 async def test_channel(channel_id: int, db: Session = Depends(get_db),
                        user: User = Depends(current_user)) -> dict:
     row = _mein_kanal(channel_id, db, user)

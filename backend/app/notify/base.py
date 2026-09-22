@@ -37,6 +37,10 @@ class Notification:
     # Meldung, weil er das Einzige ist, worauf man sofort reagieren muss.
     fehler_stufe: str | None = None
     fehler_text: str | None = None
+    # Gutschein-Code, falls im Deal-Text einer stand. Gehoert in die
+    # Meldung, nicht in die Beschreibung: die wird gekuerzt, und genau
+    # das Stueck, das man an der Kasse braucht, faellt dann weg.
+    gutschein_code: str | None = None
     # Meldung ueber SparBit selbst (Selbstueberwachung), nicht ueber einen
     # Deal. Ohne Preis, ohne Haendler, ohne Link.
     ist_hinweis: bool = False
@@ -84,6 +88,9 @@ class Notification:
         if self.fehler_text:
             raus.append(("Preisfehler", self.fehler_text))
         raus.append(("Preis", self.preis_text()))
+        # Direkt hinter dem Preis: ohne den Code stimmt der Preis nicht.
+        if self.gutschein_code:
+            raus.append(("Gutschein-Code", self.gutschein_code))
         if self.haendler:
             raus.append(("Händler", self.haendler))
         raus.append(("Quelle", self.quelle))

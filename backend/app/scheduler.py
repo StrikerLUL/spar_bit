@@ -15,15 +15,24 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import delete, desc, select
 
 from . import backup as backup_mod
+from . import currency as currency_mod
 from . import erwachsen as erwachsen_mod
 from . import gratischeck, pricefehler
 from .config import settings
-from .db import SessionLocal, get_setting, session_scope
+from .db import SessionLocal, get_setting, session_scope, set_setting
 from .events import broker
 from .http import NotModified, PoliteClient, RateLimited
 from .images import aufraeumen as bilder_aufraeumen
 from .images import hole_fuer_deals
-from .models import Deal, LogEntry, NotificationLog, SourceConfig, SourceRun, utcnow
+from .models import (
+    Deal,
+    EventLog,
+    LogEntry,
+    NotificationLog,
+    SourceConfig,
+    SourceRun,
+    utcnow,
+)
 from .pipeline import (
     check_price_alarms,
     dispatch,
@@ -40,6 +49,9 @@ from .sources.base import FetchContext
 from .verdict import aktualisiere as urteile_aktualisieren
 
 log = logging.getLogger(__name__)
+
+# Wie viele unerkannte Titel ein Lauf hoechstens ans Modell gibt.
+WARENGRUPPEN_PRO_LAUF = 40
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 http: PoliteClient | None = None
@@ -368,7 +380,7 @@ async def watch_job() -> None:
     """
     from .models import Channel
     from .notify import Notification, get_channel
-    from .pricewatch import faellige, pruefe, soll_melden
+    from .pricewatch import SCHLUESSEL_RENDER, faellige, pruefe, soll_melden
 
     try:
         with SessionLocal() as db:
@@ -376,9 +388,12 @@ async def watch_job() -> None:
             if not offen:
                 return
             kanaele = [c for c in db.scalars(select(Channel)) if c.enabled]
+            # Einmal je Lauf statt einmal je Eintrag: die Einstellung
+            # aendert sich nicht mitten in einer Runde.
+            render = get_setting(db, SCHLUESSEL_RENDER)
 
             for eintrag in offen:
-                fund = await pruefe(db, eintrag, get_http())
+                fund = await pruefe(db, eintrag, get_http(), render)
                 if fund is None:
                     continue
                 grund = soll_melden(eintrag, fund)
@@ -514,6 +529,10 @@ def cleanup_job() -> None:
             db.execute(delete(SourceRun).where(SourceRun.started_at < log_cut))
             db.execute(delete(NotificationLog).where(NotificationLog.created_at < log_cut))
             db.execute(delete(LogEntry).where(LogEntry.ts < log_cut))
+            # Der Ereignis-Ringpuffer fuer den Worker-Betrieb. Was aelter
+            # als eine Viertelstunde ist, hat niemand mehr abgeholt.
+            db.execute(delete(EventLog).where(
+                EventLog.ts < utcnow() - timedelta(minutes=15)))
             from .loginguard import aufraeumen as login_aufraeumen
             login_aufraeumen(db)
             if deals.rowcount:
@@ -559,6 +578,94 @@ async def backup_job() -> None:
         log.error("Sicherung fehlgeschlagen: %s", exc)
 
 
+async def kurse_job() -> None:
+    """Waehrungskurse bei der EZB nachziehen.
+
+    Einmal am Tag genuegt: die EZB stellt an Bankarbeitstagen gegen
+    16:00 MEZ neu ein, und fuer eine Preisgrenze ist die dritte
+    Nachkommastelle ohnehin ohne Belang.
+
+    Scheitert der Abruf, bleibt der letzte Stand stehen und es wird
+    nichts ueberschrieben - ein alter Kurs ist deutlich besser als
+    keiner, und das UI sagt ohnehin, wie alt er ist.
+    """
+    try:
+        with session_scope() as db:
+            if not get_setting(db, currency_mod.SCHLUESSEL_AUTO, True):
+                return
+            stand_vorher = get_setting(db, currency_mod.SCHLUESSEL_STAND)
+
+        kurse, stand = await currency_mod.hole(get_http())
+
+        if stand == stand_vorher:
+            return                      # nichts Neues, nichts zu schreiben
+        with session_scope() as db:
+            set_setting(db, currency_mod.SCHLUESSEL_KURSE, kurse)
+            set_setting(db, currency_mod.SCHLUESSEL_STAND, stand)
+        currency_mod.set_rates(kurse, stand)
+        log.info("Waehrungskurse aktualisiert (EZB-Stand %s): %s", stand,
+                 ", ".join(f"{k}={v}" for k, v in sorted(kurse.items()) if k != "EUR"))
+        broker.publish("kurse", {"stand": stand})
+    except NotModified:
+        pass                            # dieselbe Datei wie beim letzten Mal
+    except Exception as exc:
+        log.warning("Waehrungskurse nicht aktualisiert: %s", exc)
+
+
+async def warengruppen_job() -> None:
+    """Unerkannte Warengruppen von einem lokalen Modell nachtragen.
+
+    Laeuft nur, wenn jemand eine Ollama-Adresse eingetragen hat - ohne
+    sie tut dieser Job gar nichts und kostet eine Datenbankabfrage alle
+    paar Stunden.
+
+    Gedeckelt und rueckwaerts: die neuesten unerkannten zuerst, danach
+    ist Schluss. Ein Modell auf einer CPU braucht Sekunden je Titel, und
+    ein Job, der eine Stunde laeuft, blockiert die anderen.
+    """
+    from . import ollama
+    from . import warengruppe as wg_mod
+
+    try:
+        with session_scope() as db:
+            url = str(get_setting(db, ollama.SCHLUESSEL_URL) or "")
+            if not ollama.eingerichtet(url):
+                return
+            modell = str(get_setting(db, ollama.SCHLUESSEL_MODELL)
+                         or ollama.VORGABE_MODELL)
+            offen = list(db.scalars(
+                select(Deal)
+                .where(Deal.warengruppe.is_(None),
+                       Deal.first_seen >= utcnow() - timedelta(days=7))
+                .order_by(desc(Deal.first_seen)).limit(WARENGRUPPEN_PRO_LAUF)))
+            paare = [(d.id, d.titel) for d in offen]
+
+        if not paare:
+            return
+
+        gefunden: dict[int, str] = {}
+        for deal_id, titel in paare:
+            gruppe = await ollama.warengruppe(get_http(), url, titel, modell)
+            if gruppe in wg_mod.GRUPPEN:
+                gefunden[deal_id] = gruppe
+
+        if not gefunden:
+            return
+        with session_scope() as db:
+            for deal_id, gruppe in gefunden.items():
+                deal = db.get(Deal, deal_id)
+                if deal is not None and deal.warengruppe is None:
+                    deal.warengruppe = gruppe
+                    # Als Modellantwort kennzeichnen: nur so laesst sich
+                    # spaeter auseinanderhalten, was ein Stichwort und was
+                    # eine Schaetzung war.
+                    deal.warengruppe_quelle = "modell"
+        log.info("Warengruppen vom Modell ergaenzt: %d von %d",
+                 len(gefunden), len(paare))
+    except Exception as exc:
+        log.warning("Warengruppen-Nachtrag fehlgeschlagen: %s", exc)
+
+
 def start() -> None:
     ensure_source_rows()
     sync_jobs()
@@ -571,6 +678,16 @@ def start() -> None:
                       next_run_time=utcnow() + timedelta(minutes=5))
     scheduler.add_job(cleanup_job, IntervalTrigger(hours=6), id="cleanup",
                       max_instances=1, coalesce=True)
+    # Gleich nach dem Start einmal, danach taeglich: wer SparBit eine
+    # Woche aus hatte, rechnet sonst eine Woche mit alten Kursen.
+    scheduler.add_job(kurse_job, IntervalTrigger(hours=24), id="kurse",
+                      replace_existing=True, max_instances=1, coalesce=True,
+                      next_run_time=utcnow() + timedelta(minutes=1))
+    # Tut nichts, solange keine Ollama-Adresse eingetragen ist.
+    scheduler.add_job(warengruppen_job, IntervalTrigger(hours=2),
+                      id="warengruppen", replace_existing=True,
+                      max_instances=1, coalesce=True,
+                      next_run_time=utcnow() + timedelta(minutes=8))
     scheduler.add_job(watch_job, IntervalTrigger(minutes=10), id="watch",
                       max_instances=1, coalesce=True)
     scheduler.add_job(urteile_job, IntervalTrigger(hours=3), id="urteile",

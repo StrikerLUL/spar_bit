@@ -1,0 +1,23 @@
+# Wer gefragt wird, wenn sich etwas ändert. Keine Bürokratie - es geht
+# darum, dass Änderungen an den empfindlichen Stellen nicht unbemerkt
+# durchlaufen.
+*                           @StrikerLUL
+
+# Sicherheitsgrenzen: SSRF-Schutz, Anmeldung, zweiter Faktor, Kopfzeilen.
+# Hier ist ein zweites Augenpaar keine Formalie.
+/backend/app/netzschutz.py  @StrikerLUL
+/backend/app/auth.py        @StrikerLUL
+/backend/app/loginguard.py  @StrikerLUL
+/backend/app/zweifaktor.py  @StrikerLUL
+/backend/app/sicherheitsheader.py @StrikerLUL
+/backend/app/tokens.py      @StrikerLUL
+/backend/app/backup.py      @StrikerLUL
+
+# Migrationen laufen draußen auf echten Datenbanken. Ein geänderter
+# bestehender Schritt ist dort nie wieder einzufangen.
+/backend/app/migrations.py  @StrikerLUL
+
+# Was auf fremden Rechnern ausgerollt wird.
+/install.sh                 @StrikerLUL
+/deploy/                    @StrikerLUL
+/.github/workflows/         @StrikerLUL

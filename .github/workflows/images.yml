@@ -1,0 +1,115 @@
+# Fertige Images nach GHCR.
+#
+# Warum: bisher baute jeder VPS bei jedem Update beide Images selbst. Das
+# kostet Minuten, RAM und Build-Werkzeug auf einer Maschine, die eigentlich
+# nur Deals einsammeln soll - und es kann auf dem Zielrechner scheitern,
+# obwohl die CI gruen war.
+#
+# Getaggt wird unter anderem mit "sha-<commit>". Das ist der wichtige Teil:
+# der Auto-Updater auf dem VPS zieht genau das Image zu dem Commit, den er
+# gerade ausgecheckt hat. Passt keines (eigener Commit, eigener Fork),
+# baut er wie bisher selbst.
+name: Images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  bauen:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write      # fuer die schluessellose Signatur
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Backend
+            image: sparbit-backend
+            context: .
+            dockerfile: backend/Dockerfile
+          - name: Oberflaeche
+            image: sparbit-frontend
+            context: ./frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Anmelden
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Namen und Marken
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=SparBit ${{ matrix.name }}
+            org.opencontainers.image.description=Selbstgehostete Deal- und Freebie-Zentrale
+            org.opencontainers.image.licenses=MIT
+
+      - name: Bauen und hochladen
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # arm64 ist kein Luxus: die guenstigen VPS und die Heim-Server
+          # (Raspberry Pi, Oracle Ampere) sind genau das.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      # Wer ein Image zieht, soll pruefen koennen, dass es aus dieser CI
+      # kommt und nicht von jemandem, der sich Zugang zur Registry
+      # verschafft hat. Schluessellos - es gibt keinen privaten Schluessel,
+      # der irgendwo liegen und abhandenkommen koennte.
+      - name: Signatur
+        uses: sigstore/cosign-installer@v3
+      - name: Signieren
+        env:
+          MARKEN: ${{ steps.meta.outputs.tags }}
+          VERWEIS: ${{ steps.build.outputs.digest }}
+        run: |
+          printf '%s' "$MARKEN" | while read -r marke; do
+            [ -n "$marke" ] || continue
+            cosign sign --yes "${marke%%:*}@${VERWEIS}"
+          done
+
+      - name: Herkunftsnachweis
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

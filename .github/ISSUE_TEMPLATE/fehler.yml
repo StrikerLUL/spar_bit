@@ -1,0 +1,72 @@
+name: Fehler melden
+description: Etwas tut nicht, was es tun sollte
+labels: ["fehler"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Sicherheitslücken bitte nicht hier.** Der Weg dafür steht in
+        [SECURITY.md](../blob/main/SECURITY.md).
+
+        Vor dem Melden hilft fast immer: `python cli.py status` und der
+        Abschnitt *Logs & System* in der Oberfläche.
+
+  - type: textarea
+    id: was
+    attributes:
+      label: Was passiert
+      description: Was du gesehen hast — und was du stattdessen erwartet hättest.
+      placeholder: |
+        Die Quelle mydealz steht seit gestern auf "Fehler".
+        Erwartet hätte ich neue Deals, wie in der Woche davor.
+    validations:
+      required: true
+
+  - type: textarea
+    id: nachstellen
+    attributes:
+      label: Wie es sich nachstellen lässt
+      description: Die Schritte, in der Reihenfolge. Lieber einer zu viel als einer zu wenig.
+      placeholder: |
+        1. Quellen öffnen
+        2. Bei mydealz auf "Jetzt testen"
+        3. Meldung: …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Meldung im Klartext
+      description: >
+        Aus *Logs & System* oder `docker compose logs backend`.
+        Zugangsdaten, Token und Webhook-Adressen bitte vorher entfernen —
+        sie stehen manchmal in den Zeilen.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / Schema-Stand
+      description: Steht unter *Logs & System* oder in `/api/system/info`.
+      placeholder: "v1.2.0, Schema 14"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: betrieb
+    attributes:
+      label: Wie betrieben
+      options:
+        - Docker (install.sh auf einem VPS)
+        - Docker (docker compose von Hand)
+        - Lokal mit run.py
+        - Anders
+    validations:
+      required: true
+
+  - type: input
+    id: umgebung
+    attributes:
+      label: Betriebssystem und Python-/Node-Version
+      placeholder: "Debian 12, Python 3.11.9"

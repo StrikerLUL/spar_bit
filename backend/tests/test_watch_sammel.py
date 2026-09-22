@@ -25,7 +25,7 @@ def kein_netz(client, monkeypatch):
     Haengt bewusst an `client`: der laedt die app-Module neu, ein vorher
     gesetzter Patch waere danach weg und der Test ginge wirklich ins Netz.
     """
-    async def nichts(db, eintrag, http):
+    async def nichts(db, eintrag, http, render=None):
         # Wie das Original: der Fehler wird festgeschrieben, sonst wirft
         # das db.refresh() im Router ihn wieder weg.
         eintrag.letzter_fehler = "Seite nicht lesbar"

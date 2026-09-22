@@ -1,0 +1,77 @@
+# Abhaengigkeiten altern still. Ohne Druck von aussen steht hier in einem
+# Jahr eine httpx-Version, die niemand mehr kennt - und das Update wird
+# dann ein Umbau statt einer Zeile.
+#
+# Woechentlich, gruppiert: fuenf offene PRs fuer fuenf Patch-Updates liest
+# niemand. Eine Sammel-PR pro Oekosystem schon.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels: ["abhaengigkeiten", "backend"]
+    commit-message:
+      prefix: "deps"
+    groups:
+      # Patch- und Minor-Updates zusammen: sie sollen durchlaufen, ohne
+      # dass jemand fuenf Mal dasselbe CI-Ergebnis anschaut.
+      python-klein:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Hauptversionen kommen einzeln - dort ist die Frage nicht "gruen?",
+      # sondern "was hat sich geaendert?".
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels: ["abhaengigkeiten", "frontend"]
+    commit-message:
+      prefix: "deps"
+    groups:
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      werkzeuge:
+        patterns: ["eslint*", "@eslint/*", "typescript*", "vite*", "@vitejs/*", "vitest", "@testing-library/*"]
+      npm-klein:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: ["abhaengigkeiten", "ci"]
+    commit-message:
+      prefix: "deps"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: monthly
+    labels: ["abhaengigkeiten", "docker"]
+
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: monthly
+    labels: ["abhaengigkeiten", "docker"]
