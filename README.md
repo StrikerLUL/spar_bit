@@ -21,7 +21,7 @@ Kanäle melden — bis hin zu Push direkt in den Browser.
 Update-Knopf im UI:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/StrikerLUL/spar_bit/refs/heads/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/StrikerLUL/spar_bit/HEAD/install.sh | bash
 ```
 
 **Auf dem eigenen Rechner** — kein Docker, keine Konfigurationsdatei:

@@ -6,11 +6,12 @@
 # wird - und an denen ein Linter nichts sieht.
 name: CodeQL
 
+# Ohne Branchnamen (siehe images.yml): dieses Repository hat keinen main,
+# und ein fest eingetragener Name laesst den Workflow nie laufen.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
-    branches: [main]
   schedule:
     # Montags frueh: neue Regeln erscheinen auch ohne neuen Code.
     - cron: "17 5 * * 1"
@@ -23,6 +24,12 @@ jobs:
   analyse:
     name: Analyse (${{ matrix.sprache }})
     runs-on: ubuntu-latest
+    # Auf dem Standard-Branch und bei jedem Pull Request. Nicht bei jedem
+    # Push auf jeden Zweig: CodeQL braucht Minuten, und zweimal dasselbe
+    # zu analysieren sagt nichts Neues.
+    if: >-
+      github.event_name != 'push'
+      || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     permissions:
       security-events: write
       actions: read

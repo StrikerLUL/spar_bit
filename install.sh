@@ -2,7 +2,12 @@
 #
 # SparBit auf einem VPS einrichten.
 #
-#   curl -fsSL https://raw.githubusercontent.com/StrikerLUL/spar_bit/refs/heads/claude/deal-freebie-zentrale-gpi8dr/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/StrikerLUL/spar_bit/HEAD/install.sh | bash
+#
+# HEAD statt eines Branchnamens: das ist immer der Standard-Branch des
+# Repositories, auch nachdem er umbenannt wurde. Ein fest eingetragener
+# Name ergibt nach einer Umbenennung einen 404 - und curl | bash zeigt
+# dann gar nichts an, sondern tut einfach nichts.
 #
 # Oder, wenn das Repo schon da ist:  ./install.sh
 #

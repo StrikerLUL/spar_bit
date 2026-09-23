@@ -251,11 +251,18 @@ Bei jedem Push:
 | `pip-audit`, `npm audit` | bekannte Lücken in Abhängigkeiten — als Warnung, nicht blockierend: ein Fund ohne verfügbares Update soll sichtbar sein, aber nicht alle offenen PRs rot färben |
 | Docker-Images, `docker compose config` | auch der HTTPS-Pfad mit Caddy |
 
-Bei einem Push auf `main` und bei einem Tag `v*` baut ein zweiter Workflow
-beide Images für `amd64` und `arm64`, signiert sie schlüssellos über sigstore
-und lädt sie nach `ghcr.io` — unter anderem mit der Marke `sha-<commit>`.
-Genau die zieht der Auto-Updater auf dem VPS: das Image zum ausgecheckten
-Commit, und wenn es keines gibt (eigener Fork), baut er wie zuvor selbst.
+Bei einem Push auf den **Standard-Branch** und bei einem Tag `v*` baut ein
+zweiter Workflow beide Images für `amd64` und `arm64`, signiert sie
+schlüssellos über sigstore und lädt sie nach `ghcr.io` — unter anderem mit
+den Marken `latest` und `sha-<commit>`. Genau die zweite zieht der
+Auto-Updater auf dem VPS: das Image zum ausgecheckten Commit, und wenn es
+keines gibt (eigener Fork), baut er wie zuvor selbst.
+
+Der Branch steht dabei **nicht** im Workflow. Er wird zur Laufzeit gegen
+`github.event.repository.default_branch` geprüft. Ein fest eingetragenes
+`main` wäre in diesem Repository still wirkungslos gewesen — der
+Standard-Branch heißt anders, und ein Workflow, der nie läuft, meldet sich
+nicht: kein roter Lauf, keine Fehlermeldung, nur keine Images.
 
 Bei einem Tag baut ein dritter Workflow außerdem die Oberfläche und hängt sie
 als `frontend-dist.tar.gz` samt Prüfsumme, Stückliste und Herkunftsnachweis

@@ -93,6 +93,12 @@ Update-Knopf im UI arbeitet, liest hier, was der nächste Klick bringt.
   (rückwirkend eingeteilt), Warengruppen-Filter, Render-Schalter.
 * **Neue Einstellungen:** `SPARBIT_BEZUG`, `SPARBIT_TAG`, `SPARBIT_SCHEDULER`
   — alle mit Vorgaben, die den bisherigen Betrieb unverändert lassen.
+* **Die Install-Zeile im README zeigte auf einen Branch, den es nicht gibt**
+  (`refs/heads/main`) — ein 404, und `curl | bash` tut dann einfach nichts.
+  Jetzt `HEAD`: immer der Standard-Branch, auch nach einer Umbenennung.
+  Dieselbe Falle steckte in den Workflows für Images und CodeQL: ein fest
+  eingetragenes `main` ließ sie stillschweigend nie laufen. Sie prüfen den
+  Standard-Branch jetzt zur Laufzeit.
 
 ### Für Mitwirkende
 

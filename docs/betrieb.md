@@ -305,7 +305,7 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 | `SPARBIT_PLUGIN_DIR` | – | Ordner mit eigenen Quellen-Modulen |
 | `SPARBIT_DB_URL_OVERRIDE` | – | Andere Datenbank statt SQLite, z. B. Postgres |
 | `SPARBIT_BEZUG` | `auto` | `auto` = fertiges Image ziehen, wenn es zum Commit eines gibt; `build` = immer selbst bauen |
-| `SPARBIT_TAG` | `main` | Welche Marke `docker compose up` von Hand zieht. Der Updater setzt sie selbst auf `sha-<commit>` |
+| `SPARBIT_TAG` | `latest` | Welche Marke `docker compose up` von Hand zieht. Der Updater setzt sie selbst auf `sha-<commit>` |
 | `SPARBIT_IMAGE_BACKEND` / `_FRONTEND` | ghcr.io/strikerlul/… | Eigene Registry, z. B. im Firmennetz |
 | `SPARBIT_SCHEDULER` | `auto` | `aus` = der API-Prozess sammelt nicht ein; dann muss ein Worker laufen |
 
