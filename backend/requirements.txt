@@ -15,7 +15,7 @@ python-multipart>=0.0.32
 anyio>=4.14.2,<5.0
 # Verkleinert zwischengespeicherte Deal-Bilder. Fehlt Pillow,
 # werden sie unveraendert abgelegt - SparBit laeuft trotzdem.
-Pillow>=11.0
+Pillow>=12.3.0
 # Verschluesselte Sicherungen (AES-256-GCM) und die Signatur der
 # Push-Benachrichtigungen (VAPID). Fehlt das Paket, laeuft SparBit
 # weiter - die Sicherung ist dann unverschluesselt und Web-Push aus.
