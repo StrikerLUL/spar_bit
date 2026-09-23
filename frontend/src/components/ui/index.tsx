@@ -236,19 +236,29 @@ export const Switch = ({
   onChange,
   disabled,
   label,
+  /** Die id eines danebenstehenden <Label>. Ein htmlFor waere hier
+   *  wirkungslos: der Schalter ist ein <button>, kein Eingabefeld, und
+   *  ein Label zeigt nur auf Formularelemente. aria-labelledby tut, was
+   *  htmlFor tun sollte. */
+  labelledBy,
+  id,
   className,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
   label?: string;
+  labelledBy?: string;
+  id?: string;
   className?: string;
 }) => (
   <button
     type="button"
     role="switch"
+    id={id}
     aria-checked={checked}
-    aria-label={label}
+    aria-label={labelledBy ? undefined : label}
+    aria-labelledby={labelledBy}
     disabled={disabled}
     onClick={() => onChange(!checked)}
     className={cn(

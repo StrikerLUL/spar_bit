@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Sicherheitslücke
+    url: https://github.com/StrikerLUL/spar_bit/security/advisories/new
+    about: Bitte nicht als Issue — der Weg steht in SECURITY.md.
+  - name: Quelle steht auf "ungeprüft"
+    url: https://github.com/StrikerLUL/spar_bit/blob/main/ENDPOINTS.md
+    about: Das ist Absicht. ENDPOINTS.md erklärt, wie du sie auf deinem Rechner verifizierst.

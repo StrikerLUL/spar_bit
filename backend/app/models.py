@@ -161,7 +161,17 @@ class Deal(Base):
     ist_gratis: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     haendler: Mapped[str | None] = mapped_column(String(128), index=True)
+    # Achtung, zwei verschiedene Dinge mit aehnlichem Namen:
+    # `kategorie` sagt, aus welcher Art Quelle der Fund kam ("community",
+    # "gaming", "reddit") - historisch gewachsen, und Regeln filtern
+    # danach. `warengruppe` sagt, was es ist (Elektronik, Haushalt ...).
+    # Getrennt gelassen, weil ein umgedeutetes Feld jede bestehende
+    # Regel still anders wirken liesse. Siehe app/warengruppe.py.
     kategorie: Mapped[str | None] = mapped_column(String(64))
+    warengruppe: Mapped[str | None] = mapped_column(String(32), index=True)
+    # Woher die Warengruppe kommt: das ausloesende Stichwort, oder
+    # "modell", wenn ein lokales Sprachmodell geraten hat.
+    warengruppe_quelle: Mapped[str | None] = mapped_column(String(64))
     quelle: Mapped[str] = mapped_column(String(64), index=True)
     temperatur: Mapped[float | None] = mapped_column(Float)
     tags: Mapped[list] = mapped_column(JSON, default=list)
@@ -205,6 +215,11 @@ class Deal(Base):
     alarm_preis: Mapped[float | None] = mapped_column(Float)
     alarm_ausgeloest: Mapped[datetime | None] = mapped_column(UTCDateTime)
     notiz: Mapped[str | None] = mapped_column(Text)
+
+    # Gutschein-Code aus dem Deal-Text, falls einer drinsteht. Er stand
+    # vorher nur im Fliesstext und ging in der Meldung unter - dabei ist
+    # er genau das, was man im Laden braucht. Siehe app/gutschein.py.
+    gutschein_code: Mapped[str | None] = mapped_column(String(64))
 
     # 18+ - siehe app/erwachsen.py. Deals mit dieser Marke erscheinen
     # ausschliesslich auf der eigenen Seite; jede andere Abfrage klammert
@@ -272,6 +287,9 @@ class Rule(Base):
 
     sources: Mapped[list] = mapped_column(JSON, default=list)     # leer = alle
     kategorien: Mapped[list] = mapped_column(JSON, default=list)
+    # Nicht dasselbe wie `kategorien`: die filtern nach Art der Quelle,
+    # diese nach der Ware (Elektronik, Haushalt ...). Siehe Deal.
+    warengruppen: Mapped[list] = mapped_column(JSON, default=list)
     haendler: Mapped[list] = mapped_column(JSON, default=list)
 
     channels: Mapped[list] = mapped_column(JSON, default=list)    # Channel-IDs
@@ -478,12 +496,21 @@ class WatchItem(Base):
     ziel_preis: Mapped[float | None] = mapped_column(Float)
     aktiv: Mapped[bool] = mapped_column(Boolean, default=True)
     intervall_minuten: Mapped[int] = mapped_column(Integer, default=180)
+    # Diesen Artikel ueber den Render-Dienst holen, statt das rohe HTML
+    # zu lesen. Nur fuer Shops, die ihren Preis erst per JavaScript
+    # einsetzen - siehe app/pricewatch.py. Ohne eingerichteten Dienst
+    # wirkungslos.
+    rendern: Mapped[bool] = mapped_column(Boolean, default=False)
 
     letzter_preis: Mapped[float | None] = mapped_column(Float)
     waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
     bester_preis: Mapped[float | None] = mapped_column(Float)
     bild: Mapped[str | None] = mapped_column(Text)
     haendler: Mapped[str | None] = mapped_column(String(128))
+    # Versandkosten, falls der Shop sie auszeichnet. NULL heisst "steht
+    # nicht da" - nicht "kostenlos". Zwei Angebote sind erst vergleichbar,
+    # wenn beide Zahlen dieselbe Frage beantworten.
+    versandkosten: Mapped[float | None] = mapped_column(Float)
 
     letzter_lauf: Mapped[datetime | None] = mapped_column(UTCDateTime)
     letzter_erfolg: Mapped[datetime | None] = mapped_column(UTCDateTime)
@@ -502,8 +529,36 @@ class WatchPrice(Base):
                                                      ondelete="CASCADE"), index=True)
     preis: Mapped[float] = mapped_column(Float)
     waehrung: Mapped[str] = mapped_column(String(8), default="EUR")
+    # Mitgeschrieben, damit der Verlauf nicht springt, wenn ein Shop den
+    # Artikel billiger macht und den Versand teurer.
+    versand: Mapped[float | None] = mapped_column(Float)
     ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow,
                                          index=True)
+
+
+class EventLog(Base):
+    """Ereignisse fuer den Live-Ticker, wenn der Scheduler woanders laeuft.
+
+    Im Normalfall gibt es diese Tabelle zwar, aber niemand schreibt
+    hinein: Scheduler und API teilen sich einen Prozess, und der Broker
+    reicht die Ereignisse direkt weiter.
+
+    Laeuft der Scheduler als eigener Dienst (SPARBIT_SCHEDULER=aus plus
+    ein Worker), geht das nicht mehr - zwei Prozesse teilen keine
+    Warteschlange. Dann schreibt der Worker hier hinein und der
+    API-Prozess liest alle zwei Sekunden nach. Umstaendlicher als ein
+    Message-Broker, aber es kommt keine weitere Software dazu, die
+    laufen, aktualisiert und gesichert werden muss.
+
+    Die Tabelle ist ein Ringpuffer: das Aufraeumen wirft alles weg, was
+    aelter als ein paar Minuten ist. Wer nicht zusieht, verpasst nichts,
+    was nicht ohnehin in den Deals steht.
+    """
+    __tablename__ = "event_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event: Mapped[str] = mapped_column(String(32), index=True)
+    daten: Mapped[dict] = mapped_column(JSON, default=dict)
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
 
 
 class Interaction(Base):

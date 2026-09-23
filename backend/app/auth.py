@@ -123,11 +123,37 @@ def create_user(db: Session, username: str, password: str,
     return user
 
 
-def nur_admin(user: User = Depends(current_user)) -> User:
+# Schluessel in der Settings-Tabelle: verlangt die Anlage von ihren
+# Administratoren einen zweiten Faktor?
+ZWEIFAKTOR_PFLICHT = "zweifaktor_pflicht"
+
+
+def zweifaktor_pflicht(db: Session) -> bool:
+    from .db import get_setting
+    return bool(get_setting(db, ZWEIFAKTOR_PFLICHT, False))
+
+
+def nur_admin(user: User = Depends(current_user),
+              db: Session = Depends(get_db)) -> User:
     """Dependency fuer alles, was die ganze Installation betrifft."""
     if user.rolle != ADMIN:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Das darf nur ein Administrator.")
+
+    # Ein Admin-Konto kann Quellen umstellen, Sicherungen herunterladen
+    # (in denen die Geheimnisse *aller* Konten stehen) und Updates
+    # einspielen. Wer das darf, soll nicht an einem wiederverwendeten
+    # Passwort haengen.
+    #
+    # Gesperrt werden nur die Admin-Rechte, nicht die Anmeldung: der
+    # zweite Faktor laesst sich einrichten, ohne Admin zu sein - sonst
+    # waere diese Pflicht eine Aussperrung statt einer Huerde.
+    if zweifaktor_pflicht(db) and not user.totp_aktiv:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Diese Anlage verlangt von Administratoren einen zweiten Faktor. "
+            "Richte ihn unter „Konto → Zweiter Faktor“ ein; danach stehen die "
+            "Admin-Funktionen wieder offen.")
     return user
 
 

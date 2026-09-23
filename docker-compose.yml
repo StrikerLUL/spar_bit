@@ -2,6 +2,12 @@ name: sparbit
 
 services:
   backend:
+    # Fertiges Image aus der GitHub-Registry. Steht es lokal nicht bereit,
+    # baut Compose aus dem Quellbaum daneben - ein Fork oder ein eigener
+    # Commit laeuft also weiter, ohne dass hier etwas umgestellt werden
+    # muss. SPARBIT_TAG setzt der Auto-Updater auf den Commit, den er
+    # gerade ausgecheckt hat; "main" ist der Stand ohne Updater.
+    image: ${SPARBIT_IMAGE_BACKEND:-ghcr.io/strikerlul/sparbit-backend}:${SPARBIT_TAG:-main}
     build:
       # Wurzel als Kontext, damit cli.py mit ins Image geht.
       context: .
@@ -33,6 +39,7 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
   frontend:
+    image: ${SPARBIT_IMAGE_FRONTEND:-ghcr.io/strikerlul/sparbit-frontend}:${SPARBIT_TAG:-main}
     build:
       context: ./frontend
       args:
@@ -59,6 +66,39 @@ services:
       resources:
         limits:
           memory: 128M
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Der Scheduler als eigener Dienst. Laeuft nur mit "--profile worker",
+  # und nur dann sinnvoll, wenn in der .env SPARBIT_SCHEDULER=aus steht -
+  # sonst sammeln beide ein und jeder Deal kommt doppelt.
+  #
+  # Fuer den Normalfall ist das nicht noetig: ein Prozess reicht. Gedacht
+  # fuer Anlagen, in denen das Einsammeln die Oberflaeche traege macht.
+  worker:
+    image: ${SPARBIT_IMAGE_BACKEND:-ghcr.io/strikerlul/sparbit-backend}:${SPARBIT_TAG:-main}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: sparbit-worker
+    restart: unless-stopped
+    profiles: ["worker"]
+    command: ["python", "-m", "app.worker"]
+    env_file: [.env]
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      SPARBIT_DATA_DIR: /data
+      SPARBIT_CLAIMER_LOG_DIR: /claimer-data
+      # Hier laeuft der Scheduler - egal, was fuer den API-Prozess gilt.
+      SPARBIT_SCHEDULER: auto
+    volumes:
+      - sparbit-data:/data
+      - claimer-data:/claimer-data:ro
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

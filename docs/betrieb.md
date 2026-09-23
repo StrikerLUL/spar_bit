@@ -304,6 +304,10 @@ der Live-Ticker „verbunden" zeigt. In den Entwicklertools muss das Cookie
 | `SPARBIT_ERLAUBE_PRIVATE_ZIELE` | `false` | Feeds und Shops im eigenen Netz abrufen dürfen |
 | `SPARBIT_PLUGIN_DIR` | – | Ordner mit eigenen Quellen-Modulen |
 | `SPARBIT_DB_URL_OVERRIDE` | – | Andere Datenbank statt SQLite, z. B. Postgres |
+| `SPARBIT_BEZUG` | `auto` | `auto` = fertiges Image ziehen, wenn es zum Commit eines gibt; `build` = immer selbst bauen |
+| `SPARBIT_TAG` | `main` | Welche Marke `docker compose up` von Hand zieht. Der Updater setzt sie selbst auf `sha-<commit>` |
+| `SPARBIT_IMAGE_BACKEND` / `_FRONTEND` | ghcr.io/strikerlul/… | Eigene Registry, z. B. im Firmennetz |
+| `SPARBIT_SCHEDULER` | `auto` | `aus` = der API-Prozess sammelt nicht ein; dann muss ein Worker laufen |
 
 Die vollständige Liste mit Erklärungen steht in
 [.env.example](../.env.example).
@@ -317,8 +321,35 @@ die man mitnehmen kann. Wer schon ein Postgres betreibt:
 SPARBIT_DB_URL_OVERRIDE=postgresql+psycopg://sparbit:geheim@db/sparbit
 ```
 
-Die Volltextsuche fällt dort automatisch auf `LIKE` zurück; FTS5 gibt es nur
-in SQLite.
+**Die Suchsyntax bleibt dieselbe.** Bis vor Kurzem fiel die Suche auf
+Postgres stillschweigend auf `LIKE` zurück — die dokumentierte Syntax
+funktionierte also genau dann nicht, wenn jemand die ebenfalls dokumentierte
+Postgres-Option nutzte. Jetzt übersetzt derselbe Parser in `tsquery`:
+`lego technic` wird zu `lego & technic`, `kopfhör*` zu `kopfhör:*`,
+`"nintendo switch"` zu `nintendo <-> switch`. Ein GIN-Index auf dem
+Suchausdruck entsteht beim Start.
+
+### Den Scheduler getrennt betreiben
+
+Für einen Haushalt nicht nötig: SparBit ist ein Prozess, ein Neustart, ein
+Protokoll. Wenn das Einsammeln die Oberfläche träge macht, geht auch getrennt:
+
+```bash
+# .env
+SPARBIT_SCHEDULER=aus            # gilt für den API-Prozess
+
+docker compose --profile worker up -d
+```
+
+**Genau einer.** Zwei Worker auf derselben Datenbank fragen jede Quelle
+doppelt ab und verschicken jede Meldung zweimal — und das fällt niemandem als
+Fehler auf, es sieht aus, als wäre der Feed gut gefüllt. Eine Sperre dagegen
+wäre ein verteiltes Schloss für einen Fall, den es hier nicht gibt.
+
+Der Live-Ticker läuft weiter: der Worker spiegelt seine Ereignisse in die
+Datenbank, der API-Prozess liest nach — aber nur, solange jemand zusieht. Der
+Telegram-Bot wandert mit in den Worker; Long Polling ist eine
+Dauerverbindung, und zwei davon würden sich die Nachrichten wegnehmen.
 
 ## Automatische Sicherung
 

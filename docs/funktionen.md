@@ -6,7 +6,7 @@ Der vollstaendige Funktionsumfang, mit den Gruenden dahinter.
 
 ### Finden
 
-**14 Quellen als Plugins**, jede einzeln schaltbar mit eigenem Intervall:
+**17 Quellen als Plugins**, jede einzeln schaltbar mit eigenem Intervall:
 
 | Gruppe | Quellen |
 |---|---|
@@ -14,7 +14,15 @@ Der vollstaendige Funktionsumfang, mit den Gruenden dahinter.
 | Blogs | Sparhamster.at, Schnäppchenfuchs |
 | Reddit | GameDeals, FreeGameFindings, freebies, googleplaydeals, AppHookup, Schnaeppchen — im UI pflegbar |
 | Gaming | Epic Games Store, GOG, Steam, CheapShark, IsThereAnyDeal, GG.deals |
+| International | Slickdeals (US), OzBargain (AU) |
 | Eigene | beliebige RSS/Atom-Feeds (z. B. deine Geizhals-Wunschliste) |
+
+Die beiden internationalen Quellen rechnen in **USD** bzw. **AUD**. Die
+Währung wird dabei nicht geraten: steht im Titel ein Währungszeichen, gewinnt
+das, sonst gilt die Vorgabe der Quelle. Ohne diese Festlegung liefe ein
+„$ 199" als EUR durch jede Preisregel — und „max. 200 €" würde bei
+umgerechnet 180 € mal greifen und mal nicht. OzBargain ist wegen der Zeitzone
+oft die erste Quelle, die einen weltweiten Preisfehler meldet.
 
 Fällt eine Quelle aus, laufen die anderen weiter. Nach fünf Fehlern in Folge
 pausiert ein Schutzschalter sie automatisch; im UI steht, warum.
@@ -28,6 +36,21 @@ denselben, die Shops für Suchmaschinen ausliefern, und dem stabilen Teil einer
 Produktseite: CSS-Klassen ändern sich bei jedem Redesign, `"@type": "Product"`
 nicht. Liefert eine Seite davon nichts, sagt SparBit das klar, statt einen
 brüchigen Selektor zu raten.
+
+**Versandkosten zählen mit**, wo der Shop sie auszeichnet: 195 € plus 9,90 €
+sind teurer als 199 € versandkostenfrei. Wichtig ist dabei der Unterschied
+zwischen *keine Angabe* und *kostenlos* — ohne ihn rechnete man für jeden Shop
+ohne Angabe mit 0 € Versand, und das ist eine erfundene Zahl. Steht nichts da,
+ist der Gesamtpreis der Artikelpreis, mit derselben Unsicherheit wie vorher.
+Gibt der Shop mehrere Lieferoptionen an, zählt die günstigste — wer Express
+will, rechnet ohnehin selbst.
+
+**Shops, die ihren Preis erst per JavaScript einsetzen**, bleiben ehrlich
+„kann ich nicht lesen". Wer sie trotzdem braucht, trägt unter *Logs & System →
+Optionale Helfer* die Adresse eines Render-Dienstes ein (browserless, ein
+eigener Playwright-Container) und schaltet ihn je Artikel frei. Bewusst nicht
+mitgeliefert: ein Browser im Image wäre ein halbes Gigabyte und ein eigener
+Angriffspfad — für eine Handvoll Shops, die das Auslesen ohnehin nicht wollen.
 
 **[Browser-Erweiterung](../browser-extension/)** für Chrome, Edge, Brave und
 Firefox — setzt Artikel in einem Klick von jeder Shop-Seite auf die
@@ -67,11 +90,66 @@ Produktvarianten bleiben getrennt: „Hades" und „Hades II", „iPhone 15" und
 
 Regeln aus Keywords (ODER), Pflicht-Keywords (UND) und Blacklist, dazu
 Preisgrenze, Mindestrabatt, „nur 0 €", Mindest-Temperatur, Preisurteil,
-**Preisfehler-Punktzahl** sowie Quellen-, Kategorie- und Händlerfilter. Priorität **SOFORT** (Push in Sekunden)
-oder **NORMAL** (Sammelmeldung).
+**Preisfehler-Punktzahl** sowie Quellen-, Warengruppen- und Händlerfilter.
+Priorität **SOFORT** (Push in Sekunden) oder **NORMAL** (Sammelmeldung).
 
 Die **Live-Vorschau** beim Bauen zeigt Trefferzahl, Beispiele, „knapp verfehlt"
 und je Deal eine Begründung, warum er getroffen oder gescheitert ist.
+
+#### Warengruppen: *was* es ist, nicht woher es kommt
+
+Zwölf Gruppen — Elektronik, Computer & Zubehör, Gaming, Haushalt & Küche,
+Werkzeug & Garten, Kleidung & Schuhe, Drogerie & Gesundheit, Lebensmittel &
+Getränke, Spielzeug, Bücher/Filme/Musik, Software & Abos, Reise & Mobilität.
+
+Erkannt wird aus **Stichwörtern im Titel**, nicht aus einem Modell — und zwar
+aus einem Grund: die Einteilung muss erklärbar sein. Landet ein Deal unter
+„Drogerie", steht daneben, welches Wort das ausgelöst hat. Ein Modell, das
+„Elektronik" sagt und nicht warum, wäre in einer Anwendung, die sonst jede
+Zahl begründet, ein Fremdkörper.
+
+Deutsch macht das kniffliger als es klingt. „Kaffeevollautomat" setzt das
+Hauptwort hinten an, also trifft `vollautomat` auch am Wortende — aber nur ab
+acht Zeichen, sonst fände `roller` jeden „Controller". Und `reis ` mit
+Leerzeichen heißt: nur das ganze Wort, sonst wäre eine Reise nach Mallorca ein
+Lebensmittel.
+
+Was sich nicht erkennen lässt, bleibt **ohne Gruppe**. „Sonstiges" wäre eine
+Antwort, die so aussieht, als hätte jemand hingesehen. In den Statistiken
+steht diese Menge ausdrücklich mit drin.
+
+Für den Rest gibt es einen optionalen Weg: ein **lokales Ollama** unter
+*Logs & System → Optionale Helfer*. Es sieht nur, was die Stichwörter nicht
+erkannt haben, darf nur aus den zwölf Gruppen wählen, und was von ihm kommt,
+wird als Schätzung gekennzeichnet. Aus, bis du es einschaltest.
+
+#### „Warum kam das nicht an?"
+
+Die Live-Vorschau beantwortet die Frage in die eine Richtung: zu einer Regel
+zeigt sie die Deals. Die Gegenrichtung fehlte — und das ist die, die man
+abends stellt, wenn ein Fund im Feed steht, aber nicht auf dem Handy war.
+
+In der Detailansicht jedes Deals steht dafür ein Knopf. Dahinter läuft
+derselbe Weg ab, den die Zustellung nimmt:
+
+| Stufe | Was sie prüft |
+|---|---|
+| 18+-Sperre | Ist der Fund als 18+ eingestuft, und ist die Zustellung dafür an? |
+| Regeln | **Jede einzelne**, mit dem Grund, woran es lag — meistens ein Stichwort, das anders geschrieben ist |
+| Preisfehler-Weg | Der zweite Weg: ohne Regel, ohne Ruhezeit. Reichen die Punkte? Wurde schon gemeldet? |
+| Pause | Ist die Zustellung global angehalten (UI oder `/pause`)? |
+| Ruhezeit | Und lässt eine SOFORT-Regel sie durch? |
+| Kanäle | Hat die treffende Regel überhaupt einen — und ist er an? |
+| Versand | Was wirklich passiert ist, mit dem Fehler im Klartext |
+
+Zwei Dinge daran sind wichtig. Erstens läuft die Diagnose **mit demselben
+Code**, der auch wirklich entscheidet — eine Diagnose, die anders rechnet als
+die Zustellung, schickt einen zum falschen Knopf. Zweitens unterscheidet sie
+die beiden Wege: bei einem gewöhnlichen Deal steht der Preisfehler-Weg zwar
+auf „gestoppt" (0 von 70 Punkten), aber grau statt rot. Richtig wäre beides,
+nur führt das eine am Thema vorbei.
+
+Auch ohne Oberfläche: `python cli.py diagnose <nr>`.
 
 **Der Feed lernt mit.** Was du dir merkst, öffnest oder mit einem Alarm
 versiehst, wertet SparBit aus — **lokal, ohne externen Dienst**. Der Feed lässt
@@ -81,7 +159,8 @@ SparBit fertige Regeln vor: *„16 von 16 gemerkten Deals passen zu ‚lego'"*.
 Solange zu wenig Signal da ist, hält es den Mund.
 
 **Suche** über SQLite-FTS5 — schnell auch bei 50.000 Deals, und mit Dingen, die
-eine einfache Suche nicht kann:
+eine einfache Suche nicht kann. Auf PostgreSQL übersetzt derselbe Parser in
+`tsquery`, die Syntax bleibt also dieselbe:
 
 | Eingabe | Bedeutung |
 |---|---|
@@ -117,9 +196,29 @@ nur dann als Preis akzeptiert, wenn sie ein **Paar** vervollständigt — es gib
 schon einen „alten" Preis und der neue liegt darunter. Ohne diese Regel meldet
 `3 für 2` einen Preis von 2 €.
 
+Steht im Text ein **Gutschein-Code**, holt SparBit ihn heraus und stellt ihn
+auf die Karte und in die Meldung — vorher stand er im Fließtext, und der wird
+gekürzt: ausgerechnet das Stück, das man an der Kasse braucht. Die eigentliche
+Aufgabe dabei ist das Nicht-Finden: ein Deal-Text ist voller Zeichenfolgen,
+die aussehen wie ein Code (`WH-1000XM5`, `XXL`, `PS5`). Gesucht wird deshalb
+nie nach dem Code allein, sondern immer nach dem Wort, das ihn ankündigt —
+und ein Kandidat gilt nur, wenn er Großbuchstaben oder eine Ziffer enthält.
+Sonst würde aus „mit dem Code sommer" ein Gutschein „SOMMER", den es nie gab.
+
 Alle Beträge werden zusätzlich in **Euro umgerechnet**, damit „max. 20 €" auch
-bei USD- und GBP-Quellen greift; in der Oberfläche steht der Gegenwert daneben
-(`29,99 $ · ≈ 27,59 €`). Preis, Streichpreis, Währung und Rabatt ziehen dabei
+bei USD-, GBP- und AUD-Quellen greift; in der Oberfläche steht der Gegenwert
+daneben (`29,99 $ · ≈ 27,59 €`). Die Kurse kommen **einmal am Tag von der
+EZB** — eine Datei, rund 3 KB, kein Schlüssel, kein Konto.
+
+Das ist der einzige ausgehende Abruf, den SparBit von sich aus macht, und
+dafür gibt es einen Grund: ein fester Kurs im Code altert still. Niemand
+bekommt eine Fehlermeldung, wenn „max. 20 €" seit einem Jahr bei 21,40 €
+zuschlägt — die Regel greift einfach ein bisschen daneben, und das fällt erst
+auf, wenn man es nachrechnet. Abschalten lässt sich der Abruf unter
+*Benachrichtigungen → Währung & Pause*; dann gilt, was du dort einträgst. Wie
+alt der Stand ist, steht in beiden Fällen daneben — ein Kurs ohne Datum sieht
+aus wie einer von heute. Ab 90 Tagen wird der Kasten gelb, und `/api/health`
+meldet einen Mangel. Preis, Streichpreis, Währung und Rabatt ziehen dabei
 immer gemeinsam um: übernimmt eine günstigere Quelle in anderer Währung den
 Deal, verschwindet der alte Streichpreis, statt mit dem neuen Währungszeichen
 stehen zu bleiben. Und ein Prozentwert wird aus den beiden angezeigten Zahlen
@@ -341,7 +440,7 @@ Das sind zwei verschiedene Probleme, und man sucht sonst am falschen Ende.
 
 ### Melden
 
-**Neun Kanäle als Plugins**, beliebig viele parallel, jeder einzeln
+**Zwölf Kanäle als Plugins**, beliebig viele parallel, jeder einzeln
 abschaltbar und mit *Test senden* sofort prüfbar:
 
 | Kanal | Wofür | Was du brauchst |
@@ -354,8 +453,19 @@ abschaltbar und mit *Test senden* sofort prüfbar:
 | **Pushover** | Push auf iOS/Android ohne eigenen Server | App-Token + Benutzerschlüssel |
 | **ntfy** | Push ohne Konto, ntfy.sh oder eigene Instanz | Topic |
 | **E-Mail** | Archiv, Weiterleitung, Filterregeln im Mailclient | SMTP-Zugang |
-| **Webhook** | Home Assistant, n8n, eigene Skripte | URL (bekommt JSON) |
+| **Webhook** | n8n, eigene Skripte | URL (bekommt JSON) |
+| **Home Assistant** | Sensor drüben, ohne Basteln | MQTT-Broker |
 | **Desktop** | derselbe Rechner, kein Konto nötig | ein Klick im Browser |
+| **Apprise** | über hundert weitere Dienste | eine Adresszeile |
+
+Für **Home Assistant** gab es schon den Webhook-Kanal. Der funktioniert, aber
+man muss drüben von Hand eine Automation bauen, das JSON auseinandernehmen und
+daraus einen Sensor basteln — eine halbe Stunde Arbeit für etwas, das MQTT von
+sich aus kann. Der eigene Kanal legt beim ersten Senden eine Beschreibung
+seiner selbst ab (MQTT-Discovery); danach steht drüben ein Gerät „SparBit" mit
+dem Sensor *Letzter Deal*, und Preis, Urteil, Gutschein-Code, Bild und Link
+hängen als Attribute daran. Alles `retain`: nach einem Neustart von Home
+Assistant steht sofort wieder der letzte Fund da statt „unbekannt".
 
 Jede Meldung trägt **das Preisurteil mit** — ein Bestpreis kommt grün, ein
 Preisfehler rot mit seiner Begründung, eine SOFORT-Regel gelb. Discord erwähnt eine Rolle nur

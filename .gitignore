@@ -50,3 +50,16 @@ backend/tests/fixtures/live/
 
 # Arbeitsverzeichnis des Auto-Updaters (Sperre, Protokoll, Sicherung)
 .update/
+
+# Playwright: Bericht, Spuren und die Wegwerf-Datenbank des Durchstichs.
+frontend/playwright-report/
+frontend/test-results/
+frontend/.e2e-daten/
+frontend/e2e/.auth/
+frontend/coverage/
+
+# Das OpenAPI-Schema ist ein Zwischenschritt: erzeugt aus dem Backend,
+# verbraucht von openapi-typescript. Eingecheckt wird das Ergebnis
+# (src/lib/api-typen.ts), damit die CI vergleichen kann - die Zwischenform
+# waere nur ein zweiter Ort, an dem dasselbe steht.
+frontend/openapi.json

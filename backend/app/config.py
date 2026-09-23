@@ -102,6 +102,17 @@ class Settings(BaseSettings):
     # es an; von Hand:  openssl rand -hex 32
     update_token: str = ""
 
+    # Laeuft der Scheduler in diesem Prozess?
+    #   "auto" - ja (der Normalfall, ein Prozess fuer alles)
+    #   "aus"  - nein; dann muss ein Worker laufen (python -m app.worker),
+    #            sonst sammelt niemand Deals ein. Fuer grosse Anlagen, in
+    #            denen das Einsammeln die Oberflaeche nicht bremsen soll.
+    scheduler: str = "auto"
+
+    @property
+    def scheduler_hier(self) -> bool:
+        return str(self.scheduler).strip().lower() not in {"aus", "off", "0", "false"}
+
     # Wo der lokale Start lauscht.
     host: str = "127.0.0.1"
     port: int = 8000

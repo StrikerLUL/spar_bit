@@ -16,6 +16,7 @@ from ..pricefehler import HEISS as PF_HEISS
 from ..pricefehler import VERDACHT as PF_VERDACHT
 from ..search import fts_verfuegbar, match_bedingung
 from ..verdict import mindestens
+from ..warengruppe import label as warengruppe_label
 
 router = APIRouter(prefix="/api", tags=["deals"],
                    dependencies=[Depends(current_user)])
@@ -28,6 +29,10 @@ def _deal_dict(d: Deal) -> dict:
         "originalpreis": d.originalpreis, "rabatt_prozent": d.rabatt_prozent,
         "waehrung": d.waehrung, "ist_gratis": d.ist_gratis,
         "haendler": d.haendler, "kategorie": d.kategorie, "quelle": d.quelle,
+        "warengruppe": d.warengruppe,
+        "warengruppe_label": warengruppe_label(d.warengruppe),
+        "warengruppe_quelle": d.warengruppe_quelle,
+        "gutschein_code": d.gutschein_code,
         "temperatur": d.temperatur, "tags": d.tags or [],
         "veroeffentlicht_am": d.veroeffentlicht_am, "first_seen": d.first_seen,
         "last_seen": d.last_seen, "seen_count": d.seen_count,
@@ -58,6 +63,7 @@ def list_deals(
     max_preis: float | None = None,
     bookmarked: bool = False,
     urteil: str | None = None,
+    warengruppe: str | None = None,
     preisfehler: str | None = None,
     bereich: str = "normal",
     sortierung: str = "neu",
@@ -100,6 +106,8 @@ def list_deals(
     if urteil:
         # "mindestens gut" heisst: gut, sehr gut oder Bestpreis.
         conditions.append(Deal.urteil.in_(mindestens(urteil)))
+    if warengruppe:
+        conditions.append(Deal.warengruppe == warengruppe)
     if preisfehler:
         # "verdacht" schliesst "heiss" mit ein - wer Verdachtsfaelle sehen
         # will, will die bestaetigten erst recht sehen.

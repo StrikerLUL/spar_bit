@@ -1101,6 +1101,142 @@ def befehl_deals(args) -> int:
 
 # --- Argumente -------------------------------------------------------------
 
+def befehl_diagnose(args) -> int:
+    """Warum kam dieser Fund nicht an?
+
+    Dieselbe Stufenliste wie im UI - nur dass sie auch dann zu haben
+    ist, wenn der Server aus ist und man gerade herausfinden will,
+    warum.
+    """
+    from app.db import SessionLocal
+    from app.diagnose import DURCH, GESTOPPT, diagnose
+    from app.models import Deal
+
+    with SessionLocal() as db:
+        deal = db.get(Deal, args.deal_id)
+        if deal is None:
+            return fehler(f"Keinen Deal mit der Nummer {args.deal_id} gefunden.")
+        bericht = diagnose(db, deal)
+
+    print()
+    print("  " + fett(beschnitten(bericht["titel"], 78)))
+    print(grau(f"  Deal #{bericht['deal_id']} · Weg: {bericht['weg']}"))
+    print()
+    for stufe in bericht["stufen"]:
+        if stufe["stand"] == DURCH:
+            marke = gruen("✓")
+        elif stufe["stand"] == GESTOPPT:
+            # Eine Stufe, die nicht auf dem gegangenen Weg liegt, ist
+            # kein Hindernis - sie grau zu zeichnen spart die Frage,
+            # warum da ein rotes Kreuz steht, obwohl alles ankam.
+            marke = rot("✗") if stufe.get("blockiert", True) else grau("·")
+        else:
+            marke = gelb("!")
+        print(f"  {marke} {fett(stufe['name'])}: {stufe['text']}")
+        if stufe.get("rat"):
+            print(grau(f"      → {stufe['rat']}"))
+        for zeile in stufe.get("details", []):
+            name = zeile.get("regel") or zeile.get("kanal") or ""
+            print(grau(f"      {beschnitten(name, 24):26} "
+                       f"{zeile.get('stand', ''):14} {zeile.get('text', '')}"))
+    print()
+    print("  " + fett("Fazit: ") + bericht["fazit"])
+    if bericht["zugestellt"]:
+        print(gruen("  Diese Meldung ist rausgegangen."))
+    print()
+    return 0
+
+
+def befehl_warengruppen(args) -> int:
+    """Was faellt hier eigentlich an - nach Ware, nicht nach Quelle."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from app.db import SessionLocal
+    from app.models import Deal, utcnow
+    from app.warengruppe import label
+
+    with SessionLocal() as db:
+        zeilen = db.execute(
+            select(Deal.warengruppe, func.count(Deal.id),
+                   func.avg(Deal.rabatt_prozent))
+            .where(Deal.first_seen >= utcnow() - timedelta(days=args.tage),
+                   Deal.erwachsen.is_(False))
+            .group_by(Deal.warengruppe)
+            .order_by(func.count(Deal.id).desc())
+        ).all()
+
+    if not zeilen:
+        print(grau("  (noch keine Deals im gewählten Zeitraum)\n"))
+        return 0
+
+    gesamt = sum(z[1] for z in zeilen)
+    print()
+    tabelle(["Warengruppe", "Deals", "Anteil", "Ø Rabatt"],
+            [[label(g) or grau("ohne Gruppe"), str(n),
+              f"{n / gesamt * 100:.0f} %",
+              f"{float(r or 0):.0f} %"] for g, n, r in zeilen])
+    print(grau(f"\n  {gesamt} Deals der letzten {args.tage} Tage.\n"))
+    return 0
+
+
+def befehl_kurse(args) -> int:
+    """Wechselkurse ansehen und holen.
+
+    Ein veralteter Kurs meldet sich nie von selbst - darum steht hier
+    das Datum gleich neben den Zahlen.
+    """
+    import asyncio
+
+    from app import currency
+    from app.db import SessionLocal, get_setting, set_setting
+
+    with SessionLocal() as db:
+        if args.automatisch:
+            set_setting(db, currency.SCHLUESSEL_AUTO, args.automatisch == "an")
+            db.commit()
+            print(gruen(f"  Automatische Kursaktualisierung: {args.automatisch}\n"))
+
+        if args.jetzt:
+            from app.http import PoliteClient
+
+            async def hole():
+                klient = PoliteClient()
+                try:
+                    return await currency.hole(klient)
+                finally:
+                    await klient.aclose()
+
+            try:
+                kurse, stand = asyncio.run(hole())
+            except Exception as exc:
+                return fehler(f"Kurse nicht geholt: {exc}")
+            set_setting(db, currency.SCHLUESSEL_KURSE, kurse)
+            set_setting(db, currency.SCHLUESSEL_STAND, stand)
+            db.commit()
+            currency.set_rates(kurse, stand)
+            print(gruen(f"  Kurse der EZB vom {stand} übernommen.\n"))
+
+        kurse = get_setting(db, currency.SCHLUESSEL_KURSE) or currency.DEFAULT_RATES
+        stand = get_setting(db, currency.SCHLUESSEL_STAND)
+        automatisch = bool(get_setting(db, currency.SCHLUESSEL_AUTO, True))
+
+    alter = currency.alter_in_tagen(stand)
+    print()
+    tabelle(["Währung", "1 Einheit = … EUR"],
+            [[k, f"{float(v):.4f}"] for k, v in sorted(kurse.items()) if k != "EUR"])
+    if stand:
+        satz = f"  Stand: {stand}"
+        satz += f" ({alter} Tage alt)" if alter is not None else ""
+        print(rot(satz) if currency.ist_veraltet(stand) else grau(satz))
+    else:
+        print(gelb("  Noch nie geholt — es gelten die festen Werte aus dem Code."))
+    print(grau(f"  Automatisch: {'an' if automatisch else 'aus'}"))
+    print(grau("  Jetzt holen mit:  sparbit kurse --jetzt\n"))
+    return 0
+
+
 def baue_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python cli.py", description=__doc__,
@@ -1267,6 +1403,23 @@ def baue_parser() -> argparse.ArgumentParser:
     g.add_argument("--max-pro-lauf", type=int, dest="max_pro_lauf",
                    help="Deckel für Seitenaufrufe je Quellenlauf (0-60)")
     g.set_defaults(fn=befehl_gratischeck)
+
+    dg = bereiche.add_parser("diagnose",
+                             help="warum kam ein Fund nicht an?")
+    dg.add_argument("deal_id", type=int, help="Nummer des Deals (siehe 'deals')")
+    dg.set_defaults(fn=befehl_diagnose)
+
+    wg = bereiche.add_parser("warengruppen",
+                             help="was hier anfaellt - nach Ware sortiert")
+    wg.add_argument("--tage", type=int, default=30)
+    wg.set_defaults(fn=befehl_warengruppen)
+
+    ku = bereiche.add_parser("kurse", help="Wechselkurse ansehen und holen")
+    ku.add_argument("--jetzt", action="store_true",
+                    help="Kurse sofort bei der EZB holen")
+    ku.add_argument("--automatisch", choices=["an", "aus"],
+                    help="taegliche Aktualisierung ein- oder ausschalten")
+    ku.set_defaults(fn=befehl_kurse)
 
     d = bereiche.add_parser("deals", help="gesammelte Deals ansehen")
     d.add_argument("suche", nargs="?", help='z. B. lego oder "nintendo switch"')

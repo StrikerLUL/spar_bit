@@ -1,0 +1,27 @@
+name: Funktionswunsch
+description: Eine Idee, was SparBit noch können sollte
+labels: ["idee"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Welches Problem löst das
+      description: >
+        Nicht die Lösung, sondern der Fall. „Ich verpasse Angebote aus
+        Quelle X" sagt mehr als „bitte Quelle X einbauen" — manchmal gibt
+        es einen kürzeren Weg zum selben Ziel.
+    validations:
+      required: true
+
+  - type: textarea
+    id: vorstellung
+    attributes:
+      label: Wie du es dir vorstellst
+      description: Falls du schon eine Vorstellung hast. Muss nicht.
+
+  - type: checkboxes
+    id: selbst
+    attributes:
+      label: Mitmachen
+      options:
+        - label: Ich würde das selbst umsetzen, wenn jemand sagt, wo es hingehört.

@@ -71,7 +71,11 @@ def einrichten(client) -> tuple[str, list[str]]:
 
 def test_anfangs_ist_nichts_eingerichtet(client):
     assert client.get("/api/auth/zweifaktor").json() == {
-        "aktiv": False, "vorbereitet": False, "ersatzcodes_uebrig": 0}
+        "aktiv": False, "vorbereitet": False, "ersatzcodes_uebrig": 0,
+        # Die Pflicht ist aus, solange sie niemand einschaltet - eine
+        # frische Anlage soll niemanden vor eine Huerde stellen, die er
+        # nicht bestellt hat.
+        "pflicht_fuer_admins": False, "faellig": False}
 
 
 def test_falscher_code_schaltet_nicht_scharf(client):

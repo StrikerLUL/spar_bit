@@ -1,0 +1,35 @@
+name: Neue Quelle vorschlagen
+description: Eine Deal-Seite, die SparBit noch nicht kennt
+labels: ["idee", "quelle"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Vorher kurz prüfen: geht es vielleicht schon **ohne Code**? Die
+        Quellen *Eigener Feed* (RSS/Atom) und *Eigene JSON-Schnittstelle*
+        decken die meisten Seiten ab. Nur wenn beides nicht passt, braucht
+        es ein eigenes Plugin.
+
+  - type: input
+    id: seite
+    attributes:
+      label: Adresse der Seite
+    validations:
+      required: true
+
+  - type: input
+    id: endpunkt
+    attributes:
+      label: Feed oder API-Endpunkt, falls bekannt
+      description: RSS/Atom-Adresse, JSON-Endpunkt oder die Shop-Software dahinter.
+
+  - type: dropdown
+    id: reicht
+    attributes:
+      label: Reicht "Eigener Feed" / "Eigene JSON-Schnittstelle"?
+      options:
+        - Ja, ich habe es probiert und es funktioniert (dann braucht es kein Plugin)
+        - Nein, probiert und es kommt nichts an
+        - Nicht probiert
+    validations:
+      required: true

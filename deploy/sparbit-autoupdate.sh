@@ -226,8 +226,39 @@ rc=$?
 if [ $rc -eq 0 ]; then
   profil=""
   grep -qE '^SPARBIT_DOMAIN=.+' .env 2>/dev/null && profil="--profile https"
-  # shellcheck disable=SC2086
-  docker compose $profil up -d --build >> "$PROTOKOLL" 2>&1
+
+  # Fertiges Image statt Eigenbau, wenn es eines fuer genau diesen Commit
+  # gibt. Das spart auf einem kleinen VPS mehrere Minuten und das halbe
+  # RAM - und es kann nicht passieren, dass der Bau hier scheitert,
+  # obwohl die CI gruen war.
+  #
+  # Genau *dieser* Commit: der Tag ist der Kurz-Hash. Wer eigene Commits
+  # obendrauf hat oder in einem Fork arbeitet, findet keinen - dann wird
+  # gebaut wie zuvor. Kein Ratespiel mit "latest", das zu einem anderen
+  # Stand gehoert als der Quellbaum daneben.
+  bezug="$(wert_aus_env SPARBIT_BEZUG)"; bezug="${bezug:-auto}"
+  SPARBIT_TAG="sha-$(git rev-parse --short=7 HEAD)"
+  export SPARBIT_TAG
+
+  gezogen=0
+  if [ "$bezug" != "build" ]; then
+    meldung "Versuche fertige Images: $SPARBIT_TAG" >> "$PROTOKOLL"
+    # shellcheck disable=SC2086
+    if docker compose $profil pull --quiet backend frontend >> "$PROTOKOLL" 2>&1; then
+      gezogen=1
+    else
+      meldung "Kein fertiges Image fuer $SPARBIT_TAG - es wird gebaut." >> "$PROTOKOLL"
+    fi
+  fi
+
+  if [ "$gezogen" = "1" ]; then
+    # shellcheck disable=SC2086
+    docker compose $profil up -d >> "$PROTOKOLL" 2>&1
+  else
+    unset SPARBIT_TAG
+    # shellcheck disable=SC2086
+    docker compose $profil up -d --build >> "$PROTOKOLL" 2>&1
+  fi
   rc=$?
   docker image prune -f >> "$PROTOKOLL" 2>&1 || true
 fi

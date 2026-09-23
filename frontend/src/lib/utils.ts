@@ -1,5 +1,19 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { gespeicherteSprache, locale } from "@/lib/i18n";
+
+/* Die Zahlen- und Datumsformate hingen hart auf "de-DE". Das war so lange
+ * richtig, wie die Oberflaeche nur deutsch war - aber ein englischer
+ * Benutzer liest "1.299,00" als ein Tausendstel von dem, was es ist.
+ *
+ * Gelesen wird direkt aus dem Speicher statt aus dem React-Kontext: diese
+ * Funktionen werden auch ausserhalb von Komponenten aufgerufen (Sortierung,
+ * CSV, Ticker-Texte), und ein Hook ginge dort nicht. Die Sprache aendert
+ * sich ohnehin nur, wenn jemand sie umstellt - und dann rendert React neu.
+ */
+function intl(): string {
+  return locale(gespeicherteSprache());
+}
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -24,7 +38,7 @@ export function formatAmount(
   currency = "EUR",
 ): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
-  const zahl = new Intl.NumberFormat("de-DE", {
+  const zahl = new Intl.NumberFormat(intl(), {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
@@ -76,24 +90,31 @@ export function zeigeStreichpreis(deal: {
 
 export function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("de-DE").format(value);
+  return new Intl.NumberFormat(intl()).format(value);
 }
 
-/** "vor 3 Min." statt Zeitstempel - im Ticker deutlich besser lesbar. */
+/** "vor 3 Min." statt Zeitstempel - im Ticker deutlich besser lesbar.
+ *
+ *  Ueber Intl.RelativeTimeFormat statt ueber eigene Wortlisten: die Formen
+ *  sind sprachabhaengig ("vor 1 Tag" / "vor 2 Tagen", "1 day ago"), und
+ *  eine selbstgebaute Pluralregel ist genau die Sorte Code, die in der
+ *  zweiten Sprache still danebenliegt.
+ */
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
   const seconds = Math.floor((Date.now() - then) / 1000);
-  if (seconds < 0) return "gleich";
-  if (seconds < 60) return "gerade eben";
+  const relativ = new Intl.RelativeTimeFormat(intl(), { numeric: "auto" });
+  if (seconds < 0) return relativ.format(0, "second");
+  if (seconds < 60) return relativ.format(0, "second");
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `vor ${minutes} Min.`;
+  if (minutes < 60) return relativ.format(-minutes, "minute");
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `vor ${hours} Std.`;
+  if (hours < 24) return relativ.format(-hours, "hour");
   const days = Math.floor(hours / 24);
-  if (days < 30) return `vor ${days} ${days === 1 ? "Tag" : "Tagen"}`;
-  return new Date(iso).toLocaleDateString("de-DE", {
+  if (days < 30) return relativ.format(-days, "day");
+  return new Date(iso).toLocaleDateString(intl(), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -104,7 +125,7 @@ export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("de-DE", {
+  return date.toLocaleString(intl(), {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -113,15 +134,25 @@ export function formatDateTime(iso: string | null | undefined): string {
   });
 }
 
+/** Eine Dauer ("4 Std. 20 Min."), in der Sprache der Oberflaeche. */
+function einheit(wert: number, unit: "second" | "minute" | "hour" | "day"): string {
+  return new Intl.NumberFormat(intl(), {
+    style: "unit",
+    unit,
+    unitDisplay: "short",
+    maximumFractionDigits: 0,
+  }).format(wert);
+}
+
 export function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds} Sek.`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} Min.`;
+  if (seconds < 60) return einheit(seconds, "second");
+  if (seconds < 3600) return einheit(Math.round(seconds / 60), "minute");
   if (seconds < 86400) {
     const h = Math.floor(seconds / 3600);
     const m = Math.round((seconds % 3600) / 60);
-    return m ? `${h} Std. ${m} Min.` : `${h} Std.`;
+    return m ? `${einheit(h, "hour")} ${einheit(m, "minute")}` : einheit(h, "hour");
   }
-  return `${Math.floor(seconds / 86400)} Tage`;
+  return einheit(Math.floor(seconds / 86400), "day");
 }
 
 export function formatBytes(bytes: number): string {

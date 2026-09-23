@@ -1,8 +1,11 @@
 import {
-  Bell, BellOff, Bookmark, Check, ExternalLink, SearchCheck, TrendingDown,
+  AlertCircle, Bell, BellOff, Bookmark, Check, CircleDot, ExternalLink,
+  SearchCheck, Stethoscope, TrendingDown,
 } from "lucide-react";
 import * as React from "react";
-import { api, type Angebot, type DealDetail as Detail } from "@/lib/api";
+import {
+  api, type Angebot, type DealDetail as Detail, type Diagnose,
+} from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import {
   bildQuelle, cn, formatAmount, formatDateTime, formatPrice, sourceLabel,
@@ -186,6 +189,8 @@ export function DealDetailDialog({
           <div className="space-y-5">
             <Angebote angebote={data.angebote} />
 
+            <Zustellung dealId={dealId} />
+
             <section className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">Preisverlauf</h3>
@@ -338,6 +343,122 @@ function Angebote({ angebote }: { angebote: Angebot[] }) {
         <p className="text-[11px] text-muted-foreground">
           Vergleich rechnet in Euro — Kurse unter Benachrichtigungen anpassbar.
         </p>
+      )}
+    </section>
+  );
+}
+
+
+/** „Warum kam das nicht an?"
+ *
+ *  Die Gegenrichtung zur Live-Vorschau im Regel-Editor: dort sieht man zu
+ *  einer Regel die Deals, hier zu einem Deal die Regeln — und alles
+ *  Weitere, was zwischen Fund und Handy steht.
+ *
+ *  Bewusst zugeklappt. Die Frage stellt man selten, und wenn, dann
+ *  gezielt; als offener Block stünde sie bei jedem Deal im Weg. Geladen
+ *  wird sie erst beim Aufklappen: sie rechnet jede Regel gegen den Deal
+ *  durch, und das für jeden geöffneten Deal zu tun wäre Arbeit für
+ *  nichts.
+ */
+function Zustellung({ dealId }: { dealId: number }) {
+  const [offen, setOffen] = React.useState(false);
+  const [daten, setDaten] = React.useState<Diagnose | null>(null);
+  const [laedt, setLaedt] = React.useState(false);
+  const [fehler, setFehler] = React.useState<string | null>(null);
+
+  const oeffnen = async () => {
+    setOffen(true);
+    if (daten || laedt) return;
+    setLaedt(true);
+    try {
+      setDaten(await api.deals.diagnose(dealId));
+    } catch (err) {
+      setFehler((err as Error).message);
+    } finally {
+      setLaedt(false);
+    }
+  };
+
+  if (!offen) {
+    return (
+      <Button variant="ghost" size="sm" onClick={oeffnen} className="w-full">
+        <Stethoscope className="h-3.5 w-3.5" aria-hidden />
+        Warum kam das nicht an?
+      </Button>
+    );
+  }
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-medium">Zustellung</h3>
+
+      {laedt && <Skeleton className="h-32" />}
+      {fehler && (
+        <p className="text-xs text-destructive" role="alert">{fehler}</p>
+      )}
+
+      {daten && (
+        <>
+          <p className={cn(
+            "rounded-md border px-3 py-2 text-xs leading-relaxed",
+            daten.zugestellt
+              ? "border-success/30 bg-success/10"
+              : "border-border bg-muted/40",
+          )}>
+            {daten.fazit}
+          </p>
+
+          <ol className="space-y-1.5">
+            {daten.stufen.map((stufe) => {
+              /* Grau statt rot, wo eine Stufe zwar stoppt, aber nicht auf
+                 dem gegangenen Weg liegt: ein roter Haken neben
+                 „Preisfehler-Weg" bei einem gewöhnlichen Deal wäre
+                 richtig und trotzdem irreführend. */
+              const sperrt = stufe.stand === "gestoppt" && stufe.blockiert;
+              return (
+                <li key={stufe.name} className="flex items-start gap-2 text-xs">
+                  {stufe.stand === "durch" ? (
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success"
+                           aria-hidden />
+                  ) : sperrt ? (
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+                                 aria-hidden />
+                  ) : (
+                    <CircleDot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/50"
+                               aria-hidden />
+                  )}
+                  <div className="min-w-0">
+                    <span className={cn("font-medium",
+                      !sperrt && stufe.stand !== "durch" && "text-muted-foreground")}>
+                      {stufe.name}:
+                    </span>{" "}
+                    <span className={cn(
+                      !sperrt && stufe.stand !== "durch" && "text-muted-foreground")}>
+                      {stufe.text}
+                    </span>
+                    {stufe.rat && (
+                      <p className="mt-0.5 text-muted-foreground">{stufe.rat}</p>
+                    )}
+                    {stufe.details && stufe.details.length > 0 && (
+                      <ul className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
+                        {stufe.details.slice(0, 8).map((zeile, i) => (
+                          <li key={i} className="truncate">
+                            <span className="text-foreground/70">
+                              {zeile.regel ?? zeile.kanal ?? ""}
+                            </span>
+                            {" — "}
+                            {zeile.text}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </>
       )}
     </section>
   );

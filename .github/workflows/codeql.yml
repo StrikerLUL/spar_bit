@@ -1,0 +1,52 @@
+# Statische Analyse fuer Python und die Oberflaeche.
+#
+# Warum fuer eine selbstgehostete Anwendung: SparBit ruft fremde Adressen
+# ab, nimmt Dateien entgegen (Sicherung einspielen, OPML) und hat eine
+# Anmeldung. Genau die drei Stellen, an denen ein uebersehener Pfad teuer
+# wird - und an denen ein Linter nichts sieht.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Montags frueh: neue Regeln erscheinen auch ohne neuen Code.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyse:
+    name: Analyse (${{ matrix.sprache }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sprache: python
+            build-mode: none
+          - sprache: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.sprache }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended greift auch die Faelle ab, die "wahrscheinlich
+          # unausnutzbar, aber falsch" sind. Fuer ein Projekt dieser Groesse
+          # ist die Zahl der Fehlalarme handhabbar.
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.sprache }}"

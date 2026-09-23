@@ -2,6 +2,7 @@ import { BarChart3, Euro, PiggyBank, Signal, Store } from "lucide-react";
 import * as React from "react";
 import {
   api, type HaendlerStat, type QuellenStat, type Sparbilanz, type TimelinePoint,
+  type WarengruppeStat,
 } from "@/lib/api";
 import { useAsync } from "@/lib/useEvents";
 import { formatAmount, formatNumber, sourceLabel } from "@/lib/utils";
@@ -25,6 +26,8 @@ export function Statistics() {
     () => api.statistik.quellen(tage), [tage]);
   const { data: haendler } = useAsync<HaendlerStat[]>(
     () => api.statistik.haendler(), []);
+  const { data: warengruppen } = useAsync<WarengruppeStat[]>(
+    () => api.statistik.warengruppen(tage), [tage]);
 
   const punkte = (timeline?.punkte ?? []) as unknown as Array<
     Record<string, string | number>>;
@@ -103,6 +106,33 @@ export function Statistics() {
                 sub: `${q.signalquote}% Signal · ${q.gratis} gratis`,
               }))}
               emptyText="Noch keine Deals im gewählten Zeitraum."
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Warengruppen</CardTitle>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Nicht dasselbe wie die Quelle: hier steht, <em>was</em> anfällt.
+              Daneben, wie viel davon wirklich günstig war — gemessen am
+              eigenen Preisverlauf, nicht am Rabatt der Quelle.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              items={(warengruppen ?? [])
+                /* Gruppen ohne einen einzigen Fund wären nur Zeilen mit
+                   Null — die Liste soll zeigen, was da ist. */
+                .filter((w) => w.anzahl > 0)
+                .map((w) => ({
+                  label: w.label,
+                  value: w.anzahl,
+                  sub: w.gute_preise
+                    ? `${w.gute_preise} gute Preise`
+                    : undefined,
+                }))}
+              emptyText="Noch nichts eingeteilt."
             />
           </CardContent>
         </Card>

@@ -31,6 +31,7 @@ class RuleBody(BaseModel):
     min_fehler_score: int | None = None
     sources: list[str] = []
     kategorien: list[str] = []
+    warengruppen: list[str] = []
     haendler: list[str] = []
     channels: list[int] = []
     # Ohne dieses Haekchen sieht die Regel 18+-Funde gar nicht.
@@ -46,7 +47,9 @@ def _rule_dict(r: Rule) -> dict:
         "min_temperatur": r.min_temperatur, "min_urteil": r.min_urteil,
         "min_fehler_score": r.min_fehler_score,
         "sources": r.sources or [],
-        "kategorien": r.kategorien or [], "haendler": r.haendler or [],
+        "kategorien": r.kategorien or [],
+        "warengruppen": r.warengruppen or [],
+        "haendler": r.haendler or [],
         "erwachsen": bool(getattr(r, "erwachsen", False)),
         "channels": r.channels or [], "created_at": r.created_at,
         "match_count": r.match_count, "last_match": r.last_match,
@@ -140,7 +143,8 @@ def preview_rule(body: RuleBody, sample: int = Query(500, le=2000),
         min_rabatt_prozent=body.min_rabatt_prozent, nur_gratis=body.nur_gratis,
         min_temperatur=body.min_temperatur, min_urteil=body.min_urteil,
         min_fehler_score=body.min_fehler_score, sources=body.sources,
-        kategorien=body.kategorien, haendler=body.haendler,
+        kategorien=body.kategorien, warengruppen=body.warengruppen,
+        haendler=body.haendler,
         erwachsen=body.erwachsen,
     )
     return preview(spec, deals)
@@ -184,6 +188,7 @@ def explain(rule_id: int, deal_id: int, db: Session = Depends(get_db),
 TEILBAR = ("name", "priority", "keywords", "required_keywords", "blacklist",
            "max_preis", "min_rabatt_prozent", "nur_gratis", "min_temperatur",
            "min_urteil", "min_fehler_score", "sources", "kategorien",
+           "warengruppen",
            "haendler", "erwachsen")
 
 

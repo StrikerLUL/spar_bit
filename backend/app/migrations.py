@@ -286,6 +286,87 @@ def _schritt_008(conn: Connection) -> None:
     indizes_aus_modellen(conn, Base.metadata)
 
 
+def _schritt_009(conn: Connection) -> None:
+    """Versandkosten, Gutschein-Codes, Waehrungsstand.
+
+    Drei Spalten, die alle dasselbe Problem loesen: eine Zahl ohne ihren
+    Zusammenhang ist keine Zahl. 195 EUR ohne Versand sind teurer als
+    199 EUR mit, ein Deal ohne seinen Gutschein-Code ist im Laden
+    wertlos, und ein Wechselkurs ohne Datum sieht aus wie einer von
+    heute.
+    """
+    spalte_ergaenzen(conn, "watch_items", "versandkosten", "FLOAT")
+    spalte_ergaenzen(conn, "watch_prices", "versand", "FLOAT")
+    spalte_ergaenzen(conn, "deals", "gutschein_code", "VARCHAR(64)")
+
+
+def _schritt_010(conn: Connection) -> None:
+    """Warengruppe je Deal - und der Bestand wird gleich mit eingeteilt.
+
+    Ohne das Nachtragen stuenden die ersten Wochen nach dem Update in
+    jeder Statistik als "ohne Gruppe" da, und eine Regel auf
+    "Elektronik" faende nichts von dem, was schon da ist. Die Einteilung
+    kostet nur Stichwortsuche, also laeuft sie hier gleich mit - in
+    Bloecken, damit eine Datenbank mit 50.000 Deals nicht am Stueck in
+    den Speicher muss.
+    """
+    neu_angelegt = spalte_ergaenzen(conn, "deals", "warengruppe", "VARCHAR(32)")
+    spalte_ergaenzen(conn, "deals", "warengruppe_quelle", "VARCHAR(64)")
+    if not neu_angelegt or not tabelle_existiert(conn, "deals"):
+        return
+
+    from .warengruppe import bestimme
+
+    # Eine Datenbank von vor mehreren Releases hat diese Spalte noch
+    # nicht - und dass das Modell sie kennt, heisst hier gar nichts. Der
+    # Titel allein reicht fuer die Einteilung; er ist ohnehin das
+    # Zuverlaessigere von beidem.
+    mit_text = spalte_existiert(conn, "deals", "beschreibung")
+    satz = ("SELECT id, titel, beschreibung FROM deals" if mit_text
+            else "SELECT id, titel, NULL FROM deals")
+
+    letzte_id = 0
+    eingeteilt = 0
+    while True:
+        zeilen = conn.execute(text(
+            f"{satz} WHERE id > :ab ORDER BY id LIMIT 500"),
+            {"ab": letzte_id}).all()
+        if not zeilen:
+            break
+        for deal_id, titel, beschreibung in zeilen:
+            letzte_id = deal_id
+            gruppe, wort = bestimme(titel, beschreibung)
+            if not gruppe:
+                continue
+            conn.execute(text(
+                "UPDATE deals SET warengruppe = :g, warengruppe_quelle = :w "
+                "WHERE id = :i"), {"g": gruppe, "w": wort, "i": deal_id})
+            eingeteilt += 1
+    if eingeteilt:
+        log.info("Migration: %d Deals einer Warengruppe zugeordnet", eingeteilt)
+
+
+def _schritt_011(conn: Connection) -> None:
+    """Warengruppen-Filter in den Regeln.
+
+    Leere Liste heisst "alle" - bestehende Regeln wirken danach genau
+    wie vorher. Das ist die einzige Vorgabe, die nicht stillschweigend
+    etwas aendert.
+    """
+    spalte_ergaenzen(conn, "rules", "warengruppen", "JSON")
+    if tabelle_existiert(conn, "rules"):
+        conn.execute(text("UPDATE rules SET warengruppen = '[]' "
+                          "WHERE warengruppen IS NULL"))
+
+
+def _schritt_012(conn: Connection) -> None:
+    """Schalter fuer den Render-Dienst je Wunschlisten-Eintrag."""
+    spalte_ergaenzen(conn, "watch_items", "rendern", "BOOLEAN DEFAULT 0")
+    if tabelle_existiert(conn, "watch_items"):
+        conn.execute(text("UPDATE watch_items SET rendern = 0 "
+                          "WHERE rendern IS NULL"))
+
+
 SCHRITTE: list[Schritt] = [
     Schritt(1, "Spalten der Releases bis 1.0", _schritt_001),
     Schritt(2, "Fehlende Indizes nachziehen", _schritt_002),
@@ -295,6 +376,10 @@ SCHRITTE: list[Schritt] = [
     Schritt(6, "Push-Abos", _schritt_006),
     Schritt(7, "Wunschlisten mit Budget", _schritt_007),
     Schritt(8, "Mehrbenutzer: Rollen und Besitz", _schritt_008),
+    Schritt(9, "Versandkosten und Gutschein-Codes", _schritt_009),
+    Schritt(10, "Warengruppe je Deal, rueckwirkend gefuellt", _schritt_010),
+    Schritt(11, "Warengruppen-Filter in den Regeln", _schritt_011),
+    Schritt(12, "Render-Dienst je Wunschlisten-Eintrag", _schritt_012),
 ]
 
 

@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from . import gesundheit
+from . import currency, gesundheit
 from .auth import current_user
 from .config import settings
 from .currency import set_rates
@@ -40,9 +40,12 @@ async def lifespan(app: FastAPI):
     broker.bind_loop(asyncio.get_running_loop())
 
     # Waehrungskurse aus den Einstellungen laden, damit Preisregeln
-    # quellenuebergreifend in EUR rechnen.
+    # quellenuebergreifend in EUR rechnen. Der Stand kommt mit: das UI
+    # soll sagen koennen, wie alt die Zahlen sind, statt sie einfach
+    # anzuzeigen, als waeren sie von heute.
     with session_scope() as db:
-        set_rates(get_setting(db, "currency_rates"))
+        set_rates(get_setting(db, currency.SCHLUESSEL_KURSE),
+                  get_setting(db, currency.SCHLUESSEL_STAND))
 
     # Erst die Erweiterungen laden, dann den Scheduler starten: er legt
     # beim Start fuer jede registrierte Quelle eine Zeile an.
@@ -50,19 +53,63 @@ async def lifespan(app: FastAPI):
     plugins.lade()
 
     from . import scheduler as sched
-    sched.start()
-
     from .telegram_bot import bot
-    if settings.telegram_polling:
-        bot.start()
+
+    hier = settings.scheduler_hier
+    nachlese_task: asyncio.Task | None = None
+
+    if hier:
+        sched.start()
+        if settings.telegram_polling:
+            bot.start()
+    else:
+        # Der Scheduler laeuft als eigener Dienst (python -m app.worker).
+        # Dann holt dieser Prozess dessen Ereignisse aus der Datenbank,
+        # sonst bliebe der Live-Ticker stumm und saehe kaputt aus.
+        sched.ensure_source_rows()
+        nachlese_task = asyncio.create_task(_nachlese_schleife())
+        log.info("Scheduler laeuft nicht hier (SPARBIT_SCHEDULER=%s) - "
+                 "es muss ein Worker laufen, sonst wird nichts eingesammelt.",
+                 settings.scheduler)
 
     log.info("SparBit laeuft auf http://%s:%s", settings.host, settings.port)
     try:
         yield
     finally:
-        await bot.stop()
-        await sched.shutdown()
+        if nachlese_task is not None:
+            nachlese_task.cancel()
+        if hier:
+            await bot.stop()
+            await sched.shutdown()
         log.info("SparBit beendet")
+
+
+# Wie oft der API-Prozess im Worker-Betrieb nach neuen Ereignissen sieht.
+# Zwei Sekunden: schnell genug, dass der Ticker lebendig wirkt, selten
+# genug, dass es im Leerlauf nicht auffaellt.
+NACHLESE_TAKT = 2.0
+
+
+async def _nachlese_schleife() -> None:
+    """Ereignisse des Workers an die eigenen SSE-Verbindungen weiterreichen."""
+    from .events import nachlese
+
+    marke: int | None = None
+    while True:
+        try:
+            await asyncio.sleep(NACHLESE_TAKT)
+            # Niemand sieht zu? Dann auch nichts holen - das spart im
+            # Normalfall jede Abfrage, weil das Dashboard meistens zu ist.
+            if broker.subscriber_count == 0:
+                marke = None       # beim naechsten Zusehen frisch aufsetzen
+                continue
+            marke, nutzlasten = await asyncio.to_thread(nachlese, marke)
+            for nutzlast in nutzlasten:
+                broker.einspeisen(nutzlast)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.debug("Nachlese-Schleife: %s", exc)
 
 
 app = FastAPI(title="SparBit", version="1.0.0",
@@ -72,11 +119,31 @@ app = FastAPI(title="SparBit", version="1.0.0",
 app.add_middleware(SicherheitsHeader)
 
 if settings.cors_origins:
+    _herkuenfte = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+
+    # "*" zusammen mit Cookies ist die Stelle, an der der CSRF-Schutz des
+    # Cookies (SameSite=Lax) nichts mehr nuetzt: Starlette spiegelt dann
+    # jede Herkunft zurueck, und eine beliebige fremde Seite darf
+    # angemeldete Anfragen an SparBit schicken. Die Sternchen-Schreibweise
+    # sieht harmlos aus ("ich will es nur schnell testen") und ist es
+    # genau hier nicht.
+    if "*" in _herkuenfte:
+        log.warning(
+            "SPARBIT_CORS_ORIGINS enthaelt '*'. Damit duerfte jede fremde "
+            "Seite angemeldete Anfragen stellen. Cookies werden fuer "
+            "fremde Herkuenfte deshalb NICHT freigegeben - trage die "
+            "erlaubten Adressen einzeln ein, z. B. "
+            "SPARBIT_CORS_ORIGINS=https://sparbit.example.de")
+
+    _mit_cookies = "*" not in _herkuenfte
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
-        allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+        allow_origins=_herkuenfte,
+        allow_credentials=_mit_cookies,
+        allow_methods=["*"], allow_headers=["*"],
     )
+    log.info("CORS offen fuer: %s (Cookies: %s)", ", ".join(_herkuenfte),
+             "ja" if _mit_cookies else "nein")
 
 app.include_router(auth_routes.router)
 app.include_router(sources_routes.router)

@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 from .. import steamwunsch
 from ..auth import current_user, darf_schreiben
 from ..besitz import gehoert_mir, nur_meine
-from ..db import get_db
+from ..db import get_db, get_setting
+from ..drosselung import drossel
 from ..learning import notiere, trainiere, vorschlaege
 from ..models import ApiToken, Deal, User, WatchItem, WatchListe, WatchPrice, utcnow
-from ..pricewatch import NichtGefunden, preis_aus_seite
+from ..pricewatch import SCHLUESSEL_RENDER, NichtGefunden, preis_aus_seite
 from ..pricewatch import pruefe as pruefe_eintrag
 from ..scheduler import get_http
 from ..tokens import erzeuge, token_aus_header
@@ -137,6 +138,12 @@ def _watch_dict(eintrag: WatchItem, verlauf: list | None = None) -> dict:
         "ziel_preis": eintrag.ziel_preis, "aktiv": eintrag.aktiv,
         "intervall_minuten": eintrag.intervall_minuten,
         "letzter_preis": eintrag.letzter_preis, "waehrung": eintrag.waehrung,
+        "versandkosten": eintrag.versandkosten,
+        # Was wirklich zu zahlen ist. NULL beim Versand heisst "steht auf
+        # der Seite nicht" - dann ist der Gesamtpreis der Artikelpreis
+        # und traegt dieselbe Unsicherheit wie vorher, nicht mehr.
+        "gesamtpreis": (None if eintrag.letzter_preis is None else
+                        round(eintrag.letzter_preis + (eintrag.versandkosten or 0.0), 2)),
         "bester_preis": eintrag.bester_preis, "bild": eintrag.bild,
         "haendler": eintrag.haendler, "letzter_lauf": eintrag.letzter_lauf,
         "letzter_erfolg": eintrag.letzter_erfolg,
@@ -167,6 +174,7 @@ def einzeln(watch_id: int, db: Session = Depends(get_db),
     verlauf = db.scalars(select(WatchPrice).where(WatchPrice.watch_id == watch_id)
                          .order_by(WatchPrice.ts.asc()).limit(200))
     return _watch_dict(eintrag, [{"ts": p.ts, "preis": p.preis,
+                                  "versand": p.versand,
                                   "waehrung": p.waehrung} for p in verlauf])
 
 
@@ -184,11 +192,13 @@ async def anlegen(body: WatchBody, db: Session = Depends(get_db),
     db.commit()
     db.refresh(eintrag)
 
-    fund = await pruefe_eintrag(db, eintrag, get_http())
+    fund = await pruefe_eintrag(db, eintrag, get_http(),
+                                get_setting(db, SCHLUESSEL_RENDER))
     db.refresh(eintrag)
     ergebnis = _watch_dict(eintrag)
     ergebnis["erster_abruf"] = (
         {"ok": True, "preis": fund.preis, "waehrung": fund.waehrung,
+         "versand": fund.versand, "gesamt": fund.gesamt,
          "verfahren": fund.quelle} if fund else
         {"ok": False, "fehler": eintrag.letzter_fehler})
     return ergebnis
@@ -205,7 +215,9 @@ class SammelBody(BaseModel):
 SAMMEL_MAX = 25
 
 
-@router.post("/watch/sammel")
+@router.post("/watch/sammel",
+             # Ein Klick holt bis zu SAMMEL_MAX fremde Produktseiten.
+             dependencies=[Depends(drossel("watch-sammel", pro_minute=4, stoss=2))])
 async def sammel_anlegen(body: SammelBody,
                          db: Session = Depends(get_db)) -> dict:
     """Mehrere Artikel auf einmal aufnehmen - eine URL je Zeile.
@@ -232,6 +244,7 @@ async def sammel_anlegen(body: SammelBody,
 
     vorhanden = {e.url for e in db.scalars(select(WatchItem))}
     http = get_http()
+    render = get_setting(db, SCHLUESSEL_RENDER)
     angelegt, uebersprungen, fehler = [], [], []
 
     for url in kandidaten:
@@ -250,7 +263,7 @@ async def sammel_anlegen(body: SammelBody,
         vorhanden.add(url)
 
         try:
-            fund = await pruefe_eintrag(db, eintrag, http)
+            fund = await pruefe_eintrag(db, eintrag, http, render)
         except Exception as exc:                      # eine Seite darf nicht alles abbrechen
             log.warning("Sammelimport: %s: %s", url, exc)
             fund = None
@@ -280,7 +293,8 @@ class SteamImportBody(BaseModel):
     gleich_pruefen: bool = False
 
 
-@router.post("/watch/steam")
+@router.post("/watch/steam",
+             dependencies=[Depends(drossel("watch-steam", pro_minute=4, stoss=2))])
 async def steam_import(body: SteamImportBody,
                        db: Session = Depends(get_db)) -> dict:
     """Steam-Wunschliste uebernehmen.
@@ -290,6 +304,7 @@ async def steam_import(body: SteamImportBody,
     meisten lassen es dann.
     """
     http = get_http()
+    render = get_setting(db, SCHLUESSEL_RENDER)
     try:
         eintraege = await steamwunsch.hole(http, body.profil)
     except ValueError as exc:
@@ -324,7 +339,7 @@ async def steam_import(body: SteamImportBody,
             continue
 
         try:
-            fund = await pruefe_eintrag(db, eintrag, http)
+            fund = await pruefe_eintrag(db, eintrag, http, render)
         except Exception as exc:
             log.warning("Steam-Import: %s: %s", spiel.url, exc)
             fund = None
@@ -384,16 +399,19 @@ def loeschen(watch_id: int, db: Session = Depends(get_db)) -> dict:
     return {"ok": True}
 
 
-@router.post("/watch/{watch_id}/pruefen")
+@router.post("/watch/{watch_id}/pruefen",
+             dependencies=[Depends(drossel("watch-pruefen", pro_minute=20, stoss=6))])
 async def jetzt_pruefen(watch_id: int, db: Session = Depends(get_db)) -> dict:
     eintrag = db.get(WatchItem, watch_id)
     if eintrag is None:
         raise HTTPException(404, "Nicht gefunden")
-    fund = await pruefe_eintrag(db, eintrag, get_http())
+    fund = await pruefe_eintrag(db, eintrag, get_http(),
+                                get_setting(db, SCHLUESSEL_RENDER))
     db.refresh(eintrag)
     if fund is None:
         return {"ok": False, "fehler": eintrag.letzter_fehler}
     return {"ok": True, "preis": fund.preis, "waehrung": fund.waehrung,
+            "versand": fund.versand, "gesamt": fund.gesamt,
             "verfahren": fund.quelle, "name": fund.name}
 
 
@@ -401,7 +419,8 @@ class PruefBody(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
 
-@router.post("/watch-test")
+@router.post("/watch-test",
+             dependencies=[Depends(drossel("watch-test", pro_minute=20, stoss=6))])
 async def testen(body: PruefBody) -> dict:
     """URL pruefen, ohne sie aufzunehmen - fuer das Anlege-Formular."""
     try:
@@ -412,6 +431,7 @@ async def testen(body: PruefBody) -> dict:
     except Exception as exc:
         return {"ok": False, "fehler": f"{type(exc).__name__}: {exc}"[:300]}
     return {"ok": True, "preis": fund.preis, "waehrung": fund.waehrung,
+            "versand": fund.versand, "gesamt": fund.gesamt,
             "name": fund.name, "bild": fund.bild, "verfahren": fund.quelle}
 
 
@@ -550,7 +570,8 @@ async def extern_aufnehmen(body: ExternWatchBody,
     db.add(eintrag)
     db.commit()
     db.refresh(eintrag)
-    fund = await pruefe_eintrag(db, eintrag, get_http())
+    fund = await pruefe_eintrag(db, eintrag, get_http(),
+                                get_setting(db, SCHLUESSEL_RENDER))
     db.refresh(eintrag)
     return {"ok": True, "id": eintrag.id, "bereits_vorhanden": False,
             "preis": fund.preis if fund else None,

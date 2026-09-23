@@ -49,6 +49,7 @@ def _note(deal: Deal, *, regel: str, prioritaet: str = "NORMAL",
         urteil=deal.urteil, urteil_text=deal.urteil_text,
         fehler_stufe=deal.fehler_stufe,
         fehler_text=" ".join(fehler[:2]) if fehler else None,
+        gutschein_code=deal.gutschein_code,
     )
 
 

@@ -1,4 +1,12 @@
-from . import apprise_kanal, browser, chat, others, push, telegram  # noqa: F401
+from . import (  # noqa: F401
+    apprise_kanal,
+    browser,
+    chat,
+    homeassistant,
+    others,
+    push,
+    telegram,
+)
 from .base import (
                    Channel,
                    Notification,

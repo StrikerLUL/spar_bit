@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .. import erwachsen as erwachsen_mod
 from ..auth import current_user, nur_admin
 from ..db import get_db
+from ..drosselung import drossel
 from ..models import SourceConfig, SourceRun, utcnow
 from ..scheduler import build_context, run_source, schedule_source
 from ..sources import all_sources, get_source
@@ -103,7 +104,11 @@ def list_sources(db: Session = Depends(get_db)) -> list[dict]:
     return out
 
 
-@router.post(dependencies=schreib_abhaengig, path="/feed-suche")
+@router.post(dependencies=[*schreib_abhaengig,
+                           # Jede Suche laedt eine fremde Seite und probiert
+                           # danach mehrere Pfade durch - ein Knopf, viele Abrufe.
+                           Depends(drossel("feed-suche", pro_minute=10, stoss=3))],
+             path="/feed-suche")
 async def feed_suche(body: FeedSuche) -> dict:
     """Welche Feeds zeichnet diese Adresse aus?
 
@@ -174,7 +179,9 @@ def update_source(source_id: str, body: SourceUpdate,
     return _serialize(src, cfg, {})
 
 
-@router.post(dependencies=schreib_abhaengig, path="/{source_id}/test")
+@router.post(dependencies=[*schreib_abhaengig,
+                           Depends(drossel("quelle-test", pro_minute=12, stoss=4))],
+             path="/{source_id}/test")
 async def test_source(source_id: str, db: Session = Depends(get_db)) -> dict:
     """'Jetzt testen' - health_check mit Live-Ergebnis, ohne zu speichern."""
     src = get_source(source_id)
