@@ -2,3 +2,16 @@ node_modules
 dist
 .vite
 *.log
+
+# Tests und ihre Nebenprodukte gehoeren nicht in den Build-Kontext. Sie
+# werden nicht gebaut, machen den Kontext aber groesser - und jede
+# Aenderung daran wuerde den Docker-Cache unnoetig verwerfen.
+e2e/
+playwright.config.ts
+playwright-report/
+test-results/
+.e2e-daten/
+coverage/
+vitest.config.ts
+src/test/
+openapi.json

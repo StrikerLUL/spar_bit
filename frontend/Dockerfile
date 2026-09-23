@@ -3,6 +3,13 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
+# Playwright steckt in den devDependencies, und npm ci installiert die -
+# sie werden zum Bauen gebraucht (vite, typescript). Sein postinstall
+# wuerde dabei jedes Mal ueber 150 MB Browser nachladen, die in diesem
+# Image niemand startet: hier wird gebaut, getestet wird woanders. Ohne
+# diese Zeile dauert jedes Update auf einem kleinen VPS Minuten laenger.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 
