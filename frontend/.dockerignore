@@ -6,6 +6,9 @@ dist
 # Tests und ihre Nebenprodukte gehoeren nicht in den Build-Kontext. Sie
 # werden nicht gebaut, machen den Kontext aber groesser - und jede
 # Aenderung daran wuerde den Docker-Cache unnoetig verwerfen.
+# "Nicht gebaut" stimmt nur, weil der Build allein tsconfig.app.json
+# prueft, und die schliesst Tests aus. Wer sie dort wieder aufnimmt, bricht
+# das Image: ohne src/test/setup.ts fehlen den Tests die jest-dom-Typen.
 e2e/
 playwright.config.ts
 playwright-report/

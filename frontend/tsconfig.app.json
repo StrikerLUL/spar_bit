@@ -25,13 +25,15 @@
       "@/*": [
         "./src/*"
       ]
-    },
-    "types": [
-      "vitest/globals",
-      "@testing-library/jest-dom"
-    ]
+    }
   },
   "include": [
     "src"
+  ],
+  "exclude": [
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/test/**"
   ]
 }

@@ -92,7 +92,13 @@ export default defineConfig({
       },
     },
     {
-      command: "npm run dev",
+      // Die Adresse ausdrücklich: Vite lauscht sonst auf "localhost", und
+      // das ist auf den GitHub-Runnern zuerst ::1. Der Test wartet dann
+      // auf 127.0.0.1, findet nichts und meldet nach einer Minute nur
+      // "Timed out waiting from config.webServer" - lokal, ohne IPv6,
+      // fällt das nie auf. strictPort, damit ein belegter Port als Fehler
+      // kommt und nicht als stiller Wechsel auf 5174.
+      command: "npm run dev -- --host 127.0.0.1 --port 5173 --strictPort",
       url: "http://127.0.0.1:5173",
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

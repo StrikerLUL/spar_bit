@@ -9,7 +9,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // Im Dev-Modus direkt aufs Backend, damit Cookies und SSE funktionieren.
-      "/api": { target: "http://localhost:8000", changeOrigin: true, ws: true },
+      // 127.0.0.1 statt localhost: run.py und der Browser-Test starten das
+      // Backend nur auf IPv4, "localhost" kann aber zuerst ::1 sein.
+      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true, ws: true },
     },
   },
   build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 900 },
