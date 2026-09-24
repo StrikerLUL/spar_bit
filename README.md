@@ -56,7 +56,7 @@ dem, was man gerade sucht:
 | Seite | Worum es geht |
 |---|---|
 | **[Preisfehler](docs/preisfehler.md)** | Wie die Erkennung urteilt, was sie *nicht* meldet, und wie du sie eichst |
-| **[Was SparBit kann](docs/funktionen.md)** | Quellen, Urteile, Regeln, Wunschliste, Gratis-Gegenprobe, 18+-Bereich |
+| **[Was SparBit kann](docs/funktionen.md)** | Quellen, Urteile, Regeln, Wunschliste, Gratis-Gegenprobe |
 | **[Betrieb](docs/betrieb.md)** | VPS, eigener Rechner, Reverse-Proxy, Updates, Auto-Claimer |
 | **[Benachrichtigungen](docs/benachrichtigungen.md)** | Telegram, Discord, Matrix, ntfy, Web Push, Apprise und der Rest |
 | **[Kommandozeile & API](docs/kommandozeile.md)** | Alles, was die Oberfläche kann, geht auch ohne sie |
@@ -95,7 +95,7 @@ er auf der Karte statt im gekürzten Fließtext.
 **Filtern** — Regeln aus Keywords, Preisgrenzen, Mindestrabatt, Preisurteil,
 Warengruppe und Preisfehler-Punktzahl, mit Live-Vorschau und Begründung je
 Deal. Und die Gegenrichtung: zu jedem Fund sagt SparBit, **warum er nicht
-angekommen ist** — Stufe für Stufe, vom 18+-Filter bis zum Versandprotokoll.
+angekommen ist** — Stufe für Stufe, von der ersten Regel bis zum Versandprotokoll.
 Der Feed lernt mit, lokal und erklärbar. Regeln lassen sich exportieren und
 weitergeben.
 
@@ -138,7 +138,6 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
 | **Gaming** | Epic Games Store, GOG, Steam, CheapShark, IsThereAnyDeal, GG.deals |
 | **International** | Slickdeals (US, USD), OzBargain (AU, AUD) — wegen der Zeitzone oft die erste Quelle, die einen weltweiten Preisfehler meldet |
 | **Eigene** | beliebige RSS/Atom-Feeds und eigene JSON-Schnittstellen (Adresse und Feldnamen genügen, kein Code) |
-| **18+** | sechs weitere Quellen in einem getrennten Bereich — standardmäßig aus, siehe unten |
 
 * Jede Quelle **einzeln schaltbar**, mit eigenem Intervall und eigenen
   Optionsfeldern. Ein Mindestintervall lässt sich im UI nicht unterschreiten.
@@ -273,8 +272,8 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
   worden wären, mit Beispielen, den *knapp verfehlten* und je Deal einer
   Begründung, warum er getroffen oder gescheitert ist.
 * **Und die Gegenrichtung: „Warum kam das nicht an?"** In der Detailansicht
-  jedes Deals läuft derselbe Weg ab, den die Zustellung nimmt — 18+-Sperre,
-  jede einzelne Regel, Preisfehler-Weg, globale Pause, Ruhezeit, Kanäle,
+  jedes Deals läuft derselbe Weg ab, den die Zustellung nimmt — jede
+  einzelne Regel, Preisfehler-Weg, globale Pause, Ruhezeit, Kanäle,
   Versandverlauf. Jede Stufe sagt, ob sie durchlässt, und wenn nicht: warum
   und was dagegen zu tun wäre. Vorher hieß die Antwort darauf: an vier
   Stellen nachsehen und am Ende raten, ob die Regel nicht traf oder der
@@ -358,7 +357,7 @@ die Liste, damit nichts unentdeckt bleibt, was schon eingebaut ist.
   man neu lädt.
 * **Kommandozeile** — `cli.py` steuert dieselbe Datenbank wie die Oberfläche,
   **auch wenn der Server aus ist**: `status`, `kanaele`, `quellen`, `regeln`,
-  `wunschliste`, `preisfehler`, `gratischeck`, `feed-suche`, `18plus`,
+  `wunschliste`, `preisfehler`, `gratischeck`, `feed-suche`,
   `deals`, `diagnose`, `warengruppen`, `kurse`. Sie meckert früh statt spät und schlägt bei einem Tippfehler im
   Quellennamen die richtige vor.
 * **REST-API** hinter derselben Anmeldung, mit OpenAPI-Dokumentation unter
@@ -377,17 +376,6 @@ API-Token, Push-Geräte und die gelernten Vorlieben. **Gemeinsam:** Quellen,
 die gesammelten Deals, die Systemeinstellungen. Ein Konto abzuschalten lässt
 Regeln und Wunschliste stehen; der letzte Administrator kann sich weder
 entmachten noch abschalten.
-
-### 18+-Bereich
-
-Ein getrennter Bereich, **standardmäßig aus** — solange er aus ist, gibt es
-ihn wirklich nicht: die sechs zugehörigen Quellen werden nicht gelistet,
-nicht gestartet und auch über CLI und API nicht eingeschaltet. Ist er an,
-gilt: diese Funde erscheinen **nirgendwo sonst** — nicht im Feed, nicht in
-der Suche, nicht in den Statistiken, nicht im CSV-Export, nicht beim
-Preisfehler-Wächter. Melden ist noch einmal getrennt (je Regel und global,
-beide aus), eingestuft wird jeder Fund egal woher, und die Bilder lassen sich
-verdecken.
 
 ### Betrieb
 
@@ -588,8 +576,6 @@ Ehrlich benannt statt verschwiegen — die vollständige Liste steht in
 * **Die Gratis-Gegenprobe ist nur so gut wie die Zielseite.** Shops, die ihren
   Preis per JavaScript nachladen, ergeben `ungeprüft` — und dann bleibt alles,
   wie die Quelle es gemeldet hat.
-* **Die 18+-Quellen sind ungeprüft wie alle anderen.** Ein falscher Pfad heilt
-  sich inzwischen selbst, aber die vorbelegten Namen sind geraten.
 * **Die englische Übersetzung ist nicht vollständig.** Navigation, Anmeldung,
   Deal-Karten, Preisurteile und die gemeinsamen Bedienelemente sind übersetzt,
   die Einstellungsseiten (Regeln, Kanäle, Quellen, System) noch nicht — dort
