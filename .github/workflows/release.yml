@@ -19,8 +19,8 @@ jobs:
       id-token: write        # Herkunftsnachweis ohne eigenen Schluessel
       attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -45,11 +45,11 @@ jobs:
           output-file: sparbit-frontend.spdx.json
 
       - name: Herkunftsnachweis
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: frontend-dist.tar.gz
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             frontend-dist.tar.gz
