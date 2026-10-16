@@ -19,7 +19,7 @@ Pillow>=11.0
 # Verschluesselte Sicherungen (AES-256-GCM) und die Signatur der
 # Push-Benachrichtigungen (VAPID). Fehlt das Paket, laeuft SparBit
 # weiter - die Sicherung ist dann unverschluesselt und Web-Push aus.
-cryptography>=44.0,<48
+cryptography>=50.0.1,<51
 # Home-Assistant-Kanal (MQTT mit Auto-Discovery). Fehlt das Paket,
 # meldet sich nur dieser eine Kanal - SparBit laeuft weiter.
 paho-mqtt>=2.1,<3
